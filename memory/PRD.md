@@ -1,4 +1,4 @@
-# NOC-SENTINEL - MikroTik Monitoring Tool v2.2
+# NOC-SENTINEL - MikroTik Monitoring Tool v2.3
 
 ## Problem Statement
 MikroTik monitoring tool for Ubuntu server with real SNMP monitoring and MikroTik API integration supporting both RouterOS v6 (legacy API) and RouterOS v7 (REST API).
@@ -9,6 +9,7 @@ MikroTik monitoring tool for Ubuntu server with real SNMP monitoring and MikroTi
 - **Database**: MongoDB (traffic history, device config, user management)
 - **PDF Export**: jsPDF + jspdf-autotable
 - **MikroTik API Factory**: Supports both RouterOS v6 (port 8728/8729) and v7 (port 443/80)
+- **Ping**: ICMP with TCP fallback to port 161/8728/443
 
 ## What's Implemented (March 8, 2026)
 - [x] Login page (JWT auth, 3 roles: administrator/viewer/user)
@@ -24,6 +25,7 @@ MikroTik monitoring tool for Ubuntu server with real SNMP monitoring and MikroTi
 - [x] **System Health Extended**: CPU/Memory Load, CPU Temp, Board Temp, Voltage, Power
 - [x] **Device Info**: Identity, Board Name, ROS Version, Architecture
 - [x] **Traffic History**: Time in WIB (UTC+7) timezone
+- [x] **Ping & Jitter**: ICMP ping with TCP fallback, real-time graph
 
 ## MikroTik Requirements
 ### RouterOS v7.1+ (REST API mode)

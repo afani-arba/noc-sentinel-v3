@@ -55,8 +55,11 @@ export default function DashboardPage() {
   if (!stats) return null;
 
   const td = stats.traffic_data || [];
-  const avgPing = td.length ? Math.round(td.reduce((s,d) => s+d.ping, 0) / td.length) : 0;
-  const avgJitter = td.length ? (td.reduce((s,d) => s+d.jitter, 0) / td.length).toFixed(1) : "0";
+  // Calculate averages only from non-zero values
+  const pingValues = td.filter(d => d.ping > 0).map(d => d.ping);
+  const jitterValues = td.filter(d => d.jitter > 0).map(d => d.jitter);
+  const avgPing = pingValues.length ? Math.round(pingValues.reduce((s,v) => s+v, 0) / pingValues.length) : 0;
+  const avgJitter = jitterValues.length ? (jitterValues.reduce((s,v) => s+v, 0) / jitterValues.length).toFixed(1) : "0";
   const sd = stats.selected_device;
   const noData = td.length === 0;
 
@@ -162,16 +165,26 @@ export default function DashboardPage() {
                 <div className="flex items-center gap-2 px-2 py-1 rounded-sm bg-rose-500/10 border border-rose-500/20"><span className="text-rose-400">Jitter:</span><span className="font-mono text-rose-300 font-semibold">{avgJitter} ms</span></div>
               </div>
             </div>
-            <div className="h-48">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={td}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" /><XAxis dataKey="time" tick={{ fill:"#a1a1aa", fontSize:11 }} tickLine={false} axisLine={{ stroke:"#27272a" }} /><YAxis tick={{ fill:"#a1a1aa", fontSize:11 }} tickLine={false} axisLine={{ stroke:"#27272a" }} domain={[0,'auto']} /><Tooltip {...ttStyle} />
-                  <Legend iconType="line" wrapperStyle={{ fontSize:"11px", color:"#a1a1aa" }} />
-                  <Line type="monotone" dataKey="ping" stroke="#06b6d4" strokeWidth={2} dot={false} name="Ping (ms)" />
-                  <Line type="monotone" dataKey="jitter" stroke="#f43f5e" strokeWidth={2} dot={false} strokeDasharray="5 3" name="Jitter (ms)" />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+            {avgPing === 0 && avgJitter === "0" ? (
+              <div className="h-48 flex items-center justify-center bg-secondary/20 rounded-sm border border-dashed border-border">
+                <div className="text-center">
+                  <Activity className="w-8 h-8 mx-auto mb-2 text-muted-foreground/30" />
+                  <p className="text-sm text-muted-foreground">Ping data tidak tersedia</p>
+                  <p className="text-xs text-muted-foreground/70 mt-1">Server monitoring tidak dapat menjangkau IP device via ICMP.<br/>Pastikan firewall MikroTik mengizinkan ICMP dari server monitoring.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={td}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" /><XAxis dataKey="time" tick={{ fill:"#a1a1aa", fontSize:11 }} tickLine={false} axisLine={{ stroke:"#27272a" }} /><YAxis tick={{ fill:"#a1a1aa", fontSize:11 }} tickLine={false} axisLine={{ stroke:"#27272a" }} domain={[0,'auto']} /><Tooltip {...ttStyle} />
+                    <Legend iconType="line" wrapperStyle={{ fontSize:"11px", color:"#a1a1aa" }} />
+                    <Line type="monotone" dataKey="ping" stroke="#06b6d4" strokeWidth={2} dot={false} name="Ping (ms)" />
+                    <Line type="monotone" dataKey="jitter" stroke="#f43f5e" strokeWidth={2} dot={false} strokeDasharray="5 3" name="Jitter (ms)" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
           </div>
         </>
       )}

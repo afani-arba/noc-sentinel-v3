@@ -270,6 +270,7 @@ async def get_memory_usage(host, port, community):
 
 
 async def ping_host(host, count=3, timeout=2):
+    """Try ICMP ping first, fallback to TCP ping on SNMP port."""
     try:
         proc = await asyncio.create_subprocess_exec(
             "ping", "-c", str(count), "-W", str(timeout), host,
@@ -283,10 +284,50 @@ async def ping_host(host, count=3, timeout=2):
             return {"reachable": True, "min": float(rtt.group(1)), "avg": float(rtt.group(2)),
                     "max": float(rtt.group(3)), "jitter": float(rtt.group(4)),
                     "loss": int(loss.group(1)) if loss else 0}
-        return {"reachable": False, "min": 0, "avg": 0, "max": 0, "jitter": 0, "loss": 100}
     except Exception as e:
-        logger.debug(f"Ping {host}: {e}")
-        return {"reachable": False, "min": 0, "avg": 0, "max": 0, "jitter": 0, "loss": 100}
+        logger.debug(f"ICMP Ping {host}: {e}")
+    
+    # Fallback: TCP ping to SNMP port (161) or API port (8728/443)
+    return await tcp_ping(host, [161, 8728, 443])
+
+
+async def tcp_ping(host, ports, count=3, timeout=2):
+    """Measure latency using TCP connection time to common MikroTik ports."""
+    import time
+    latencies = []
+    
+    for _ in range(count):
+        for port in ports:
+            try:
+                start = time.time()
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(host, port),
+                    timeout=timeout
+                )
+                latency = (time.time() - start) * 1000  # Convert to ms
+                latencies.append(latency)
+                writer.close()
+                await writer.wait_closed()
+                break  # Success on this port, no need to try others
+            except Exception:
+                continue  # Try next port
+    
+    if latencies:
+        avg = sum(latencies) / len(latencies)
+        min_lat = min(latencies)
+        max_lat = max(latencies)
+        # Calculate jitter as average deviation from mean
+        jitter = sum(abs(l - avg) for l in latencies) / len(latencies) if len(latencies) > 1 else 0
+        return {
+            "reachable": True,
+            "min": round(min_lat, 2),
+            "avg": round(avg, 2),
+            "max": round(max_lat, 2),
+            "jitter": round(jitter, 2),
+            "loss": round((count - len(latencies)) / count * 100)
+        }
+    
+    return {"reachable": False, "min": 0, "avg": 0, "max": 0, "jitter": 0, "loss": 100}
 
 
 async def poll_device(host, port, community):
