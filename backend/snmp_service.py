@@ -1,13 +1,13 @@
 """
 SNMP Service for MikroTik device monitoring.
+Uses GET-based scanning instead of WALK for better compatibility.
 """
 import asyncio
 import subprocess
 import re
 import logging
 from pysnmp.hlapi.asyncio import (
-    getCmd, nextCmd,
-    SnmpEngine, CommunityData, UdpTransportTarget, ContextData, ObjectType, ObjectIdentity,
+    getCmd, SnmpEngine, CommunityData, UdpTransportTarget, ContextData, ObjectType, ObjectIdentity,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,31 +46,67 @@ async def snmp_get(host, port, community, oid, timeout=4, retries=1):
         if errorIndication or errorStatus:
             return None
         for varBind in varBinds:
-            return str(varBind[1])
+            val = str(varBind[1])
+            if 'NoSuchInstance' in val or 'NoSuchObject' in val:
+                return None
+            return val
     except Exception as e:
         logger.debug(f"SNMP GET {host} {oid}: {e}")
         return None
 
 
-async def snmp_walk(host, port, community, oid, timeout=4, retries=1):
+async def snmp_get_indexed(host, port, community, base_oid, max_index=64, timeout=3, retries=1):
+    """Get OID values by index (1 to max_index) - more reliable than WALK for some devices."""
     results = {}
-    try:
-        engine = SnmpEngine()
-        async for (errorIndication, errorStatus, _, varBinds) in nextCmd(
-            engine, CommunityData(community),
-            UdpTransportTarget((host, port), timeout=timeout, retries=retries),
-            ContextData(), ObjectType(ObjectIdentity(oid)),
-            lexicographicMode=False,
-        ):
+    engine = SnmpEngine()
+    
+    async def get_one(idx):
+        oid = f"{base_oid}.{idx}"
+        try:
+            result = await getCmd(
+                engine, CommunityData(community),
+                UdpTransportTarget((host, port), timeout=timeout, retries=retries),
+                ContextData(), ObjectType(ObjectIdentity(oid)),
+            )
+            errorIndication, errorStatus, _, varBinds = result
             if errorIndication or errorStatus:
-                break
+                return None
             for varBind in varBinds:
-                idx = str(varBind[0]).split('.')[-1]
-                results[idx] = str(varBind[1])
+                val = str(varBind[1])
+                if 'NoSuchInstance' in val or 'NoSuchObject' in val:
+                    return None
+                return (str(idx), val)
+        except Exception:
+            return None
+    
+    # Query in batches for better performance
+    batch_size = 8
+    for batch_start in range(1, max_index + 1, batch_size):
+        batch_end = min(batch_start + batch_size, max_index + 1)
+        tasks = [get_one(i) for i in range(batch_start, batch_end)]
+        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        found_any = False
+        for r in batch_results:
+            if r and not isinstance(r, Exception):
+                results[r[0]] = r[1]
+                found_any = True
+        
+        # If no results in batch and we already have some results, stop early
+        if not found_any and results:
+            break
+    
+    try:
         engine.closeDispatcher()
-    except Exception as e:
-        logger.debug(f"SNMP WALK {host} {oid}: {e}")
+    except Exception:
+        pass
+    
     return results
+
+
+async def snmp_walk(host, port, community, oid, timeout=4, retries=1):
+    """Use index-based GET as fallback since WALK may timeout on some devices."""
+    return await snmp_get_indexed(host, port, community, oid, max_index=64, timeout=timeout, retries=retries)
 
 
 async def test_connection(host, port, community):
@@ -107,10 +143,15 @@ async def get_interfaces(host, port, community):
     speeds = await snmp_walk(host, port, community, OID_IF_SPEED)
     interfaces = []
     for idx, name in names.items():
+        try:
+            speed_val = speeds.get(idx, "0")
+            speed = int(speed_val) if speed_val and speed_val.isdigit() else 0
+        except (ValueError, TypeError):
+            speed = 0
         interfaces.append({
             "index": idx, "name": name,
             "status": "up" if statuses.get(idx, "2") == "1" else "down",
-            "speed": int(speeds.get(idx, "0")),
+            "speed": speed,
         })
     return interfaces
 

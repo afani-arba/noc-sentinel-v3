@@ -383,7 +383,9 @@ async def dashboard_interfaces(device_id: str = "", user=Depends(get_current_use
     device = await db.devices.find_one({"id": device_id}, {"_id": 0})
     if not device or not device.get("last_poll_data"):
         return ["all"]
-    return ["all"] + [i["name"] for i in device["last_poll_data"].get("interfaces", [])]
+    # Filter out interfaces with empty names
+    interfaces = [i["name"] for i in device["last_poll_data"].get("interfaces", []) if i.get("name")]
+    return ["all"] + interfaces
 
 # ── PPPoE Users (via MikroTik REST API) ──
 @api_router.get("/pppoe-users")
