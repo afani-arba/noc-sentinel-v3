@@ -42,9 +42,11 @@ class MikroTikRestAPI(MikroTikBase):
 
     def _request(self, method, path, data=None):
         url = f"{self.base_url}/{path}"
+        logger.info(f"REST API request: {method} {url}")
         try:
             resp = requests.request(method, url, auth=self.auth, json=data,
                                     verify=self.verify, timeout=self.timeout)
+            logger.info(f"REST API response: {resp.status_code}")
             if resp.status_code == 401:
                 raise Exception("Authentication failed - check API username/password")
             if resp.status_code == 400:
@@ -52,12 +54,16 @@ class MikroTikRestAPI(MikroTikBase):
                 raise Exception(f"Bad request: {detail.get('detail', detail.get('message', resp.text))}")
             resp.raise_for_status()
             return resp.json() if resp.content else {}
-        except requests.exceptions.ConnectionError:
-            raise Exception(f"Cannot connect to REST API at {url}")
+        except requests.exceptions.SSLError as e:
+            logger.error(f"SSL Error: {e}")
+            raise Exception(f"SSL Error - coba nonaktifkan SSL atau gunakan port HTTP. Detail: {e}")
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"Connection Error: {e}")
+            raise Exception(f"Cannot connect to REST API at {url} - pastikan www atau www-ssl service aktif di MikroTik")
         except requests.exceptions.Timeout:
-            raise Exception("Connection timed out")
+            raise Exception("Connection timed out - periksa firewall dan pastikan port terbuka")
         except Exception as e:
-            if any(k in str(e) for k in ["Authentication", "Bad request", "Cannot connect", "timed out"]):
+            if any(k in str(e) for k in ["Authentication", "Bad request", "Cannot connect", "timed out", "SSL Error"]):
                 raise
             raise Exception(f"REST API error: {e}")
 
@@ -256,8 +262,16 @@ def get_api_client(device: dict) -> MikroTikBase:
         # RouterOS 7+ REST API
         # Prioritas: ssl_port > api_port > default 443
         port = device.get("ssl_port") or device.get("api_port") or 443
-        # Tentukan SSL berdasarkan port (443 = https, lainnya = http) jika api_ssl tidak di-set
-        use_ssl = device.get("api_ssl", True)
+        
+        # Auto-detect SSL: jika api_ssl tidak di-set explicit, gunakan logic berdasarkan port
+        # Port 443 biasanya HTTPS, port lain (80, custom) biasanya HTTP
+        api_ssl_value = device.get("api_ssl")
+        if api_ssl_value is None:
+            # Auto-detect: port 443 = https, lainnya = http
+            use_ssl = (port == 443)
+        else:
+            use_ssl = api_ssl_value
+        
         return MikroTikRestAPI(
             host=device["ip_address"],
             username=device.get("api_username", "admin"),
