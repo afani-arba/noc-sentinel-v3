@@ -1,53 +1,108 @@
-import { useEffect } from "react";
+import { useState, useEffect, createContext, useContext, useCallback } from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import axios from "axios";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import api from "@/lib/api";
+import LoginPage from "@/pages/LoginPage";
+import DashboardPage from "@/pages/DashboardPage";
+import PPPoEUsersPage from "@/pages/PPPoEUsersPage";
+import HotspotUsersPage from "@/pages/HotspotUsersPage";
+import ReportsPage from "@/pages/ReportsPage";
+import DevicesPage from "@/pages/DevicesPage";
+import AdminPage from "@/pages/AdminPage";
+import Layout from "@/components/Layout";
+import { Toaster } from "@/components/ui/sonner";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+const AuthContext = createContext(null);
 
-const Home = () => {
-  const helloWorldApi = async () => {
-    try {
-      const response = await axios.get(`${API}/`);
-      console.log(response.data.message);
-    } catch (e) {
-      console.error(e, `errored out requesting / api`);
+export function useAuth() {
+  return useContext(AuthContext);
+}
+
+function AuthProvider({ children }) {
+  const [user, setUser] = useState(null);
+  const [token, setToken] = useState(localStorage.getItem("noc_token"));
+  const [loading, setLoading] = useState(true);
+
+  const fetchUser = useCallback(async () => {
+    if (!token) {
+      setLoading(false);
+      return;
     }
-  };
+    try {
+      const res = await api.get("/auth/me");
+      setUser(res.data);
+    } catch {
+      localStorage.removeItem("noc_token");
+      localStorage.removeItem("noc_user");
+      setToken(null);
+      setUser(null);
+    }
+    setLoading(false);
+  }, [token]);
 
   useEffect(() => {
-    helloWorldApi();
-  }, []);
+    fetchUser();
+  }, [fetchUser]);
+
+  const login = async (username, password) => {
+    const res = await api.post("/auth/login", { username, password });
+    const { token: t, user: u } = res.data;
+    localStorage.setItem("noc_token", t);
+    localStorage.setItem("noc_user", JSON.stringify(u));
+    setToken(t);
+    setUser(u);
+    return u;
+  };
+
+  const logout = () => {
+    localStorage.removeItem("noc_token");
+    localStorage.removeItem("noc_user");
+    setToken(null);
+    setUser(null);
+  };
 
   return (
-    <div>
-      <header className="App-header">
-        <a
-          className="App-link"
-          href="https://emergent.sh"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <img src="https://avatars.githubusercontent.com/in/1201222?s=120&u=2686cf91179bbafbc7a71bfbc43004cf9ae1acea&v=4" />
-        </a>
-        <p className="mt-5">Building something incredible ~!</p>
-      </header>
-    </div>
+    <AuthContext.Provider value={{ user, token, login, logout, loading }}>
+      {children}
+    </AuthContext.Provider>
   );
-};
+}
+
+function ProtectedRoute({ children, allowedRoles }) {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="flex items-center justify-center min-h-screen bg-background"><div className="text-muted-foreground">Loading...</div></div>;
+  if (!user) return <Navigate to="/login" />;
+  if (allowedRoles && !allowedRoles.includes(user.role)) return <Navigate to="/" />;
+  return children;
+}
 
 function App() {
   return (
-    <div className="App">
-      <BrowserRouter>
+    <BrowserRouter>
+      <AuthProvider>
+        <Toaster
+          theme="dark"
+          toastOptions={{
+            classNames: {
+              toast: "bg-card border-border text-foreground",
+              description: "text-muted-foreground",
+            },
+          }}
+        />
         <Routes>
-          <Route path="/" element={<Home />}>
-            <Route index element={<Home />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+            <Route index element={<DashboardPage />} />
+            <Route path="pppoe" element={<PPPoEUsersPage />} />
+            <Route path="hotspot" element={<HotspotUsersPage />} />
+            <Route path="reports" element={<ReportsPage />} />
+            <Route path="devices" element={<DevicesPage />} />
+            <Route path="admin" element={<ProtectedRoute allowedRoles={["administrator"]}><AdminPage /></ProtectedRoute>} />
           </Route>
+          <Route path="*" element={<Navigate to="/" />} />
         </Routes>
-      </BrowserRouter>
-    </div>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
 
