@@ -242,20 +242,26 @@ def get_api_client(device: dict) -> MikroTikBase:
 
     if mode == "api":
         # RouterOS 6+ API protocol
+        # Gunakan api_port jika ada, kalau tidak gunakan default 8728
+        port = device.get("api_port") or 8728
         return MikroTikRouterAPI(
             host=device["ip_address"],
             username=device.get("api_username", "admin"),
             password=device.get("api_password", ""),
-            port=device.get("api_port", 8728),
+            port=port,
             use_ssl=device.get("api_ssl", False),
             plaintext_login=device.get("api_plaintext_login", True),
         )
     else:
         # RouterOS 7+ REST API
+        # Prioritas: ssl_port > api_port > default 443
+        port = device.get("ssl_port") or device.get("api_port") or 443
+        # Tentukan SSL berdasarkan port (443 = https, lainnya = http) jika api_ssl tidak di-set
+        use_ssl = device.get("api_ssl", True)
         return MikroTikRestAPI(
             host=device["ip_address"],
             username=device.get("api_username", "admin"),
             password=device.get("api_password", ""),
-            port=device.get("api_port", 443),
-            use_ssl=device.get("api_ssl", True),
+            port=port,
+            use_ssl=use_ssl,
         )
