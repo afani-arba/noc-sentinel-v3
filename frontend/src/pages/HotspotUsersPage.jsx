@@ -155,7 +155,11 @@ export default function HotspotUsersPage() {
               ) : users.map(u => (
                 <TableRow key={u[".id"]} data-testid={`hotspot-row-${u.name}`}>
                   <TableCell className="font-mono text-xs">{u.name}</TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">{u.password || "••••••"}</TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {u.password && u.password !== "" && !u.password.includes("*") ? u.password : (
+                      <span className="text-yellow-500/70 italic text-[10px]">tersembunyi (ROS7)</span>
+                    )}
+                  </TableCell>
                   <TableCell><Badge variant="outline" className="rounded-sm text-xs">{u.profile || "default"}</Badge></TableCell>
                   <TableCell className="text-xs">{u.server || "all"}</TableCell>
                   <TableCell>

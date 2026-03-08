@@ -14,6 +14,44 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger(__name__)
 
 
+# ── Helper function to get passwords via API protocol ──
+def get_passwords_via_api(host, username, password, resource_type="ppp"):
+    """
+    Fetch passwords using API protocol (port 8728) which can show passwords.
+    Returns dict mapping username -> password
+    """
+    password_map = {}
+    try:
+        pool = routeros_api.RouterOsApiPool(
+            host=host,
+            username=username,
+            password=password,
+            port=8728,
+            use_ssl=False,
+            ssl_verify=False,
+            plaintext_login=True,
+        )
+        api = pool.get_api()
+        
+        if resource_type == "ppp":
+            resource = api.get_resource("/ppp/secret")
+        else:  # hotspot
+            resource = api.get_resource("/ip/hotspot/user")
+        
+        items = resource.get()
+        for item in items:
+            name = item.get("name", "")
+            pwd = item.get("password", "")
+            if name and pwd:
+                password_map[name] = pwd
+        
+        pool.disconnect()
+    except Exception as e:
+        logger.debug(f"Could not fetch passwords via API protocol: {e}")
+    
+    return password_map
+
+
 # ── Base interface ──
 class MikroTikBase:
     async def test_connection(self): raise NotImplementedError
@@ -39,6 +77,10 @@ class MikroTikRestAPI(MikroTikBase):
         self.auth = (username, password)
         self.verify = False
         self.timeout = 10
+        # Store credentials for API protocol fallback
+        self.host = host
+        self.username = username
+        self.password = password
 
     def _request(self, method, path, data=None):
         url = f"{self.base_url}/{path}"
@@ -72,8 +114,27 @@ class MikroTikRestAPI(MikroTikBase):
             return {"success": False, "error": str(e), "mode": "REST API (RouterOS 7+)"}
 
     async def list_pppoe_secrets(self):
-        # Tambahkan .proplist untuk mendapatkan semua field termasuk password
-        return await self._async_req("GET", "ppp/secret?.proplist=.id,name,password,profile,service,comment,disabled")
+        # Fetch from REST API
+        try:
+            result = await self._async_req("GET", "ppp/secret?.proplist=*")
+        except Exception:
+            result = await self._async_req("GET", "ppp/secret")
+        
+        # RouterOS 7 REST API tidak menampilkan password
+        # Coba dapatkan password via API protocol (port 8728)
+        try:
+            password_map = await asyncio.to_thread(
+                get_passwords_via_api, self.host, self.username, self.password, "ppp"
+            )
+            # Merge passwords into result
+            for item in result:
+                name = item.get("name", "")
+                if name in password_map:
+                    item["password"] = password_map[name]
+        except Exception as e:
+            logger.debug(f"Could not fetch PPPoE passwords via API: {e}")
+        
+        return result
 
     async def create_pppoe_secret(self, data):
         return await self._async_req("PUT", "ppp/secret", data)
@@ -88,8 +149,27 @@ class MikroTikRestAPI(MikroTikBase):
         return await self._async_req("GET", "ppp/active")
 
     async def list_hotspot_users(self):
-        # Tambahkan .proplist untuk mendapatkan semua field termasuk password
-        return await self._async_req("GET", "ip/hotspot/user?.proplist=.id,name,password,profile,server,comment,disabled")
+        # Fetch from REST API
+        try:
+            result = await self._async_req("GET", "ip/hotspot/user?.proplist=*")
+        except Exception:
+            result = await self._async_req("GET", "ip/hotspot/user")
+        
+        # RouterOS 7 REST API tidak menampilkan password
+        # Coba dapatkan password via API protocol (port 8728)
+        try:
+            password_map = await asyncio.to_thread(
+                get_passwords_via_api, self.host, self.username, self.password, "hotspot"
+            )
+            # Merge passwords into result
+            for item in result:
+                name = item.get("name", "")
+                if name in password_map:
+                    item["password"] = password_map[name]
+        except Exception as e:
+            logger.debug(f"Could not fetch Hotspot passwords via API: {e}")
+        
+        return result
 
     async def create_hotspot_user(self, data):
         return await self._async_req("PUT", "ip/hotspot/user", data)
