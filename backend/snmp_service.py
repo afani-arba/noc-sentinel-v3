@@ -186,10 +186,24 @@ async def ping_host(host, count=3, timeout=2):
 
 
 async def poll_device(host, port, community):
-    ping = await ping_host(host)
-    if not ping["reachable"]:
+    # Run ping and SNMP checks in parallel - don't skip SNMP if ping fails
+    # Many routers block ICMP but allow SNMP
+    ping_task = ping_host(host)
+    snmp_test_task = snmp_get(host, port, community, OID_SYS_NAME, timeout=5, retries=2)
+    
+    ping, snmp_test = await asyncio.gather(ping_task, snmp_test_task, return_exceptions=True)
+    
+    if isinstance(ping, Exception):
+        ping = {"reachable": False, "min": 0, "avg": 0, "max": 0, "jitter": 0, "loss": 100}
+    
+    # Check if SNMP is reachable (even if ping fails)
+    snmp_reachable = snmp_test is not None and not isinstance(snmp_test, Exception)
+    
+    if not snmp_reachable:
         return {"reachable": False, "ping": ping, "system": {}, "cpu": 0,
                 "memory": {"total": 0, "used": 0, "percent": 0}, "interfaces": [], "traffic": {}}
+    
+    # SNMP is reachable, fetch all data
     sys_info, cpu, memory, ifaces, traffic = await asyncio.gather(
         get_system_info(host, port, community),
         get_cpu_load(host, port, community),
