@@ -33,7 +33,7 @@ export default function Layout() {
     (item) => !item.adminOnly || user?.role === "administrator"
   );
 
-  const SidebarContent = () => (
+  const SidebarContent = ({ prefix = "" }) => (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-3 px-4 h-16 border-b border-border/50">
         <div className="w-8 h-8 rounded-sm bg-primary/20 flex items-center justify-center flex-shrink-0">
@@ -61,7 +61,7 @@ export default function Layout() {
                   : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
               }`
             }
-            data-testid={`nav-${item.to === "/" ? "dashboard" : item.to.slice(1)}`}
+            data-testid={`${prefix}nav-${item.to === "/" ? "dashboard" : item.to.slice(1)}`}
           >
             <item.icon className="w-4 h-4 flex-shrink-0" />
             {!collapsed && <span>{item.label}</span>}
@@ -105,7 +105,7 @@ export default function Layout() {
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <SidebarContent />
+        <SidebarContent prefix="mobile-" />
       </aside>
 
       {/* Sidebar - Desktop */}
