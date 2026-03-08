@@ -237,31 +237,16 @@ export default function DevicesPage() {
                 <div className="space-y-1.5"><Label className="text-xs text-muted-foreground">API Password</Label>
                   <Input type="password" value={form.api_password} onChange={e => setForm({...form, api_password:e.target.value})} className="rounded-sm bg-background" placeholder={editing?"(unchanged)":""} data-testid="device-form-api-password" /></div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">API Port</Label>
-                  <Input 
-                    type="number" 
-                    value={form.api_port} 
-                    onChange={e => setForm({...form, api_port:e.target.value})} 
-                    className="rounded-sm bg-background font-mono text-xs" 
-                    placeholder={form.api_mode === "api" ? "8728" : "443"}
-                    data-testid="device-form-api-port" 
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">SSL/TLS</Label>
-                  <div className="flex items-center gap-3 h-9 px-3 rounded-sm bg-background border border-input">
-                    <input 
-                      type="checkbox" 
-                      checked={form.api_ssl} 
-                      onChange={e => setForm({...form, api_ssl: e.target.checked})}
-                      className="w-4 h-4 rounded border-gray-600 bg-background"
-                      data-testid="device-form-ssl"
-                    />
-                    <span className="text-xs text-muted-foreground">{form.api_ssl ? "Aktif" : "Non-aktif"}</span>
-                  </div>
-                </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">API Port</Label>
+                <Input 
+                  type="number" 
+                  value={form.api_port} 
+                  onChange={e => setForm({...form, api_port:e.target.value})} 
+                  className="rounded-sm bg-background font-mono text-xs" 
+                  placeholder="Masukkan port API"
+                  data-testid="device-form-api-port" 
+                />
               </div>
             </div>
             <div className="space-y-1.5"><Label className="text-xs text-muted-foreground">Description</Label>
