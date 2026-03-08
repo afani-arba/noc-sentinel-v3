@@ -248,27 +248,19 @@ export default function DevicesPage() {
                     placeholder={form.api_mode === "api" ? "8728" : "443"}
                     data-testid="device-form-api-port" 
                   />
-                  <p className="text-[10px] text-muted-foreground/70">
-                    {form.api_mode === "api" ? "Kosong = 8728 (SSL: 8729)" : "Kosong = 443 (HTTP: 80)"}
-                  </p>
                 </div>
-                <div className="space-y-1.5"><Label className="text-xs text-muted-foreground">SSL/TLS</Label>
-                  <Select value={form.api_ssl?"true":"false"} onValueChange={v => setForm({...form, api_ssl:v==="true"})}>
-                    <SelectTrigger className="rounded-sm bg-background text-xs" data-testid="device-form-ssl"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {form.api_mode === "api" ? (
-                        <>
-                          <SelectItem value="false">Tanpa SSL</SelectItem>
-                          <SelectItem value="true">Dengan SSL</SelectItem>
-                        </>
-                      ) : (
-                        <>
-                          <SelectItem value="true">HTTPS</SelectItem>
-                          <SelectItem value="false">HTTP</SelectItem>
-                        </>
-                      )}
-                    </SelectContent>
-                  </Select>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">SSL/TLS</Label>
+                  <div className="flex items-center gap-3 h-9 px-3 rounded-sm bg-background border border-input">
+                    <input 
+                      type="checkbox" 
+                      checked={form.api_ssl} 
+                      onChange={e => setForm({...form, api_ssl: e.target.checked})}
+                      className="w-4 h-4 rounded border-gray-600 bg-background"
+                      data-testid="device-form-ssl"
+                    />
+                    <span className="text-xs text-muted-foreground">{form.api_ssl ? "Aktif" : "Non-aktif"}</span>
+                  </div>
                 </div>
               </div>
             </div>
