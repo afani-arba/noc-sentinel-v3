@@ -32,7 +32,8 @@ export default function DevicesPage() {
 
   const openAdd = () => {
     setEditing(null);
-    setForm({ name: "", ip_address: "", snmp_community: "public", snmp_port: 161, api_mode: "rest", api_username: "admin", api_password: "", api_port: 443, api_ssl: true, api_plaintext_login: true, description: "" });
+    // Port dikosongkan agar user bebas mengisi nilainya
+    setForm({ name: "", ip_address: "", snmp_community: "public", snmp_port: 161, api_mode: "rest", api_username: "admin", api_password: "", api_port: "", api_ssl: true, api_plaintext_login: true, description: "" });
     setDialogOpen(true);
   };
 
@@ -41,7 +42,7 @@ export default function DevicesPage() {
     setForm({
       name: d.name, ip_address: d.ip_address || "", snmp_community: "public", snmp_port: d.snmp_port || 161,
       api_mode: d.api_mode || "rest", api_username: d.api_username || "admin", api_password: "",
-      api_port: d.api_port || (d.api_mode === "api" ? 8728 : 443),
+      api_port: d.api_port || "",  // Biarkan kosong jika tidak ada, user bisa isi bebas
       api_ssl: d.api_ssl !== undefined ? d.api_ssl : (d.api_mode !== "api"),
       api_plaintext_login: d.api_plaintext_login !== undefined ? d.api_plaintext_login : true,
       description: d.description || "",
@@ -51,7 +52,10 @@ export default function DevicesPage() {
 
   const handleSave = async () => {
     try {
-      const data = { ...form, snmp_port: parseInt(form.snmp_port)||161, api_port: parseInt(form.api_port)||443 };
+      // Jika port kosong, gunakan default berdasarkan mode
+      const defaultPort = form.api_mode === "api" ? 8728 : 443;
+      const apiPort = form.api_port ? parseInt(form.api_port) : defaultPort;
+      const data = { ...form, snmp_port: parseInt(form.snmp_port)||161, api_port: apiPort };
       if (editing) {
         if (!data.api_password) delete data.api_password;
         if (!data.snmp_community || data.snmp_community === "public") delete data.snmp_community;
@@ -208,14 +212,8 @@ export default function DevicesPage() {
                 <Select 
                   value={form.api_mode} 
                   onValueChange={v => {
-                    // Auto-adjust defaults based on mode
-                    if (v === "api") {
-                      // RouterOS 6+ defaults: port 8728, no SSL
-                      setForm({...form, api_mode: v, api_port: 8728, api_ssl: false});
-                    } else {
-                      // RouterOS 7+ REST defaults: port 443, with SSL
-                      setForm({...form, api_mode: v, api_port: 443, api_ssl: true});
-                    }
+                    // Hanya ubah mode, TIDAK auto-set port - biarkan user yang tentukan
+                    setForm({...form, api_mode: v});
                   }}
                 >
                   <SelectTrigger className="rounded-sm bg-background text-xs" data-testid="device-form-api-mode">
@@ -242,9 +240,16 @@ export default function DevicesPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label className="text-xs text-muted-foreground">API Port</Label>
-                  <Input type="number" value={form.api_port} onChange={e => setForm({...form, api_port:e.target.value})} className="rounded-sm bg-background font-mono text-xs" data-testid="device-form-api-port" />
+                  <Input 
+                    type="number" 
+                    value={form.api_port} 
+                    onChange={e => setForm({...form, api_port:e.target.value})} 
+                    className="rounded-sm bg-background font-mono text-xs" 
+                    placeholder={form.api_mode === "api" ? "8728" : "443"}
+                    data-testid="device-form-api-port" 
+                  />
                   <p className="text-[10px] text-muted-foreground/70">
-                    {form.api_mode === "api" ? "Default: 8728 (SSL: 8729)" : "Default: 443 (HTTP: 80)"}
+                    {form.api_mode === "api" ? "Kosong = 8728 (SSL: 8729)" : "Kosong = 443 (HTTP: 80)"}
                   </p>
                 </div>
                 <div className="space-y-1.5"><Label className="text-xs text-muted-foreground">SSL/TLS</Label>

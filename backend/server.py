@@ -629,6 +629,169 @@ async def delete_admin_user(user_id: str, user=Depends(require_admin)):
 async def health():
     return {"status": "ok"}
 
+# ── System Update Endpoints ──
+@api_router.get("/system/check-update")
+async def check_update(user=Depends(require_admin)):
+    """Check if there are updates available from GitHub."""
+    import subprocess
+    
+    try:
+        # Get current commit
+        current = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, cwd="/app", timeout=10
+        )
+        current_commit = current.stdout.strip() if current.returncode == 0 else None
+        
+        # Fetch latest from remote
+        fetch = subprocess.run(
+            ["git", "fetch", "origin"],
+            capture_output=True, text=True, cwd="/app", timeout=30
+        )
+        
+        if fetch.returncode != 0:
+            return {
+                "has_update": False,
+                "current_commit": current_commit,
+                "message": "Tidak dapat terhubung ke repository. Pastikan git remote sudah dikonfigurasi.",
+                "error": fetch.stderr
+            }
+        
+        # Get remote HEAD
+        remote = subprocess.run(
+            ["git", "rev-parse", "origin/main"],
+            capture_output=True, text=True, cwd="/app", timeout=10
+        )
+        
+        # Try origin/master if main doesn't exist
+        if remote.returncode != 0:
+            remote = subprocess.run(
+                ["git", "rev-parse", "origin/master"],
+                capture_output=True, text=True, cwd="/app", timeout=10
+            )
+        
+        if remote.returncode != 0:
+            return {
+                "has_update": False,
+                "current_commit": current_commit,
+                "message": "Tidak dapat menemukan branch remote (main/master)."
+            }
+        
+        latest_commit = remote.stdout.strip()
+        has_update = current_commit != latest_commit
+        
+        # Count commits behind
+        commits_behind = 0
+        if has_update:
+            count = subprocess.run(
+                ["git", "rev-list", "--count", f"HEAD..origin/main"],
+                capture_output=True, text=True, cwd="/app", timeout=10
+            )
+            if count.returncode == 0:
+                commits_behind = int(count.stdout.strip())
+        
+        return {
+            "has_update": has_update,
+            "current_commit": current_commit,
+            "latest_commit": latest_commit,
+            "commits_behind": commits_behind,
+            "message": "Update tersedia!" if has_update else "Aplikasi sudah versi terbaru."
+        }
+        
+    except subprocess.TimeoutExpired:
+        return {"has_update": False, "message": "Timeout saat mengecek update.", "error": "timeout"}
+    except Exception as e:
+        logger.error(f"Check update error: {e}")
+        return {"has_update": False, "message": f"Error: {str(e)}", "error": str(e)}
+
+@api_router.post("/system/perform-update")
+async def perform_update(user=Depends(require_admin)):
+    """Pull latest changes from GitHub and restart services."""
+    import subprocess
+    
+    log = []
+    
+    try:
+        # Step 1: Git pull
+        log.append("Menjalankan git pull...")
+        pull = subprocess.run(
+            ["git", "pull", "origin", "main"],
+            capture_output=True, text=True, cwd="/app", timeout=60
+        )
+        
+        # Try master if main fails
+        if pull.returncode != 0:
+            pull = subprocess.run(
+                ["git", "pull", "origin", "master"],
+                capture_output=True, text=True, cwd="/app", timeout=60
+            )
+        
+        if pull.returncode != 0:
+            log.append(f"Error git pull: {pull.stderr}")
+            return {"success": False, "log": log, "error": pull.stderr}
+        
+        log.append(pull.stdout if pull.stdout else "Git pull berhasil")
+        
+        # Step 2: Install backend dependencies
+        log.append("Menginstall dependensi backend...")
+        pip = subprocess.run(
+            ["pip", "install", "-r", "requirements.txt"],
+            capture_output=True, text=True, cwd="/app/backend", timeout=120
+        )
+        if pip.returncode == 0:
+            log.append("Dependensi backend terinstall")
+        else:
+            log.append(f"Warning: pip install: {pip.stderr[:200]}")
+        
+        # Step 3: Install frontend dependencies
+        log.append("Menginstall dependensi frontend...")
+        yarn = subprocess.run(
+            ["yarn", "install"],
+            capture_output=True, text=True, cwd="/app/frontend", timeout=120
+        )
+        if yarn.returncode == 0:
+            log.append("Dependensi frontend terinstall")
+        else:
+            log.append(f"Warning: yarn install: {yarn.stderr[:200]}")
+        
+        # Step 4: Build frontend
+        log.append("Building frontend...")
+        build = subprocess.run(
+            ["yarn", "build"],
+            capture_output=True, text=True, cwd="/app/frontend", timeout=300
+        )
+        if build.returncode == 0:
+            log.append("Frontend build berhasil")
+        else:
+            log.append(f"Warning: yarn build: {build.stderr[:200]}")
+        
+        # Step 5: Restart services (if using systemd)
+        log.append("Mencoba restart services...")
+        
+        # Try supervisor first (for development/Emergent environment)
+        try:
+            subprocess.run(["sudo", "supervisorctl", "restart", "backend"], timeout=10)
+            subprocess.run(["sudo", "supervisorctl", "restart", "frontend"], timeout=10)
+            log.append("Services di-restart via supervisor")
+        except Exception:
+            # Try systemd (for self-hosted)
+            try:
+                subprocess.run(["sudo", "systemctl", "restart", "noc-sentinel"], timeout=10)
+                log.append("Service di-restart via systemd")
+            except Exception:
+                log.append("Note: Silakan restart service secara manual jika diperlukan")
+        
+        log.append("Success! Update selesai.")
+        return {"success": True, "log": log}
+        
+    except subprocess.TimeoutExpired:
+        log.append("Error: Timeout saat proses update")
+        return {"success": False, "log": log, "error": "timeout"}
+    except Exception as e:
+        logger.error(f"Update error: {e}")
+        log.append(f"Error: {str(e)}")
+        return {"success": False, "log": log, "error": str(e)}
+
 app.include_router(api_router)
 app.add_middleware(CORSMiddleware, allow_credentials=True,
     allow_origins=os.environ.get('CORS_ORIGINS','*').split(','), allow_methods=["*"], allow_headers=["*"])

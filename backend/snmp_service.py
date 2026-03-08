@@ -41,6 +41,11 @@ OID_MT_POWER = '1.3.6.1.4.1.14988.1.1.3.12.0'  # Power consumption
 OID_MT_ARCHITECTURE = '1.3.6.1.4.1.14988.1.1.4.4.0'  # Architecture
 OID_MT_IDENTITY = '1.3.6.1.4.1.14988.1.1.4.3.0'  # Identity
 
+# MikroTik specific memory OIDs
+OID_MT_TOTAL_MEMORY = '1.3.6.1.4.1.14988.1.1.3.13.0'  # Total memory (bytes)
+OID_MT_FREE_MEMORY = '1.3.6.1.2.1.25.2.3.1.6.65536'  # Free memory index 65536 (MikroTik specific)
+OID_MT_TOTAL_HDD = '1.3.6.1.4.1.14988.1.1.3.14.0'  # Total HDD space
+
 
 async def snmp_get(host, port, community, oid, timeout=4, retries=1):
     try:
@@ -251,13 +256,21 @@ async def get_cpu_load(host, port, community):
 
 
 async def get_memory_usage(host, port, community):
+    """Get memory usage from MikroTik via SNMP.
+    Tries multiple methods: HR-MIB and MikroTik private OIDs.
+    """
+    memory = {"total": 0, "used": 0, "percent": 0}
+    
+    # Method 1: Try standard HR-MIB (Host Resources)
     descrs = await snmp_walk(host, port, community, OID_HR_STORAGE_DESCR)
     units = await snmp_walk(host, port, community, OID_HR_STORAGE_UNITS)
     sizes = await snmp_walk(host, port, community, OID_HR_STORAGE_SIZE)
     useds = await snmp_walk(host, port, community, OID_HR_STORAGE_USED)
-    memory = {"total": 0, "used": 0, "percent": 0}
+    
     for idx, descr in descrs.items():
-        if "memory" in descr.lower() or "ram" in descr.lower():
+        descr_lower = descr.lower()
+        # Look for memory-related entries
+        if any(kw in descr_lower for kw in ["memory", "ram", "real memory", "main memory"]):
             try:
                 unit = int(units.get(idx, "1"))
                 total = int(sizes.get(idx, "0")) * unit
@@ -266,6 +279,39 @@ async def get_memory_usage(host, port, community):
                     memory = {"total": total, "used": used, "percent": round((used / total) * 100) if total > 0 else 0}
             except (ValueError, TypeError, ZeroDivisionError):
                 pass
+    
+    # Method 2: If HR-MIB didn't work, try MikroTik private OID
+    if memory["percent"] == 0:
+        try:
+            # MikroTik total memory in kB (OID .1.3.6.1.2.1.25.2.3.1.5.65536)
+            total_kb = await snmp_get(host, port, community, '1.3.6.1.2.1.25.2.3.1.5.65536')
+            used_kb = await snmp_get(host, port, community, '1.3.6.1.2.1.25.2.3.1.6.65536')
+            
+            if total_kb and used_kb:
+                total = int(total_kb) * 1024  # Convert KB to bytes
+                used = int(used_kb) * 1024
+                if total > 0:
+                    memory = {"total": total, "used": used, "percent": round((used / total) * 100)}
+        except (ValueError, TypeError):
+            pass
+    
+    # Method 3: Alternative MikroTik memory OIDs
+    if memory["percent"] == 0:
+        try:
+            # Try hrStorageIndex 1 (often used for main memory)
+            total_units = await snmp_get(host, port, community, '1.3.6.1.2.1.25.2.3.1.5.1')
+            used_units = await snmp_get(host, port, community, '1.3.6.1.2.1.25.2.3.1.6.1')
+            unit_size = await snmp_get(host, port, community, '1.3.6.1.2.1.25.2.3.1.4.1')
+            
+            if total_units and used_units and unit_size:
+                unit = int(unit_size)
+                total = int(total_units) * unit
+                used = int(used_units) * unit
+                if total > 0:
+                    memory = {"total": total, "used": used, "percent": round((used / total) * 100)}
+        except (ValueError, TypeError):
+            pass
+    
     return memory
 
 

@@ -9,6 +9,7 @@ import HotspotUsersPage from "@/pages/HotspotUsersPage";
 import ReportsPage from "@/pages/ReportsPage";
 import DevicesPage from "@/pages/DevicesPage";
 import AdminPage from "@/pages/AdminPage";
+import SettingsPage from "@/pages/SettingsPage";
 import Layout from "@/components/Layout";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -97,6 +98,7 @@ function App() {
             <Route path="hotspot" element={<HotspotUsersPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="devices" element={<DevicesPage />} />
+            <Route path="settings" element={<ProtectedRoute allowedRoles={["administrator"]}><SettingsPage /></ProtectedRoute>} />
             <Route path="admin" element={<ProtectedRoute allowedRoles={["administrator"]}><AdminPage /></ProtectedRoute>} />
           </Route>
           <Route path="*" element={<Navigate to="/" />} />
