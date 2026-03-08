@@ -221,25 +221,75 @@ async def login(data: UserLogin):
 async def get_me(user=Depends(get_current_user)):
     return {k: v for k, v in user.items() if k != "password"}
 
+# --- Mock interfaces per device model ---
+DEVICE_INTERFACES = {
+    "CCR1036-12G-4S": ["ether1-WAN", "ether2-LAN", "ether3-LAN", "ether4-LAN", "sfp1-Uplink", "sfp2-Backup", "bridge-local", "pppoe-out1"],
+    "RB4011iGS+": ["ether1-WAN", "ether2-LAN", "ether3-LAN", "ether4-DMZ", "sfp-plus1", "bridge-local", "pppoe-out1"],
+    "cAP ac": ["ether1-LAN", "wlan1-2GHz", "wlan2-5GHz", "bridge-hotspot"],
+    "hEX S": ["ether1-WAN", "ether2-LAN", "ether3-LAN", "sfp1", "bridge-local"],
+    "Unknown": ["ether1", "ether2", "ether3", "bridge-local"],
+}
+
 # --- Dashboard ---
+@api_router.get("/dashboard/interfaces")
+async def get_device_interfaces(device_id: str = "", user=Depends(get_current_user)):
+    """Return available interfaces for a device."""
+    if not device_id:
+        return ["ether1-WAN", "ether2-LAN", "ether3-LAN", "bridge-local", "pppoe-out1", "all"]
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    if not device:
+        return ["ether1", "ether2", "bridge-local", "all"]
+    model = device.get("model", "Unknown")
+    interfaces = DEVICE_INTERFACES.get(model, DEVICE_INTERFACES["Unknown"])
+    return interfaces + ["all"]
+
 @api_router.get("/dashboard/stats")
-async def get_dashboard_stats(user=Depends(get_current_user)):
-    pppoe_total = await db.pppoe_users.count_documents({})
-    pppoe_active = await db.pppoe_users.count_documents({"status": "active"})
-    hotspot_total = await db.hotspot_users.count_documents({})
-    hotspot_active = await db.hotspot_users.count_documents({"status": "active"})
+async def get_dashboard_stats(device_id: str = "", interface: str = "", user=Depends(get_current_user)):
+    # Filter queries by device_id if specified
+    pppoe_query = {"device_id": device_id} if device_id else {}
+    hotspot_query = {"device_id": device_id} if device_id else {}
+
+    pppoe_total = await db.pppoe_users.count_documents(pppoe_query)
+    pppoe_active = await db.pppoe_users.count_documents({**pppoe_query, "status": "active"})
+    hotspot_total = await db.hotspot_users.count_documents(hotspot_query)
+    hotspot_active = await db.hotspot_users.count_documents({**hotspot_query, "status": "active"})
     devices_total = await db.devices.count_documents({})
     devices_online = await db.devices.count_documents({"status": "online"})
 
-    # Mock traffic data for charts
+    # Get selected device info for system health
+    selected_device = None
+    if device_id:
+        selected_device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+
+    # Scale traffic based on interface type
+    iface = interface or "all"
+    if "WAN" in iface or "Uplink" in iface or iface == "all":
+        dl_range = (100, 800)
+        ul_range = (50, 400)
+    elif "pppoe" in iface:
+        dl_range = (80, 600)
+        ul_range = (30, 300)
+    elif "wlan" in iface or "hotspot" in iface:
+        dl_range = (20, 200)
+        ul_range = (10, 100)
+    else:
+        dl_range = (30, 300)
+        ul_range = (15, 150)
+
+    # Mock traffic data with ping and jitter
     now = datetime.now(timezone.utc)
     traffic_data = []
+    base_ping = random.randint(5, 25)
     for i in range(24):
         t = now - timedelta(hours=23-i)
+        ping_val = base_ping + random.randint(-3, 15)
+        jitter_val = max(0.5, round(random.uniform(0.5, 8.0) + (random.random() * 5 if random.random() > 0.85 else 0), 1))
         traffic_data.append({
             "time": t.strftime("%H:%M"),
-            "download": random.randint(50, 500),
-            "upload": random.randint(20, 200),
+            "download": random.randint(*dl_range),
+            "upload": random.randint(*ul_range),
+            "ping": max(1, ping_val),
+            "jitter": jitter_val,
         })
 
     # Mock bandwidth by profile
@@ -250,14 +300,31 @@ async def get_dashboard_stats(user=Depends(get_current_user)):
         {"name": "100Mbps", "users": random.randint(1, 8), "bandwidth": random.randint(100, 400)},
     ]
 
-    # Mock alerts
+    # Contextual alerts based on device
+    device_name = selected_device["name"] if selected_device else "Router-Core-01"
     alerts = [
-        {"id": "1", "type": "warning", "message": "High CPU on Router-Core-01 (89%)", "time": "5 min ago"},
+        {"id": "1", "type": "warning", "message": f"High CPU on {device_name} (89%)", "time": "5 min ago"},
         {"id": "2", "type": "error", "message": "Router-Backup-01 offline", "time": "15 min ago"},
         {"id": "3", "type": "info", "message": "PPPoE user pppoe_user_12 connected", "time": "30 min ago"},
         {"id": "4", "type": "success", "message": "Firmware update completed on AP-Hotspot-01", "time": "1 hour ago"},
         {"id": "5", "type": "warning", "message": "Memory usage 85% on Router-Distribution-01", "time": "2 hours ago"},
     ]
+
+    # System health from device data or random
+    if selected_device and selected_device.get("status") == "online":
+        sys_health = {
+            "cpu": selected_device.get("cpu_load", random.randint(15, 85)),
+            "memory": selected_device.get("memory_usage", random.randint(30, 75)),
+            "disk": random.randint(20, 60),
+            "temperature": random.randint(35, 65),
+        }
+    else:
+        sys_health = {
+            "cpu": random.randint(15, 85),
+            "memory": random.randint(30, 75),
+            "disk": random.randint(20, 60),
+            "temperature": random.randint(35, 65),
+        }
 
     return {
         "pppoe": {"total": pppoe_total, "active": pppoe_active},
@@ -267,12 +334,8 @@ async def get_dashboard_stats(user=Depends(get_current_user)):
         "traffic_data": traffic_data,
         "bandwidth_by_profile": bandwidth_by_profile,
         "alerts": alerts,
-        "system_health": {
-            "cpu": random.randint(15, 85),
-            "memory": random.randint(30, 75),
-            "disk": random.randint(20, 60),
-            "temperature": random.randint(35, 65),
-        }
+        "selected_interface": iface,
+        "system_health": sys_health,
     }
 
 # --- PPPoE Users ---
