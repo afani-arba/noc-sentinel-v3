@@ -270,29 +270,12 @@ async def get_memory_usage(host, port, community):
 
 
 async def ping_host(host, count=3, timeout=2):
-    """Try ICMP ping first, fallback to TCP ping on SNMP port."""
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "ping", "-c", str(count), "-W", str(timeout), host,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=count * timeout + 5)
-        output = stdout.decode()
-        rtt = re.search(r'rtt min/avg/max/mdev = ([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+)', output)
-        loss = re.search(r'(\d+)% packet loss', output)
-        if rtt:
-            return {"reachable": True, "min": float(rtt.group(1)), "avg": float(rtt.group(2)),
-                    "max": float(rtt.group(3)), "jitter": float(rtt.group(4)),
-                    "loss": int(loss.group(1)) if loss else 0}
-    except Exception as e:
-        logger.debug(f"ICMP Ping {host}: {e}")
-    
-    # Fallback: TCP ping to SNMP port (161) or API port (8728/443)
-    return await tcp_ping(host, [161, 8728, 443])
+    """Ping to 8.8.8.8 (Google DNS) using TCP to measure internet latency."""
+    return await tcp_ping("8.8.8.8", [53], count=count, timeout=timeout)  # DNS port 53
 
 
 async def tcp_ping(host, ports, count=3, timeout=2):
-    """Measure latency using TCP connection time to common MikroTik ports."""
+    """Measure latency using TCP connection time."""
     import time
     latencies = []
     
