@@ -42,6 +42,7 @@ from routers.system import router as system_router
 from routers.notifications import router as notifications_router
 from routers.backups import router as backups_router
 from routers.syslog import router as syslog_router
+from routers.metrics import router as metrics_router
 
 # ── App factory ────────────────────────────────────────────────────────────
 app = FastAPI(title="NOC-Sentinel API", version="2.5.0")
@@ -67,6 +68,7 @@ api.include_router(system_router)
 api.include_router(notifications_router)
 api.include_router(backups_router)
 api.include_router(syslog_router)
+api.include_router(metrics_router)
 app.include_router(api)
 
 # ── Lifecycle ──────────────────────────────────────────────────────────────

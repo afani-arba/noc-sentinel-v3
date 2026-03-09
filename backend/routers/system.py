@@ -139,6 +139,76 @@ async def perform_update(user=Depends(require_admin)):
         return {"success": False, "log": log, "error": str(e)}
 
 
+@router.post("/save-influxdb-config")
+async def save_influxdb_config(data: dict, user=Depends(require_admin)):
+    """
+    Save InfluxDB configuration to the backend .env file.
+    Updates INFLUXDB_URL, INFLUXDB_TOKEN, INFLUXDB_ORG, INFLUXDB_BUCKET.
+    """
+    backend_dir = Path(__file__).parent.parent
+    env_path = backend_dir / ".env"
+
+    url = (data.get("url") or "").strip()
+    token = (data.get("token") or "").strip()
+    org = (data.get("org") or "").strip()
+    bucket = (data.get("bucket") or "noc-sentinel").strip()
+
+    if not url or not token or not org:
+        from fastapi import HTTPException
+        raise HTTPException(400, "URL, token, dan org wajib diisi")
+
+    # Read existing .env
+    lines = []
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+
+    # Keys to update
+    new_values = {
+        "INFLUXDB_URL": url,
+        "INFLUXDB_TOKEN": token,
+        "INFLUXDB_ORG": org,
+        "INFLUXDB_BUCKET": bucket,
+    }
+
+    updated = set()
+    new_lines = []
+    for line in lines:
+        key = line.split("=")[0].strip() if "=" in line else ""
+        if key in new_values:
+            new_lines.append(f'{key}={new_values[key]}')
+            updated.add(key)
+        else:
+            new_lines.append(line)
+
+    # Append any missing keys
+    for key, val in new_values.items():
+        if key not in updated:
+            new_lines.append(f"{key}={val}")
+
+    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+    # Also set in current process env so test-connection works immediately
+    import os as _os
+    _os.environ["INFLUXDB_URL"] = url
+    _os.environ["INFLUXDB_TOKEN"] = token
+    _os.environ["INFLUXDB_ORG"] = org
+    _os.environ["INFLUXDB_BUCKET"] = bucket
+
+    # Reset cached client so next test uses new config
+    try:
+        import services.metrics_service as _ms
+        _ms._influx_enabled = None
+        _ms._write_client = None
+        _ms._query_client = None
+        _ms._write_api = None
+        _ms._error_logged = False
+    except Exception:
+        pass
+
+    logger.info(f"InfluxDB config saved: {url}, org={org}, bucket={bucket}")
+    return {"message": "Konfigurasi InfluxDB disimpan. Restart backend tidak diperlukan — sudah aktif."}
+
+
 @router.get("/health")
 async def health():
     return {"status": "ok"}

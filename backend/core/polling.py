@@ -94,6 +94,25 @@ async def poll_single_device(device: dict) -> dict:
                 "cpu": result.get("cpu", 0),
                 "memory_percent": result.get("memory", {}).get("percent", 0),
             })
+            # Write to InfluxDB if configured
+            try:
+                from services.metrics_service import write_device_metrics, is_enabled
+                if is_enabled():
+                    metrics_payload = {
+                        "cpu": result.get("cpu", 0),
+                        "memory": result.get("memory", {}),
+                        "ping": ping_data,
+                        "health": result.get("health", {}),
+                        "bandwidth": bw,
+                    }
+                    await asyncio.to_thread(
+                        write_device_metrics,
+                        did,
+                        device.get("name", did),
+                        metrics_payload,
+                    )
+            except Exception as e:
+                logger.debug(f"InfluxDB write skipped: {e}")
 
     await db.traffic_snapshots.update_one(
         {"device_id": did},
@@ -101,6 +120,7 @@ async def poll_single_device(device: dict) -> dict:
         upsert=True
     )
     return result
+
 
 
 async def polling_loop():
