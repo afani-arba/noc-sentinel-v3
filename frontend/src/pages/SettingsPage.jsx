@@ -143,9 +143,10 @@ function InfluxDBSection() {
         </summary>
         <div className="mt-3 space-y-2 text-xs font-mono">
           <div className="p-3 rounded-sm bg-secondary/30 border border-border space-y-1">
-            <p className="font-sans text-muted-foreground font-semibold">1. Download dan install InfluxDB:</p>
-            <p className="text-green-400">wget https://dl.influxdata.com/influxdb/releases/influxdb2_2.7.10_amd64.deb</p>
-            <p className="text-green-400">sudo dpkg -i influxdb2_2.7.10_amd64.deb</p>
+            <p className="font-sans text-muted-foreground font-semibold">1. Tambah InfluxDB repository (Ubuntu/Debian):</p>
+            <p className="text-green-400">curl --silent --location -O https://repos.influxdata.com/influxdata-archive.key</p>
+            <p className="text-green-400 text-[10px] break-all">gpg --show-keys --with-fingerprint --with-colons ./influxdata-archive.key 2&gt;&amp;1 | grep -q '^fpr:\+24C975CBA61A024EE1B631787C3D57159FC2F927:$' &amp;&amp; cat influxdata-archive.key | gpg --dearmor | sudo tee /etc/apt/keyrings/influxdata-archive.gpg &gt; /dev/null &amp;&amp; echo 'deb [signed-by=/etc/apt/keyrings/influxdata-archive.gpg] https://repos.influxdata.com/debian stable main' | sudo tee /etc/apt/sources.list.d/influxdata.list</p>
+            <p className="text-green-400">sudo apt-get update &amp;&amp; sudo apt-get install influxdb2 -y</p>
             <p className="text-green-400">sudo systemctl enable --now influxdb</p>
           </div>
           <div className="p-3 rounded-sm bg-secondary/30 border border-border space-y-1">
