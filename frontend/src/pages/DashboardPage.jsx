@@ -70,17 +70,17 @@ export default function DashboardPage() {
   const noData = td.length === 0;
 
   return (
-    <div className="space-y-6" data-testid="dashboard-page">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+    <div className="space-y-4 pb-16" data-testid="dashboard-page">
+      <div className="flex flex-col gap-3">
         <div>
-          <h1 className="text-3xl font-bold font-['Rajdhani'] tracking-tight">Dashboard</h1>
-          <p className="text-sm text-muted-foreground mt-1">Real-time network monitoring</p>
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold font-['Rajdhani'] tracking-tight">Dashboard</h1>
+          <p className="text-xs sm:text-sm text-muted-foreground">Real-time network monitoring</p>
         </div>
-        <div className="flex flex-col sm:flex-row gap-3 items-end">
+        <div className="grid grid-cols-2 sm:flex sm:flex-row gap-2 sm:gap-3 sm:items-end">
           <div className="space-y-1">
             <label className="text-[10px] text-muted-foreground uppercase tracking-widest flex items-center gap-1"><Monitor className="w-3 h-3" /> Device</label>
             <Select value={selectedDevice} onValueChange={setSelectedDevice}>
-              <SelectTrigger className="w-52 rounded-sm bg-card text-xs h-9" data-testid="dashboard-device-select"><SelectValue placeholder="All Devices" /></SelectTrigger>
+              <SelectTrigger className="w-full sm:w-44 rounded-sm bg-card text-xs h-9" data-testid="dashboard-device-select"><SelectValue placeholder="All Devices" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all"><span className="flex items-center gap-2"><Server className="w-3 h-3 text-muted-foreground" /> All Devices</span></SelectItem>
                 {devices.map(d => (
@@ -92,32 +92,28 @@ export default function DashboardPage() {
           <div className="space-y-1">
             <label className="text-[10px] text-muted-foreground uppercase tracking-widest flex items-center gap-1"><Network className="w-3 h-3" /> Interface</label>
             <Select value={selectedInterface} onValueChange={setSelectedInterface}>
-              <SelectTrigger className="w-44 rounded-sm bg-card text-xs h-9" data-testid="dashboard-interface-select"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-full sm:w-36 rounded-sm bg-card text-xs h-9" data-testid="dashboard-interface-select"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {interfaces.map(i => <SelectItem key={i} value={i}><span className="font-mono text-xs">{i==="all"?"All Interfaces":i}</span></SelectItem>)}
               </SelectContent>
             </Select>
           </div>
-          <Button variant="outline" size="icon" className="h-9 w-9 rounded-sm" onClick={fetchStats} data-testid="dashboard-refresh-btn"><RefreshCw className="w-4 h-4" /></Button>
+          <Button variant="outline" size="icon" className="h-9 w-9 rounded-sm col-span-2 sm:col-span-1 justify-self-end" onClick={fetchStats} data-testid="dashboard-refresh-btn"><RefreshCw className="w-4 h-4" /></Button>
         </div>
       </div>
 
       {sd && (
-        <div className="flex flex-wrap items-center gap-4 px-4 py-2.5 bg-card border border-border rounded-sm text-xs animate-fade-in" data-testid="device-info-bar">
-          <div className={`w-2 h-2 rounded-full ${sd.status==="online"?"bg-green-500 animate-pulse":"bg-red-500"}`} />
-          <div>
-            <span className="font-semibold">{sd.identity || sd.name}</span>
-            {sd.model && <span className="text-muted-foreground ml-2">({sd.model})</span>}
-          </div>
-          <span className="text-muted-foreground font-mono">{sd.ip_address}</span>
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4 px-3 py-2 bg-card border border-border rounded-sm text-[10px] sm:text-xs animate-fade-in" data-testid="device-info-bar">
+          <div className={`w-2 h-2 rounded-full flex-shrink-0 ${sd.status==="online"?"bg-green-500 animate-pulse":"bg-red-500"}`} />
+          <span className="font-semibold truncate max-w-[100px] sm:max-w-none">{sd.identity || sd.name}</span>
+          <span className="text-muted-foreground font-mono hidden sm:inline">{sd.ip_address}</span>
           {sd.ros_version && <Badge variant="outline" className="rounded-sm text-[10px]">v{sd.ros_version}</Badge>}
-          {sd.architecture && <Badge variant="outline" className="rounded-sm text-[10px]">{sd.architecture}</Badge>}
-          {sd.uptime && <span className="text-muted-foreground">Up: <span className="font-mono text-foreground">{sd.uptime}</span></span>}
+          {sd.uptime && <span className="text-muted-foreground hidden sm:inline">Up: <span className="font-mono text-foreground">{sd.uptime}</span></span>}
         </div>
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {[
           { label: "Devices", value: `${stats.devices.online}/${stats.devices.total}`, sub: "online/total", icon: Server, color: "text-purple-500", bg: "bg-purple-500/10" },
           { label: "Download", value: `${stats.total_bandwidth.download}`, sub: "Mbps", icon: ArrowDown, color: "text-blue-500", bg: "bg-blue-500/10" },
@@ -125,10 +121,10 @@ export default function DashboardPage() {
           { label: "Avg Ping", value: `${avgPing}`, sub: "ms", icon: Activity, color: "text-cyan-500", bg: "bg-cyan-500/10" },
           { label: "Avg Jitter", value: avgJitter, sub: "ms", icon: Activity, color: "text-rose-500", bg: "bg-rose-500/10" },
         ].map((c,i) => (
-          <div key={c.label} className="bg-card border border-border rounded-sm p-4 opacity-0 animate-slide-up" style={{ animationDelay:`${i*0.04}s`, animationFillMode:'forwards' }} data-testid={`stat-card-${c.label.toLowerCase().replace(/\s/g,'-')}`}>
+          <div key={c.label} className="bg-card border border-border rounded-sm p-3 sm:p-4 opacity-0 animate-slide-up" style={{ animationDelay:`${i*0.04}s`, animationFillMode:'forwards' }} data-testid={`stat-card-${c.label.toLowerCase().replace(/\s/g,'-')}`}>
             <div className="flex items-start justify-between">
-              <div><p className="text-[10px] text-muted-foreground uppercase tracking-wider">{c.label}</p><p className="text-xl font-bold font-['Rajdhani'] mt-1">{c.value} <span className="text-sm font-normal text-muted-foreground">{c.sub}</span></p></div>
-              <div className={`w-8 h-8 rounded-sm ${c.bg} flex items-center justify-center`}><c.icon className={`w-4 h-4 ${c.color}`} /></div>
+              <div><p className="text-[9px] sm:text-[10px] text-muted-foreground uppercase tracking-wider">{c.label}</p><p className="text-lg sm:text-xl font-bold font-['Rajdhani'] mt-0.5 sm:mt-1">{c.value} <span className="text-xs sm:text-sm font-normal text-muted-foreground">{c.sub}</span></p></div>
+              <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-sm ${c.bg} flex items-center justify-center`}><c.icon className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${c.color}`} /></div>
             </div>
           </div>
         ))}
@@ -141,34 +137,34 @@ export default function DashboardPage() {
       ) : (
         <>
           {/* Traffic Chart */}
-          <div className="bg-card border border-border rounded-sm p-5" data-testid="traffic-chart">
-            <h3 className="text-lg font-semibold font-['Rajdhani'] mb-4">Traffic History{selectedInterface!=="all" && <span className="text-sm text-primary ml-2 font-mono font-normal">/ {selectedInterface}</span>}</h3>
-            <div className="h-64">
+          <div className="bg-card border border-border rounded-sm p-3 sm:p-5" data-testid="traffic-chart">
+            <h3 className="text-base sm:text-lg font-semibold font-['Rajdhani'] mb-3 sm:mb-4">Traffic History</h3>
+            <div className="h-48 sm:h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={td}>
                   <defs>
                     <linearGradient id="gDl" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/><stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/></linearGradient>
                     <linearGradient id="gUl" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/><stop offset="95%" stopColor="#10b981" stopOpacity={0}/></linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" /><XAxis dataKey="time" tick={{ fill:"#a1a1aa", fontSize:11 }} tickLine={false} axisLine={{ stroke:"#27272a" }} /><YAxis tick={{ fill:"#a1a1aa", fontSize:11 }} tickLine={false} axisLine={{ stroke:"#27272a" }} /><Tooltip {...ttStyle} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" /><XAxis dataKey="time" tick={{ fill:"#a1a1aa", fontSize:10 }} tickLine={false} axisLine={{ stroke:"#27272a" }} /><YAxis tick={{ fill:"#a1a1aa", fontSize:10 }} tickLine={false} axisLine={{ stroke:"#27272a" }} width={40} /><Tooltip {...ttStyle} />
                   <Area type="monotone" dataKey="download" stroke="#3b82f6" fill="url(#gDl)" strokeWidth={2} name="Download (Mbps)" />
                   <Area type="monotone" dataKey="upload" stroke="#10b981" fill="url(#gUl)" strokeWidth={2} name="Upload (Mbps)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
-            <div className="flex items-center gap-6 mt-3 text-xs text-muted-foreground">
-              <div className="flex items-center gap-2"><div className="w-3 h-[2px] bg-blue-500" /><ArrowDown className="w-3 h-3" /> Download</div>
-              <div className="flex items-center gap-2"><div className="w-3 h-[2px] bg-green-500" /><ArrowUp className="w-3 h-3" /> Upload</div>
+            <div className="flex items-center gap-4 sm:gap-6 mt-2 sm:mt-3 text-[10px] sm:text-xs text-muted-foreground">
+              <div className="flex items-center gap-1 sm:gap-2"><div className="w-3 h-[2px] bg-blue-500" /><ArrowDown className="w-3 h-3" /> Download</div>
+              <div className="flex items-center gap-1 sm:gap-2"><div className="w-3 h-[2px] bg-green-500" /><ArrowUp className="w-3 h-3" /> Upload</div>
             </div>
           </div>
 
           {/* Ping & Jitter */}
-          <div className="bg-card border border-border rounded-sm p-5" data-testid="ping-jitter-chart">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold font-['Rajdhani']">Ping & Jitter</h3>
-              <div className="flex items-center gap-3 text-xs">
-                <div className="flex items-center gap-2 px-2 py-1 rounded-sm bg-cyan-500/10 border border-cyan-500/20"><span className="text-cyan-400">Ping:</span><span className="font-mono text-cyan-300 font-semibold">{avgPing} ms</span></div>
-                <div className="flex items-center gap-2 px-2 py-1 rounded-sm bg-rose-500/10 border border-rose-500/20"><span className="text-rose-400">Jitter:</span><span className="font-mono text-rose-300 font-semibold">{avgJitter} ms</span></div>
+          <div className="bg-card border border-border rounded-sm p-3 sm:p-5" data-testid="ping-jitter-chart">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 sm:mb-4 gap-2">
+              <h3 className="text-base sm:text-lg font-semibold font-['Rajdhani']">Ping & Jitter</h3>
+              <div className="flex items-center gap-2 sm:gap-3 text-[10px] sm:text-xs">
+                <div className="flex items-center gap-1 sm:gap-2 px-2 py-1 rounded-sm bg-cyan-500/10 border border-cyan-500/20"><span className="text-cyan-400">Ping:</span><span className="font-mono text-cyan-300 font-semibold">{avgPing} ms</span></div>
+                <div className="flex items-center gap-1 sm:gap-2 px-2 py-1 rounded-sm bg-rose-500/10 border border-rose-500/20"><span className="text-rose-400">Jitter:</span><span className="font-mono text-rose-300 font-semibold">{avgJitter} ms</span></div>
               </div>
             </div>
             {avgPing === 0 && avgJitter === "0" ? (

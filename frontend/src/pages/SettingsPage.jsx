@@ -55,32 +55,32 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="space-y-6" data-testid="settings-page">
+    <div className="space-y-4 pb-16" data-testid="settings-page">
       <div>
-        <h1 className="text-3xl font-bold font-['Rajdhani'] tracking-tight">Pengaturan</h1>
-        <p className="text-sm text-muted-foreground mt-1">Pengaturan sistem dan update aplikasi</p>
+        <h1 className="text-xl sm:text-2xl md:text-3xl font-bold font-['Rajdhani'] tracking-tight">Pengaturan</h1>
+        <p className="text-xs sm:text-sm text-muted-foreground">Pengaturan sistem dan update aplikasi</p>
       </div>
 
       {/* Update Section */}
-      <div className="bg-card border border-border rounded-sm p-6" data-testid="update-section">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-sm bg-primary/10 flex items-center justify-center">
-            <Github className="w-5 h-5 text-primary" />
+      <div className="bg-card border border-border rounded-sm p-4 sm:p-6" data-testid="update-section">
+        <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-sm bg-primary/10 flex items-center justify-center">
+            <Github className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold font-['Rajdhani']">Update Aplikasi</h2>
-            <p className="text-xs text-muted-foreground">Pull update terbaru dari GitHub repository</p>
+            <h2 className="text-base sm:text-lg font-semibold font-['Rajdhani']">Update Aplikasi</h2>
+            <p className="text-[10px] sm:text-xs text-muted-foreground">Pull update dari GitHub</p>
           </div>
         </div>
 
-        <div className="space-y-4">
+        <div className="space-y-3 sm:space-y-4">
           {/* Current Version Info */}
-          <div className="flex flex-wrap gap-3 items-center text-sm">
-            <Badge variant="outline" className="rounded-sm gap-1">
+          <div className="flex flex-wrap gap-2 sm:gap-3 items-center text-xs sm:text-sm">
+            <Badge variant="outline" className="rounded-sm gap-1 text-[10px] sm:text-xs">
               <Clock className="w-3 h-3" />
-              Versi Saat Ini
+              Versi
             </Badge>
-            <span className="text-muted-foreground font-mono text-xs">
+            <span className="text-muted-foreground font-mono text-[10px] sm:text-xs">
               {updateInfo?.current_commit ? updateInfo.current_commit.slice(0, 7) : "Belum dicek"}
             </span>
           </div>
@@ -131,34 +131,35 @@ export default function SettingsPage() {
           )}
 
           {/* Action Buttons */}
-          <div className="flex flex-wrap gap-3 pt-2">
+          <div className="flex flex-wrap gap-2 sm:gap-3 pt-2">
             <Button
               variant="outline"
+              size="sm"
               onClick={checkUpdate}
               disabled={checking || updating}
-              className="rounded-sm gap-2"
+              className="rounded-sm gap-2 flex-1 sm:flex-none"
               data-testid="check-update-btn"
             >
               <RefreshCw className={`w-4 h-4 ${checking ? 'animate-spin' : ''}`} />
-              {checking ? "Mengecek..." : "Cek Update"}
+              {checking ? "..." : "Cek Update"}
             </Button>
             
             <Button
+              size="sm"
               onClick={performUpdate}
               disabled={updating || !updateInfo?.has_update}
-              className="rounded-sm gap-2"
+              className="rounded-sm gap-2 flex-1 sm:flex-none"
               data-testid="perform-update-btn"
             >
               <Download className={`w-4 h-4 ${updating ? 'animate-bounce' : ''}`} />
-              {updating ? "Mengupdate..." : "Update Sekarang"}
+              {updating ? "..." : "Update"}
             </Button>
           </div>
 
           {/* Instructions */}
-          <div className="mt-4 p-3 bg-secondary/20 rounded-sm border border-dashed border-border">
-            <p className="text-xs text-muted-foreground">
-              <strong>Petunjuk:</strong> Pastikan Anda telah melakukan "Save to GitHub" di Emergent sebelum 
-              melakukan update di server self-hosted. Proses update akan melakukan <code className="bg-secondary px-1 rounded">git pull</code> dari repository.
+          <div className="mt-3 sm:mt-4 p-2 sm:p-3 bg-secondary/20 rounded-sm border border-dashed border-border">
+            <p className="text-[10px] sm:text-xs text-muted-foreground">
+              <strong>Petunjuk:</strong> Save to GitHub dulu sebelum update di server.
             </p>
           </div>
         </div>

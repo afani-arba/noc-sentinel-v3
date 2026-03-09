@@ -119,61 +119,52 @@ export default function DevicesPage() {
   };
 
   return (
-    <div className="space-y-6" data-testid="devices-page">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="space-y-4 pb-16" data-testid="devices-page">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold font-['Rajdhani'] tracking-tight">Devices</h1>
-          <p className="text-sm text-muted-foreground mt-1">Manage MikroTik devices (SNMP monitoring + REST API)</p>
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold font-['Rajdhani'] tracking-tight">Devices</h1>
+          <p className="text-xs sm:text-sm text-muted-foreground">Manage MikroTik devices</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="icon" onClick={fetchDevices} className="rounded-sm" data-testid="devices-refresh-btn"><RefreshCw className="w-4 h-4" /></Button>
-          <Button onClick={openAdd} className="rounded-sm gap-2" data-testid="add-device-btn"><Plus className="w-4 h-4" /> Add Device</Button>
+          <Button variant="outline" size="icon" onClick={fetchDevices} className="rounded-sm h-9 w-9" data-testid="devices-refresh-btn"><RefreshCw className="w-4 h-4" /></Button>
+          <Button onClick={openAdd} size="sm" className="rounded-sm gap-2" data-testid="add-device-btn"><Plus className="w-4 h-4" /> <span className="hidden sm:inline">Add Device</span></Button>
         </div>
       </div>
 
       {loading ? (
-        <div className="text-center text-muted-foreground py-12">Loading devices...</div>
+        <div className="text-center text-muted-foreground py-12 text-sm">Loading devices...</div>
       ) : devices.length === 0 ? (
-        <div className="bg-card border border-border rounded-sm p-12 text-center"><Server className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" /><p className="text-muted-foreground">No devices configured</p><p className="text-xs text-muted-foreground mt-2">Add a MikroTik router to start monitoring</p></div>
+        <div className="bg-card border border-border rounded-sm p-8 sm:p-12 text-center"><Server className="w-10 h-10 sm:w-12 sm:h-12 mx-auto mb-3 text-muted-foreground/30" /><p className="text-sm text-muted-foreground">No devices configured</p></div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
           {devices.map(d => (
-            <div key={d.id} className="bg-card border border-border rounded-sm p-5 transition-all hover:border-border/80" data-testid={`device-card-${d.name}`}>
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-sm flex items-center justify-center ${d.status==="online"?"bg-green-500/10":"bg-red-500/10"}`}>
-                    {d.status==="online"?<Wifi className="w-5 h-5 text-green-500" />:<WifiOff className="w-5 h-5 text-red-500" />}
+            <div key={d.id} className="bg-card border border-border rounded-sm p-3 sm:p-5 transition-all hover:border-border/80" data-testid={`device-card-${d.name}`}>
+              <div className="flex items-start justify-between mb-3 sm:mb-4">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-sm flex items-center justify-center ${d.status==="online"?"bg-green-500/10":"bg-red-500/10"}`}>
+                    {d.status==="online"?<Wifi className="w-4 h-4 sm:w-5 sm:h-5 text-green-500" />:<WifiOff className="w-4 h-4 sm:w-5 sm:h-5 text-red-500" />}
                   </div>
-                  <div><h3 className="text-sm font-semibold">{d.name}</h3><p className="text-xs text-muted-foreground font-mono">{d.ip_address}</p></div>
+                  <div><h3 className="text-xs sm:text-sm font-semibold">{d.name}</h3><p className="text-[10px] sm:text-xs text-muted-foreground font-mono">{d.ip_address}</p></div>
                 </div>
-                <Badge className={`rounded-sm text-xs border ${d.status==="online"?"bg-green-500/10 text-green-500 border-green-500/20":d.status==="offline"?"bg-red-500/10 text-red-500 border-red-500/20":"bg-yellow-500/10 text-yellow-500 border-yellow-500/20"}`}>{d.status || "unknown"}</Badge>
+                <Badge className={`rounded-sm text-[10px] sm:text-xs border ${d.status==="online"?"bg-green-500/10 text-green-500 border-green-500/20":"bg-red-500/10 text-red-500 border-red-500/20"}`}>{d.status || "?"}</Badge>
               </div>
-              <div className="space-y-2 text-xs">
-                <div className="flex justify-between"><span className="text-muted-foreground">API Mode</span><Badge variant="outline" className="rounded-sm text-[10px]">{d.api_mode === "api" ? "RouterOS 6+ (API)" : "RouterOS 7+ (REST)"}</Badge></div>
-                {d.model && <div className="flex justify-between"><span className="text-muted-foreground">Model</span><span className="font-mono">{d.model}</span></div>}
+              <div className="space-y-1.5 sm:space-y-2 text-[10px] sm:text-xs">
+                <div className="flex justify-between"><span className="text-muted-foreground">API Mode</span><Badge variant="outline" className="rounded-sm text-[10px]">{d.api_mode === "api" ? "ROS6" : "ROS7"}</Badge></div>
                 {d.ros_version && <div className="flex justify-between"><span className="text-muted-foreground">RouterOS</span><span className="font-mono">v{d.ros_version}</span></div>}
-                {d.uptime && <div className="flex justify-between"><span className="text-muted-foreground">Uptime</span><span className="font-mono">{d.uptime}</span></div>}
-                {d.serial && <div className="flex justify-between"><span className="text-muted-foreground">Serial</span><span className="font-mono">{d.serial}</span></div>}
+                {d.uptime && <div className="flex justify-between"><span className="text-muted-foreground">Uptime</span><span className="font-mono text-[10px]">{d.uptime}</span></div>}
                 {typeof d.cpu_load === "number" && d.status === "online" && (
-                  <div className="flex justify-between items-center"><span className="text-muted-foreground">CPU</span><div className="flex items-center gap-2"><div className="w-16 h-1.5 bg-secondary rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width:`${d.cpu_load}%`, backgroundColor:d.cpu_load>80?"#ef4444":d.cpu_load>50?"#f59e0b":"#10b981" }} /></div><span className="font-mono w-8 text-right">{d.cpu_load}%</span></div></div>
+                  <div className="flex justify-between items-center"><span className="text-muted-foreground">CPU</span><div className="flex items-center gap-2"><div className="w-12 sm:w-16 h-1.5 bg-secondary rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width:`${d.cpu_load}%`, backgroundColor:d.cpu_load>80?"#ef4444":d.cpu_load>50?"#f59e0b":"#10b981" }} /></div><span className="font-mono w-6 sm:w-8 text-right">{d.cpu_load}%</span></div></div>
                 )}
-                {typeof d.memory_usage === "number" && d.status === "online" && (
-                  <div className="flex justify-between items-center"><span className="text-muted-foreground">Memory</span><div className="flex items-center gap-2"><div className="w-16 h-1.5 bg-secondary rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width:`${d.memory_usage}%`, backgroundColor:d.memory_usage>80?"#ef4444":d.memory_usage>50?"#f59e0b":"#10b981" }} /></div><span className="font-mono w-8 text-right">{d.memory_usage}%</span></div></div>
-                )}
-                {d.last_poll && <div className="flex justify-between"><span className="text-muted-foreground">Last Poll</span><span className="font-mono">{d.last_poll.replace("T"," ").slice(0,19)}</span></div>}
               </div>
-              <div className="mt-4 pt-3 border-t border-border/50 flex flex-wrap gap-1.5">
-                <Button variant="outline" size="sm" className="text-xs gap-1 h-7 rounded-sm" onClick={() => handleTestSnmp(d.id)} disabled={testing===d.id+"_snmp"} data-testid={`test-snmp-${d.name}`}>
-                  <TestTube className="w-3 h-3" />{testing===d.id+"_snmp"?"Testing...":"SNMP"}
+              <div className="mt-3 sm:mt-4 pt-2 sm:pt-3 border-t border-border/50 flex flex-wrap gap-1">
+                <Button variant="outline" size="sm" className="text-[10px] sm:text-xs gap-1 h-6 sm:h-7 rounded-sm px-2" onClick={() => handleTestSnmp(d.id)} disabled={testing===d.id+"_snmp"} data-testid={`test-snmp-${d.name}`}>
+                  <TestTube className="w-3 h-3" />{testing===d.id+"_snmp"?"...":"SNMP"}
                 </Button>
-                <Button variant="outline" size="sm" className="text-xs gap-1 h-7 rounded-sm" onClick={() => handleTestApi(d.id)} disabled={testing===d.id+"_api"} data-testid={`test-api-${d.name}`}>
-                  <Zap className="w-3 h-3" />{testing===d.id+"_api"?"Testing...":"API"}
+                <Button variant="outline" size="sm" className="text-[10px] sm:text-xs gap-1 h-6 sm:h-7 rounded-sm px-2" onClick={() => handleTestApi(d.id)} disabled={testing===d.id+"_api"} data-testid={`test-api-${d.name}`}>
+                  <Zap className="w-3 h-3" />{testing===d.id+"_api"?"...":"API"}
                 </Button>
-                <Button variant="outline" size="sm" className="text-xs gap-1 h-7 rounded-sm" onClick={() => handlePoll(d.id)} disabled={testing===d.id+"_poll"} data-testid={`poll-${d.name}`}>
-                  <RefreshCw className="w-3 h-3" />Poll
-                </Button>
-                <Button variant="ghost" size="sm" className="text-xs gap-1 h-7 rounded-sm" onClick={() => openEdit(d)} data-testid={`edit-device-${d.name}`}><Pencil className="w-3 h-3" />Edit</Button>
-                <Button variant="ghost" size="sm" className="text-xs gap-1 h-7 rounded-sm text-destructive" onClick={() => handleDelete(d.id, d.name)} data-testid={`delete-device-${d.name}`}><Trash2 className="w-3 h-3" />Delete</Button>
+                <Button variant="ghost" size="sm" className="text-[10px] sm:text-xs gap-1 h-6 sm:h-7 rounded-sm px-2" onClick={() => openEdit(d)} data-testid={`edit-device-${d.name}`}><Pencil className="w-3 h-3" /></Button>
+                <Button variant="ghost" size="sm" className="text-[10px] sm:text-xs gap-1 h-6 sm:h-7 rounded-sm px-2 text-destructive" onClick={() => handleDelete(d.id, d.name)} data-testid={`delete-device-${d.name}`}><Trash2 className="w-3 h-3" /></Button>
               </div>
             </div>
           ))}

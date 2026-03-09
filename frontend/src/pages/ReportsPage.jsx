@@ -64,16 +64,16 @@ export default function ReportsPage() {
   };
 
   return (
-    <div className="space-y-6" data-testid="reports-page">
-      <div><h1 className="text-3xl font-bold font-['Rajdhani'] tracking-tight">Reports</h1><p className="text-sm text-muted-foreground mt-1">Generate and export network reports from SNMP data</p></div>
+    <div className="space-y-4 pb-16" data-testid="reports-page">
+      <div><h1 className="text-xl sm:text-2xl md:text-3xl font-bold font-['Rajdhani'] tracking-tight">Reports</h1><p className="text-xs sm:text-sm text-muted-foreground">Generate and export network reports</p></div>
 
-      <div className="bg-card border border-border rounded-sm p-5">
-        <h3 className="text-base font-semibold font-['Rajdhani'] mb-4">Report Configuration</h3>
-        <div className="flex flex-col sm:flex-row gap-3 items-end">
-          <div className="space-y-1.5 flex-1 max-w-xs">
-            <label className="text-xs text-muted-foreground uppercase tracking-wider">Period</label>
+      <div className="bg-card border border-border rounded-sm p-3 sm:p-5">
+        <h3 className="text-sm sm:text-base font-semibold font-['Rajdhani'] mb-3 sm:mb-4">Report Configuration</h3>
+        <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+          <div className="space-y-1.5 flex-1">
+            <label className="text-[10px] sm:text-xs text-muted-foreground uppercase tracking-wider">Period</label>
             <Select value={period} onValueChange={setPeriod}>
-              <SelectTrigger className="rounded-sm bg-background" data-testid="report-period-select"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="rounded-sm bg-background h-9 text-xs" data-testid="report-period-select"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="daily">Daily (24 Hours)</SelectItem>
                 <SelectItem value="weekly">Weekly (7 Days)</SelectItem>
@@ -81,29 +81,31 @@ export default function ReportsPage() {
               </SelectContent>
             </Select>
           </div>
-          <Button onClick={generateReport} disabled={loading} className="rounded-sm gap-2" data-testid="generate-report-btn"><BarChart3 className="w-4 h-4" />{loading?"Generating...":"Generate Report"}</Button>
-          {report && <Button onClick={exportPDF} variant="outline" className="rounded-sm gap-2" data-testid="export-pdf-btn"><Download className="w-4 h-4" /> Export PDF</Button>}
+          <div className="flex gap-2 sm:items-end">
+            <Button onClick={generateReport} disabled={loading} size="sm" className="rounded-sm gap-2 flex-1 sm:flex-none" data-testid="generate-report-btn"><BarChart3 className="w-4 h-4" />{loading?"...":"Generate"}</Button>
+            {report && <Button onClick={exportPDF} variant="outline" size="sm" className="rounded-sm gap-2" data-testid="export-pdf-btn"><Download className="w-4 h-4" /> PDF</Button>}
+          </div>
         </div>
       </div>
 
       {report && (
-        <div className="space-y-4 animate-fade-in">
-          <div className="bg-card border border-border rounded-sm p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3"><FileText className="w-5 h-5 text-primary" /><div><h3 className="text-lg font-semibold font-['Rajdhani']">{report.label}</h3><p className="text-xs text-muted-foreground font-mono">{new Date(report.start_date).toLocaleDateString()} - {new Date(report.end_date).toLocaleDateString()}</p></div></div>
-              <Badge variant="outline" className="rounded-sm capitalize">{report.period}</Badge>
+        <div className="space-y-3 sm:space-y-4 animate-fade-in">
+          <div className="bg-card border border-border rounded-sm p-3 sm:p-5">
+            <div className="flex items-center justify-between mb-3 sm:mb-4">
+              <div className="flex items-center gap-2 sm:gap-3"><FileText className="w-4 h-4 sm:w-5 sm:h-5 text-primary" /><div><h3 className="text-base sm:text-lg font-semibold font-['Rajdhani']">{report.label}</h3><p className="text-[10px] sm:text-xs text-muted-foreground font-mono">{new Date(report.start_date).toLocaleDateString()} - {new Date(report.end_date).toLocaleDateString()}</p></div></div>
+              <Badge variant="outline" className="rounded-sm capitalize text-[10px] sm:text-xs">{report.period}</Badge>
             </div>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 gap-2 sm:gap-3">
               {[
                 { label: "Devices", value: `${report.summary.devices.online}/${report.summary.devices.total}`, icon: Server, color: "text-purple-500" },
-                { label: "Avg Bandwidth", value: `${report.summary.avg_bandwidth.download}`, sub: `Up: ${report.summary.avg_bandwidth.upload}`, icon: TrendingUp, color: "text-blue-500", suffix: " Mbps" },
-                { label: "Peak Bandwidth", value: `${report.summary.peak_bandwidth.download}`, sub: `Up: ${report.summary.peak_bandwidth.upload}`, icon: BarChart3, color: "text-green-500", suffix: " Mbps" },
-                { label: "Avg Ping / Jitter", value: `${report.summary.avg_ping}`, sub: `Jitter: ${report.summary.avg_jitter} ms`, icon: Activity, color: "text-cyan-500", suffix: " ms" },
+                { label: "Avg BW", value: `${report.summary.avg_bandwidth.download}`, sub: `Up: ${report.summary.avg_bandwidth.upload}`, icon: TrendingUp, color: "text-blue-500", suffix: " Mbps" },
+                { label: "Peak BW", value: `${report.summary.peak_bandwidth.download}`, sub: `Up: ${report.summary.peak_bandwidth.upload}`, icon: BarChart3, color: "text-green-500", suffix: " Mbps" },
+                { label: "Ping/Jitter", value: `${report.summary.avg_ping}`, sub: `Jitter: ${report.summary.avg_jitter} ms`, icon: Activity, color: "text-cyan-500", suffix: " ms" },
               ].map(s => (
-                <div key={s.label} className="p-3 bg-secondary/30 rounded-sm border border-border/50">
-                  <div className="flex items-center gap-2 mb-2"><s.icon className={`w-4 h-4 ${s.color}`} /><span className="text-xs text-muted-foreground">{s.label}</span></div>
-                  <p className="text-xl font-bold font-['Rajdhani']">{s.value}{s.suffix||""}</p>
-                  {s.sub && <p className="text-xs text-muted-foreground">{s.sub}{!s.suffix?"":""}</p>}
+                <div key={s.label} className="p-2 sm:p-3 bg-secondary/30 rounded-sm border border-border/50">
+                  <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2"><s.icon className={`w-3 h-3 sm:w-4 sm:h-4 ${s.color}`} /><span className="text-[9px] sm:text-xs text-muted-foreground">{s.label}</span></div>
+                  <p className="text-base sm:text-xl font-bold font-['Rajdhani']">{s.value}{s.suffix||""}</p>
+                  {s.sub && <p className="text-[10px] sm:text-xs text-muted-foreground">{s.sub}</p>}
                 </div>
               ))}
             </div>

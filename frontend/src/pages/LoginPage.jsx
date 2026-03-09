@@ -156,9 +156,6 @@ export default function LoginPage() {
           </form>
 
           <div className="text-center mt-8 space-y-2">
-            <p className="text-xs text-muted-foreground">
-              Default credentials: <span className="font-mono text-foreground/70">admin</span> / <span className="font-mono text-foreground/70">admin123</span>
-            </p>
             <div className="pt-4 border-t border-border/50">
               <p className="text-[10px] text-muted-foreground/70">Powered By</p>
               <p className="text-xs text-muted-foreground font-medium">PT Arsya Barokah Abadi</p>
