@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/App";
 import api from "@/lib/api";
 import { toast } from "sonner";
@@ -7,10 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend
+} from "recharts";
+import {
   Receipt, Users, Package, LayoutDashboard, RefreshCw, Plus,
   Search, CheckCircle2, Clock, AlertTriangle, Trash2, Edit2,
   DollarSign, MessageCircle, ChevronDown, X, Download, Upload,
-  PhoneCall, ArrowUpDown
+  PhoneCall, ArrowUpDown, WifiOff, Wifi, Printer, Send, TrendingUp
 } from "lucide-react";
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
@@ -18,9 +21,9 @@ import {
 const Rp = (n) => `Rp ${(Number(n) || 0).toLocaleString("id-ID")}`;
 
 const STATUS_MAP = {
-  paid:    { label: "Lunas",       cls: "bg-green-500/15 text-green-400 border-green-500/30" },
-  unpaid:  { label: "Belum Bayar", cls: "bg-amber-500/15 text-amber-400 border-amber-500/30" },
-  overdue: { label: "Jatuh Tempo", cls: "bg-red-500/15 text-red-400 border-red-500/30"   },
+  paid: { label: "Lunas", cls: "bg-green-500/15 text-green-400 border-green-500/30" },
+  unpaid: { label: "Belum Bayar", cls: "bg-amber-500/15 text-amber-400 border-amber-500/30" },
+  overdue: { label: "Jatuh Tempo", cls: "bg-red-500/15 text-red-400 border-red-500/30" },
 };
 
 function StatusBadge({ status }) {
@@ -33,6 +36,49 @@ function StatusBadge({ status }) {
       {s.label}
     </span>
   );
+}
+
+// ── Print Invoice (CSS print-only) ────────────────────────────────────────────
+function printInvoice(invoice, pkgName) {
+  const html = `
+    <html><head><title>${invoice.invoice_number}</title><style>
+      body { font-family: Arial, sans-serif; padding: 32px; color: #111; }
+      h1 { font-size: 22px; margin: 0 0 4px; }
+      .sub { color: #666; font-size: 12px; margin: 0 0 24px; }
+      table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+      td, th { padding: 8px 12px; border: 1px solid #ddd; font-size: 13px; }
+      th { background: #f5f5f5; text-align: left; font-weight: 600; }
+      .total { font-size: 18px; font-weight: bold; color: #1a1a1a; }
+      .status { padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: bold; display: inline-block; }
+      .paid { background: #d1fae5; color: #065f46; }
+      .unpaid { background: #fef3c7; color: #92400e; }
+      .overdue { background: #fee2e2; color: #991b1b; }
+      .footer { margin-top: 32px; font-size: 11px; color: #999; border-top: 1px solid #eee; padding-top: 12px; }
+    </style></head><body>
+    <h1>🌐 ARBA Monitoring System</h1>
+    <p class="sub">Invoice Tagihan Berlangganan Internet</p>
+    <table>
+      <tr><th colspan="2">INVOICE #${invoice.invoice_number}</th></tr>
+      <tr><td>Status</td><td><span class="status ${invoice.status}">${invoice.status.toUpperCase()}</span></td></tr>
+      <tr><td>Nama Pelanggan</td><td>${invoice.customer_name || '—'}</td></tr>
+      <tr><td>Username</td><td>${invoice.customer_username || '—'}</td></tr>
+      <tr><td>No. Telepon</td><td>${invoice.customer_phone || '—'}</td></tr>
+      <tr><td>Paket</td><td>${pkgName || invoice.package_name || '—'}</td></tr>
+      <tr><td>Periode</td><td>${invoice.period_start} s/d ${invoice.period_end}</td></tr>
+      <tr><td>Jatuh Tempo</td><td>${invoice.due_date}</td></tr>
+      <tr><td>Tagihan</td><td>${Rp(invoice.amount)}</td></tr>
+      ${invoice.discount ? `<tr><td>Diskon</td><td>- ${Rp(invoice.discount)}</td></tr>` : ''}
+      <tr><td><strong>Total</strong></td><td class="total">${Rp(invoice.total)}</td></tr>
+      ${invoice.status === 'paid' ? `<tr><td>Dibayar Via</td><td>${invoice.payment_method || '—'} (${invoice.paid_at?.slice(0, 10) || ''})</td></tr>` : ''}
+    </table>
+    <p class="footer">Dicetak: ${new Date().toLocaleString('id-ID')} • Terima kasih atas kepercayaan Anda 🙏</p>
+    </body></html>
+  `;
+  const w = window.open('', '_blank', 'width=700,height=900');
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(() => { w.print(); w.close(); }, 400);
 }
 
 // ── Stat Card ─────────────────────────────────────────────────────────────────
@@ -53,12 +99,14 @@ function InvoiceModal({ invoice, packages, onClose, onPaid, onDelete }) {
   const [method, setMethod] = useState("cash");
   const [paying, setPaying] = useState(false);
   const [waLoading, setWaLoading] = useState(false);
+  const [disabling, setDisabling] = useState(false);
+  const [mtDisabled, setMtDisabled] = useState(invoice.mt_disabled || false);
 
   const handlePay = async () => {
     setPaying(true);
     try {
-      await api.patch(`/billing/invoices/${invoice.id}/pay`, { payment_method: method });
-      toast.success("Invoice ditandai lunas!");
+      const r = await api.patch(`/billing/invoices/${invoice.id}/pay`, { payment_method: method });
+      toast.success(r.data.message || "Invoice ditandai lunas!");
       onPaid();
     } catch (e) { toast.error(e.response?.data?.detail || "Gagal"); }
     setPaying(false);
@@ -73,6 +121,22 @@ function InvoiceModal({ invoice, packages, onClose, onPaid, onDelete }) {
     setWaLoading(false);
   };
 
+  const toggleMikroTik = async () => {
+    setDisabling(true);
+    try {
+      const action = mtDisabled ? "enable" : "disable";
+      const r = await api.post(`/billing/invoices/${invoice.id}/${action}-user`);
+      toast.success(r.data.message);
+      setMtDisabled(!mtDisabled);
+    } catch (e) { toast.error(e.response?.data?.detail || "Gagal"); }
+    setDisabling(false);
+  };
+
+  const handlePrint = () => {
+    const pkg = packages.find(p => p.id === invoice.package_id);
+    printInvoice(invoice, pkg?.name);
+  };
+
   const pkg = packages.find(p => p.id === invoice.package_id) || {};
 
   return (
@@ -85,6 +149,11 @@ function InvoiceModal({ invoice, packages, onClose, onPaid, onDelete }) {
           </div>
           <div className="flex items-center gap-2">
             <StatusBadge status={invoice.status} />
+            {mtDisabled && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-sm border border-orange-500/30 text-orange-400 flex items-center gap-1">
+                <WifiOff className="w-2.5 h-2.5" /> Diputus
+              </span>
+            )}
             <Button size="icon" variant="ghost" className="h-7 w-7" onClick={onClose}>
               <X className="w-4 h-4" />
             </Button>
@@ -118,9 +187,8 @@ function InvoiceModal({ invoice, packages, onClose, onPaid, onDelete }) {
               <div className="flex gap-2">
                 {["cash", "transfer", "qris"].map(m => (
                   <button key={m} onClick={() => setMethod(m)}
-                    className={`flex-1 py-1.5 text-xs rounded-sm border capitalize transition-colors ${
-                      method === m ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground"
-                    }`}>{m}</button>
+                    className={`flex-1 py-1.5 text-xs rounded-sm border capitalize transition-colors ${method === m ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground"
+                      }`}>{m}</button>
                 ))}
               </div>
               <Button onClick={handlePay} disabled={paying} className="w-full rounded-sm gap-2">
@@ -136,11 +204,23 @@ function InvoiceModal({ invoice, packages, onClose, onPaid, onDelete }) {
           )}
         </div>
 
-        <div className="flex gap-2 p-4 pt-0">
-          <Button variant="outline" size="sm" className="flex-1 rounded-sm gap-1 text-xs"
+        {/* Action buttons */}
+        <div className="grid grid-cols-2 gap-2 p-4 pt-0">
+          <Button variant="outline" size="sm" className="rounded-sm gap-1 text-xs"
             onClick={sendWa} disabled={waLoading}>
             <MessageCircle className="w-3.5 h-3.5 text-green-400" />
             {waLoading ? "..." : "Kirim WA"}
+          </Button>
+          <Button variant="outline" size="sm" className="rounded-sm gap-1 text-xs"
+            onClick={handlePrint}>
+            <Printer className="w-3.5 h-3.5 text-blue-400" /> Cetak
+          </Button>
+          <Button variant="outline" size="sm"
+            className={`rounded-sm gap-1 text-xs ${mtDisabled ? "border-green-500/30 text-green-400 hover:bg-green-500/10" : "border-orange-500/30 text-orange-400 hover:bg-orange-500/10"
+              }`}
+            onClick={toggleMikroTik} disabled={disabling}>
+            {mtDisabled ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
+            {disabling ? "..." : mtDisabled ? "Enable User" : "Putus User"}
           </Button>
           <Button variant="outline" size="sm" className="rounded-sm gap-1 text-xs text-destructive hover:bg-destructive/10"
             onClick={onDelete}>
@@ -157,11 +237,19 @@ function InvoiceModal({ invoice, packages, onClose, onPaid, onDelete }) {
 function DashboardTab({ month, year }) {
   const [stats, setStats] = useState(null);
   const [recent, setRecent] = useState([]);
+  const [trend, setTrend] = useState([]);
 
   useEffect(() => {
-    api.get("/billing/stats", { params: { month, year } }).then(r => setStats(r.data)).catch(() => {});
-    api.get("/billing/invoices", { params: { month, year, status: "overdue" } }).then(r => setRecent(r.data.slice(0, 5))).catch(() => {});
+    api.get("/billing/stats", { params: { month, year } }).then(r => setStats(r.data)).catch(() => { });
+    api.get("/billing/invoices", { params: { month, year, status: "overdue" } }).then(r => setRecent(r.data.slice(0, 5))).catch(() => { });
+    api.get("/billing/monthly-summary", { params: { months: 6 } }).then(r => setTrend(r.data)).catch(() => { });
   }, [month, year]);
+
+  const fmtRp = (val) => {
+    if (val >= 1_000_000) return `Rp ${(val / 1_000_000).toFixed(1)}jt`;
+    if (val >= 1_000) return `Rp ${(val / 1_000).toFixed(0)}rb`;
+    return Rp(val);
+  };
 
   return (
     <div className="space-y-4">
@@ -171,6 +259,31 @@ function DashboardTab({ month, year }) {
         <StatCard label="Belum Bayar" value={Rp(stats?.unpaid_amount)} sub={`${stats?.unpaid_count || 0} invoice`} color="border-l-amber-500" />
         <StatCard label="Jatuh Tempo" value={stats?.overdue_count || 0} sub="pelanggan" color="border-l-red-500" />
       </div>
+
+      {/* Grafik Tren Pendapatan */}
+      {trend.length > 0 && (
+        <div className="bg-card border border-border rounded-sm p-4">
+          <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-primary" /> Tren Pendapatan 6 Bulan Terakhir
+          </h3>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={trend} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#888' }} />
+              <YAxis tickFormatter={fmtRp} tick={{ fontSize: 10, fill: '#888' }} width={72} />
+              <Tooltip
+                formatter={(val, name) => [Rp(val), name === "paid" ? "Lunas" : "Belum/Overdue"]}
+                contentStyle={{ background: '#1a1a2e', border: '1px solid #333', borderRadius: 4, fontSize: 11 }}
+                labelStyle={{ color: '#aaa' }}
+              />
+              <Legend formatter={n => n === "paid" ? "Lunas" : "Belum Bayar"} wrapperStyle={{ fontSize: 11 }} />
+              <Bar dataKey="paid" stackId="a" fill="#22c55e" radius={[0, 0, 0, 0]} />
+              <Bar dataKey="unpaid" stackId="a" fill="#f59e0b" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
       {recent.length > 0 && (
         <div className="bg-card border border-border rounded-sm p-4">
           <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
@@ -206,6 +319,8 @@ function InvoicesTab({ month, year, packages, customers }) {
   const [selected, setSelected] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [bulking, setBulking] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [showReminderModal, setShowReminderModal] = useState(false);
 
   const { user } = useAuth();
   const isAdmin = user?.role === "administrator";
@@ -231,6 +346,18 @@ function InvoicesTab({ month, year, packages, customers }) {
     setBulking(false);
   };
 
+  const syncDisable = async () => {
+    if (!window.confirm("Putus koneksi semua pelanggan dengan tagihan JATUH TEMPO?")) return;
+    setSyncing(true);
+    try {
+      const r = await api.post("/billing/invoices/sync-status", null, { params: { action: "disable", status_filter: "overdue" } });
+      toast.success(r.data.message);
+      if (r.data.errors?.length) toast.warning(r.data.errors.slice(0, 3).join("; "));
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || "Gagal"); }
+    setSyncing(false);
+  };
+
   const deleteInv = async (id) => {
     if (!window.confirm("Hapus invoice ini?")) return;
     try {
@@ -240,6 +367,9 @@ function InvoicesTab({ month, year, packages, customers }) {
       load();
     } catch (e) { toast.error(e.response?.data?.detail || "Gagal"); }
   };
+
+  // Reminder massal: filter yang belum bayar dan punya nomor telepon
+  const unpaidWithPhone = invoices.filter(i => i.status !== "paid" && i.customer_phone);
 
   return (
     <div className="space-y-3">
@@ -264,6 +394,18 @@ function InvoicesTab({ month, year, packages, customers }) {
           <Button size="sm" variant="outline" className="rounded-sm h-8 gap-1 text-xs" onClick={bulkCreate} disabled={bulking}>
             <Download className="w-3.5 h-3.5" />{bulking ? "Membuat..." : "Generate Massal"}
           </Button>
+          <Button size="sm" variant="outline"
+            className="rounded-sm h-8 gap-1 text-xs border-orange-500/40 text-orange-400 hover:bg-orange-500/10"
+            onClick={syncDisable} disabled={syncing}>
+            <WifiOff className="w-3.5 h-3.5" />{syncing ? "Memutus..." : "Putus Overdue"}
+          </Button>
+          {unpaidWithPhone.length > 0 && (
+            <Button size="sm" variant="outline"
+              className="rounded-sm h-8 gap-1 text-xs border-green-500/40 text-green-400 hover:bg-green-500/10"
+              onClick={() => setShowReminderModal(true)}>
+              <Send className="w-3.5 h-3.5" /> Reminder ({unpaidWithPhone.length})
+            </Button>
+          )}
           <Button size="sm" className="rounded-sm h-8 gap-1 text-xs" onClick={() => setShowCreate(true)}>
             <Plus className="w-3.5 h-3.5" /> Tambah
           </Button>
@@ -326,6 +468,11 @@ function InvoicesTab({ month, year, packages, customers }) {
           onClose={() => setShowCreate(false)}
           onCreated={() => { setShowCreate(false); load(); }} />
       )}
+
+      {showReminderModal && (
+        <BulkReminderModal invoices={unpaidWithPhone}
+          onClose={() => setShowReminderModal(false)} />
+      )}
     </div>
   );
 }
@@ -335,7 +482,7 @@ function InvoicesTab({ month, year, packages, customers }) {
 function CreateInvoiceModal({ packages, customers, month, year, onClose, onCreated }) {
   const [form, setForm] = useState({
     customer_id: "", package_id: "", amount: "", discount: "0",
-    period_start: `${year}-${String(month).padStart(2,"0")}-01`,
+    period_start: `${year}-${String(month).padStart(2, "0")}-01`,
     period_end: "", due_date: "", notes: "",
   });
   const [saving, setSaving] = useState(false);
@@ -546,7 +693,7 @@ function CustomerForm({ packages, initial, onClose, onSaved }) {
   const [devices, setDevices] = useState([]);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { api.get("/devices").then(r => setDevices(r.data)).catch(() => {}); }, []);
+  useEffect(() => { api.get("/devices").then(r => setDevices(r.data)).catch(() => { }); }, []);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const isEdit = !!initial;
@@ -635,7 +782,7 @@ function ImportModal({ onClose, onImported }) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
 
-  useEffect(() => { api.get("/devices").then(r => setDevices(r.data)).catch(() => {}); }, []);
+  useEffect(() => { api.get("/devices").then(r => setDevices(r.data)).catch(() => { }); }, []);
 
   const doImport = async () => {
     if (!deviceId) { toast.error("Pilih device dahulu"); return; }
@@ -836,6 +983,86 @@ function PackageForm({ initial, onClose, onSaved }) {
   );
 }
 
+// ── Bulk Reminder Modal (WA Massal) ───────────────────────────────────────────
+
+function BulkReminderModal({ invoices, onClose }) {
+  const [sending, setSending] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [done, setDone] = useState(false);
+
+  const sendAll = async () => {
+    setSending(true);
+    setProgress(0);
+    for (let i = 0; i < invoices.length; i++) {
+      try {
+        const r = await api.get(`/billing/invoices/${invoices[i].id}/whatsapp-link`);
+        window.open(r.data.link, "_blank");
+      } catch { /* skip */ }
+      setProgress(i + 1);
+      await new Promise(res => setTimeout(res, 800));
+    }
+    setDone(true);
+    setSending(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+      <div className="bg-card border border-border rounded-sm w-full max-w-md shadow-2xl">
+        <div className="flex items-center justify-between p-4 border-b border-border">
+          <h3 className="font-semibold flex items-center gap-2">
+            <Send className="w-4 h-4 text-green-400" /> Reminder Massal WhatsApp
+          </h3>
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={onClose}><X className="w-4 h-4" /></Button>
+        </div>
+        <div className="p-4 space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Akan mengirim pesan tagihan ke <strong className="text-foreground">{invoices.length} pelanggan</strong> yang belum bayar dan memiliki nomor telepon.
+          </p>
+          <div className="bg-amber-500/10 border border-amber-500/20 rounded-sm p-3 text-xs text-amber-400">
+            ⚠️ Browser akan membuka tab WA baru untuk setiap pelanggan. Pastikan popup tidak diblokir browser.
+          </div>
+          <div className="max-h-48 overflow-y-auto space-y-1.5 border border-border rounded-sm p-2">
+            {invoices.map((inv, i) => (
+              <div key={inv.id} className={`flex items-center justify-between text-xs p-1.5 rounded-sm ${i < progress ? "bg-green-500/10 text-green-400" : "text-muted-foreground"
+                }`}>
+                <span>{i < progress ? "✓" : `${i + 1}.`} {inv.customer_name}</span>
+                <span className="font-mono">{Rp(inv.total)}</span>
+              </div>
+            ))}
+          </div>
+          {sending && (
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>Mengirim...</span><span>{progress}/{invoices.length}</span>
+              </div>
+              <div className="w-full h-1.5 bg-secondary rounded-full overflow-hidden">
+                <div className="h-full bg-green-500 transition-all duration-300 rounded-full"
+                  style={{ width: `${(progress / invoices.length) * 100}%` }} />
+              </div>
+            </div>
+          )}
+          {done && (
+            <div className="p-2 bg-green-500/10 border border-green-500/20 rounded-sm text-xs text-green-400 text-center">
+              ✓ Selesai! {progress} pesan telah dibuka.
+            </div>
+          )}
+        </div>
+        <div className="flex gap-2 p-4 border-t border-border">
+          <Button variant="outline" className="flex-1 rounded-sm text-xs" onClick={onClose}>
+            {done ? "Tutup" : "Batal"}
+          </Button>
+          {!done && (
+            <Button className="flex-1 rounded-sm text-xs gap-1" onClick={sendAll} disabled={sending}>
+              <Send className="w-3.5 h-3.5" />
+              {sending ? `Mengirim ${progress}/${invoices.length}...` : "Kirim Semua"}
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function BillingPage() {
@@ -847,11 +1074,11 @@ export default function BillingPage() {
   const [year, setYear] = useState(today.getFullYear());
 
   const loadPackages = useCallback(() => {
-    api.get("/billing/packages").then(r => setPackages(r.data)).catch(() => {});
+    api.get("/billing/packages").then(r => setPackages(r.data)).catch(() => { });
   }, []);
 
   const loadCustomers = useCallback(() => {
-    api.get("/customers").then(r => setCustomers(r.data)).catch(() => {});
+    api.get("/customers").then(r => setCustomers(r.data)).catch(() => { });
   }, []);
 
   useEffect(() => { loadPackages(); loadCustomers(); }, [loadPackages, loadCustomers]);
@@ -863,7 +1090,7 @@ export default function BillingPage() {
     { id: "packages", label: "Paket", icon: Package },
   ];
 
-  const MONTHS = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agt","Sep","Okt","Nov","Des"];
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agt", "Sep", "Okt", "Nov", "Des"];
 
   return (
     <div className="space-y-4 pb-16">
@@ -890,9 +1117,8 @@ export default function BillingPage() {
       <div className="flex border-b border-border gap-1">
         {tabs.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
-            className={`flex items-center gap-1.5 px-4 py-2 text-sm border-b-2 transition-colors ${
-              tab === t.id ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}>
+            className={`flex items-center gap-1.5 px-4 py-2 text-sm border-b-2 transition-colors ${tab === t.id ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}>
             <t.icon className="w-3.5 h-3.5" />{t.label}
           </button>
         ))}

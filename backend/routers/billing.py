@@ -370,7 +370,7 @@ async def bulk_create_invoices(
 
 @router.patch("/invoices/{invoice_id}/pay")
 async def mark_paid(invoice_id: str, data: PaymentUpdate, user=Depends(require_write)):
-    """Tandai invoice sebagai lunas."""
+    """Tandai invoice sebagai lunas dan auto-enable user MikroTik jika sebelumnya di-disable."""
     db = get_db()
     inv = await db.invoices.find_one({"id": invoice_id})
     if not inv:
@@ -378,16 +378,37 @@ async def mark_paid(invoice_id: str, data: PaymentUpdate, user=Depends(require_w
     if inv.get("status") == "paid":
         raise HTTPException(400, "Invoice sudah lunas")
 
+    paid_at = _now()
     await db.invoices.update_one(
         {"id": invoice_id},
         {"$set": {
             "status": "paid",
-            "paid_at": _now(),
+            "paid_at": paid_at,
             "payment_method": data.payment_method,
             "paid_notes": data.paid_notes,
         }}
     )
-    return {"message": "Invoice ditandai lunas", "paid_at": _now()}
+
+    # Auto-enable user MikroTik setelah lunas
+    mt_msg = ""
+    try:
+        from mikrotik_api import get_api_client
+        customer = await db.customers.find_one({"id": inv["customer_id"]})
+        if customer:
+            device = await db.devices.find_one({"id": customer.get("device_id", "")})
+            if device:
+                mt = get_api_client(device)
+                username = customer.get("username", "")
+                svc = customer.get("service_type", "pppoe")
+                if svc == "pppoe":
+                    await mt.enable_pppoe_user(username)
+                else:
+                    await mt.enable_hotspot_user(username)
+                mt_msg = f" | User '{username}' di-enable di MikroTik"
+    except Exception as e:
+        mt_msg = f" | Gagal enable MikroTik: {e}"
+
+    return {"message": f"Invoice ditandai lunas{mt_msg}", "paid_at": paid_at}
 
 
 @router.patch("/invoices/{invoice_id}/unpay")
@@ -408,6 +429,158 @@ async def delete_invoice(invoice_id: str, user=Depends(require_admin)):
     if result.deleted_count == 0:
         raise HTTPException(404, "Invoice tidak ditemukan")
     return {"message": "Invoice dihapus"}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MIKROTIK DISCONNECT / RECONNECT
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def _toggle_mikrotik_user(db, invoice_id: str, action: str):
+    """Helper: disable atau enable user MikroTik berdasarkan invoice."""
+    inv = await db.invoices.find_one({"id": invoice_id})
+    if not inv:
+        raise HTTPException(404, "Invoice tidak ditemukan")
+    customer = await db.customers.find_one({"id": inv["customer_id"]})
+    if not customer:
+        raise HTTPException(404, "Customer tidak ditemukan")
+    device = await db.devices.find_one({"id": customer.get("device_id", "")})
+    if not device:
+        raise HTTPException(404, "Device tidak ditemukan")
+
+    from mikrotik_api import get_api_client
+    mt = get_api_client(device)
+    username = customer.get("username", "")
+    svc = customer.get("service_type", "pppoe")
+    try:
+        if action == "disable":
+            if svc == "pppoe":
+                await mt.disable_pppoe_user(username)
+            else:
+                await mt.disable_hotspot_user(username)
+        else:
+            if svc == "pppoe":
+                await mt.enable_pppoe_user(username)
+            else:
+                await mt.enable_hotspot_user(username)
+    except Exception as e:
+        raise HTTPException(502, f"Gagal {action} user MikroTik: {e}")
+    return username
+
+
+@router.post("/invoices/{invoice_id}/disable-user")
+async def disable_user(invoice_id: str, user=Depends(require_write)):
+    """Disable user PPPoE/Hotspot di MikroTik (putus koneksi)."""
+    db = get_db()
+    username = await _toggle_mikrotik_user(db, invoice_id, "disable")
+    # Update flag di invoice
+    await db.invoices.update_one({"id": invoice_id}, {"$set": {"mt_disabled": True}})
+    return {"message": f"User '{username}' berhasil di-disable di MikroTik"}
+
+
+@router.post("/invoices/{invoice_id}/enable-user")
+async def enable_user(invoice_id: str, user=Depends(require_write)):
+    """Enable kembali user PPPoE/Hotspot di MikroTik."""
+    db = get_db()
+    username = await _toggle_mikrotik_user(db, invoice_id, "enable")
+    await db.invoices.update_one({"id": invoice_id}, {"$set": {"mt_disabled": False}})
+    return {"message": f"User '{username}' berhasil di-enable di MikroTik"}
+
+
+@router.post("/invoices/sync-status")
+async def sync_mikrotik_status(
+    action: str = Query(...),  # "disable" atau "enable"
+    status_filter: str = Query("overdue"),  # filter invoice: overdue, unpaid
+    user=Depends(require_admin),
+):
+    """
+    Bulk disable/enable user MikroTik berdasarkan status invoice.
+    action=disable: putus semua yang overdue
+    action=enable: sambungkan kembali semua yang sudah lunas
+    """
+    if action not in ("disable", "enable"):
+        raise HTTPException(400, "action harus 'disable' atau 'enable'")
+
+    db = get_db()
+    from mikrotik_api import get_api_client
+
+    q = {"status": status_filter} if action == "disable" else {"status": "paid"}
+    invoices = await db.invoices.find(q).to_list(5000)
+
+    success, failed, skipped = 0, 0, 0
+    errors = []
+
+    for inv in invoices:
+        customer = await db.customers.find_one({"id": inv.get("customer_id", "")})
+        if not customer:
+            skipped += 1
+            continue
+        device = await db.devices.find_one({"id": customer.get("device_id", "")})
+        if not device:
+            skipped += 1
+            continue
+        try:
+            mt = get_api_client(device)
+            username = customer.get("username", "")
+            svc = customer.get("service_type", "pppoe")
+            if action == "disable":
+                if svc == "pppoe":
+                    await mt.disable_pppoe_user(username)
+                else:
+                    await mt.disable_hotspot_user(username)
+                await db.invoices.update_one({"id": inv["id"]}, {"$set": {"mt_disabled": True}})
+            else:
+                if svc == "pppoe":
+                    await mt.enable_pppoe_user(username)
+                else:
+                    await mt.enable_hotspot_user(username)
+                await db.invoices.update_one({"id": inv["id"]}, {"$set": {"mt_disabled": False}})
+            success += 1
+        except Exception as e:
+            failed += 1
+            errors.append(f"{customer.get('name', '?')}: {e}")
+
+    return {
+        "message": f"Sync selesai: {success} berhasil, {failed} gagal, {skipped} dilewati",
+        "success": success, "failed": failed, "skipped": skipped,
+        "errors": errors[:20],
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MONTHLY SUMMARY (untuk grafik tren pendapatan)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/monthly-summary")
+async def monthly_summary(
+    months: int = Query(6),   # jumlah bulan ke belakang
+    user=Depends(get_current_user),
+):
+    """Data tren pendapatan N bulan terakhir untuk grafik bar/line chart."""
+    from dateutil.relativedelta import relativedelta  # pip install python-dateutil
+    db = get_db()
+    today = date.today()
+    result = []
+
+    for i in range(months - 1, -1, -1):
+        d = today - relativedelta(months=i)
+        prefix = f"{d.year}-{d.month:02d}"
+        inv_month = await db.invoices.find(
+            {"period_start": {"$regex": f"^{prefix}"}}, {"_id": 0}
+        ).to_list(5000)
+
+        paid = [x for x in inv_month if x.get("status") == "paid"]
+        unpaid = [x for x in inv_month if x.get("status") in ("unpaid", "overdue")]
+        result.append({
+            "month": d.month,
+            "year": d.year,
+            "label": d.strftime("%b %Y"),
+            "total": sum(x.get("total", 0) for x in inv_month),
+            "paid": sum(x.get("total", 0) for x in paid),
+            "unpaid": sum(x.get("total", 0) for x in unpaid),
+            "count": len(inv_month),
+            "paid_count": len(paid),
+        })
+    return result
 
 
 # ── WhatsApp link helper ──────────────────────────────────────────────────────

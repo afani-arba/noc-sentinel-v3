@@ -22,11 +22,15 @@ class MikroTikBase:
     async def update_pppoe_secret(self, mt_id, data): raise NotImplementedError
     async def delete_pppoe_secret(self, mt_id): raise NotImplementedError
     async def list_pppoe_active(self): raise NotImplementedError
+    async def disable_pppoe_user(self, username): raise NotImplementedError
+    async def enable_pppoe_user(self, username): raise NotImplementedError
     async def list_hotspot_users(self): raise NotImplementedError
     async def create_hotspot_user(self, data): raise NotImplementedError
     async def update_hotspot_user(self, mt_id, data): raise NotImplementedError
     async def delete_hotspot_user(self, mt_id): raise NotImplementedError
     async def list_hotspot_active(self): raise NotImplementedError
+    async def disable_hotspot_user(self, username): raise NotImplementedError
+    async def enable_hotspot_user(self, username): raise NotImplementedError
     async def list_pppoe_profiles(self): raise NotImplementedError
     async def list_hotspot_profiles(self): raise NotImplementedError
     async def list_hotspot_servers(self): raise NotImplementedError
@@ -104,6 +108,24 @@ class MikroTikRestAPI(MikroTikBase):
     async def list_pppoe_active(self):
         return await self._async_req("GET", "ppp/active")
 
+    async def disable_pppoe_user(self, username):
+        """Disable PPPoE secret (user) by username."""
+        secrets = await self.list_pppoe_secrets()
+        for s in secrets:
+            if s.get("name") == username:
+                mt_id = s.get(".id") or s.get("id", "")
+                return await self._async_req("PATCH", f"ppp/secret/{mt_id}", {"disabled": "true"})
+        raise Exception(f"PPPoE user '{username}' tidak ditemukan")
+
+    async def enable_pppoe_user(self, username):
+        """Enable PPPoE secret (user) by username."""
+        secrets = await self.list_pppoe_secrets()
+        for s in secrets:
+            if s.get("name") == username:
+                mt_id = s.get(".id") or s.get("id", "")
+                return await self._async_req("PATCH", f"ppp/secret/{mt_id}", {"disabled": "false"})
+        raise Exception(f"PPPoE user '{username}' tidak ditemukan")
+
     async def list_hotspot_users(self):
         return await self._async_req("GET", "ip/hotspot/user")
 
@@ -118,6 +140,24 @@ class MikroTikRestAPI(MikroTikBase):
 
     async def list_hotspot_active(self):
         return await self._async_req("GET", "ip/hotspot/active")
+
+    async def disable_hotspot_user(self, username):
+        """Disable Hotspot user by username."""
+        users = await self.list_hotspot_users()
+        for u in users:
+            if u.get("name") == username:
+                mt_id = u.get(".id") or u.get("id", "")
+                return await self._async_req("PATCH", f"ip/hotspot/user/{mt_id}", {"disabled": "true"})
+        raise Exception(f"Hotspot user '{username}' tidak ditemukan")
+
+    async def enable_hotspot_user(self, username):
+        """Enable Hotspot user by username."""
+        users = await self.list_hotspot_users()
+        for u in users:
+            if u.get("name") == username:
+                mt_id = u.get(".id") or u.get("id", "")
+                return await self._async_req("PATCH", f"ip/hotspot/user/{mt_id}", {"disabled": "false"})
+        raise Exception(f"Hotspot user '{username}' tidak ditemukan")
 
     async def list_pppoe_profiles(self):
         try:
@@ -311,6 +351,22 @@ class MikroTikRouterAPI(MikroTikBase):
         items = await asyncio.to_thread(self._list_resource, "/ppp/active")
         return self._normalize_items(items)
 
+    async def disable_pppoe_user(self, username):
+        secrets = await self.list_pppoe_secrets()
+        for s in secrets:
+            if s.get("name") == username:
+                mt_id = s.get(".id") or s.get("id", "")
+                return await asyncio.to_thread(self._set_resource, "/ppp/secret", mt_id, {"disabled": "true"})
+        raise Exception(f"PPPoE user '{username}' tidak ditemukan")
+
+    async def enable_pppoe_user(self, username):
+        secrets = await self.list_pppoe_secrets()
+        for s in secrets:
+            if s.get("name") == username:
+                mt_id = s.get(".id") or s.get("id", "")
+                return await asyncio.to_thread(self._set_resource, "/ppp/secret", mt_id, {"disabled": "false"})
+        raise Exception(f"PPPoE user '{username}' tidak ditemukan")
+
     # ── Hotspot ──
     async def list_hotspot_users(self):
         items = await asyncio.to_thread(self._list_resource, "/ip/hotspot/user")
@@ -328,6 +384,22 @@ class MikroTikRouterAPI(MikroTikBase):
     async def list_hotspot_active(self):
         items = await asyncio.to_thread(self._list_resource, "/ip/hotspot/active")
         return self._normalize_items(items)
+
+    async def disable_hotspot_user(self, username):
+        users = await self.list_hotspot_users()
+        for u in users:
+            if u.get("name") == username:
+                mt_id = u.get(".id") or u.get("id", "")
+                return await asyncio.to_thread(self._set_resource, "/ip/hotspot/user", mt_id, {"disabled": "true"})
+        raise Exception(f"Hotspot user '{username}' tidak ditemukan")
+
+    async def enable_hotspot_user(self, username):
+        users = await self.list_hotspot_users()
+        for u in users:
+            if u.get("name") == username:
+                mt_id = u.get(".id") or u.get("id", "")
+                return await asyncio.to_thread(self._set_resource, "/ip/hotspot/user", mt_id, {"disabled": "false"})
+        raise Exception(f"Hotspot user '{username}' tidak ditemukan")
 
     async def list_pppoe_profiles(self):
         try:
