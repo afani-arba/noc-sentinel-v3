@@ -4,14 +4,54 @@ Unified MikroTik API client supporting both:
   - RouterOS 7.x: REST API (port 443/80)
 Both implementations share the same interface.
 """
+import ssl
 import requests
 import asyncio
 import logging
 import urllib3
 import routeros_api
+from requests.adapters import HTTPAdapter
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger(__name__)
+
+
+# ── Custom SSL Adapter for MikroTik ROS 7.x ──────────────────────────────────
+# MikroTik ROS 7.x uses cipher suites that OpenSSL 3.x rejects by default.
+# SECLEVEL=1 allows legacy ciphers (e.g., AES128-SHA, AES256-SHA) that MikroTik uses.
+# This fixes: "sslv3 alert handshake failure" / "Cipher is (NONE)" errors.
+_MIKROTIK_CIPHERS = "DEFAULT:@SECLEVEL=1"
+
+class MikroTikSSLAdapter(HTTPAdapter):
+    """Custom HTTPS adapter with relaxed cipher policy for MikroTik ROS 7 compatibility."""
+
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        ctx.set_ciphers(_MIKROTIK_CIPHERS)
+        # Allow older TLS versions that MikroTik may require
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        kwargs["ssl_context"] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+    def proxy_manager_for(self, proxy, **proxy_kwargs):
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        ctx.set_ciphers(_MIKROTIK_CIPHERS)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        proxy_kwargs["ssl_context"] = ctx
+        return super().proxy_manager_for(proxy, **proxy_kwargs)
+
+
+def _make_session() -> requests.Session:
+    """Create a requests.Session with MikroTik-compatible SSL settings."""
+    session = requests.Session()
+    adapter = MikroTikSSLAdapter()
+    session.mount("https://", adapter)
+    return session
+
 
 
 # ── Base interface ──
@@ -54,8 +94,10 @@ class MikroTikRestAPI(MikroTikBase):
         url = f"{self.base_url}/{path}"
         logger.info(f"REST API request: {method} {url}")
         try:
-            resp = requests.request(method, url, auth=self.auth, json=data,
-                                    verify=self.verify, timeout=self.timeout)
+            # Use custom session with MikroTik-compatible SSL ciphers
+            session = _make_session()
+            resp = session.request(method, url, auth=self.auth, json=data,
+                                   verify=False, timeout=self.timeout)
             logger.info(f"REST API response: {resp.status_code}")
             if resp.status_code == 401:
                 raise Exception("Authentication failed - check API username/password")
@@ -66,6 +108,9 @@ class MikroTikRestAPI(MikroTikBase):
             return resp.json() if resp.content else {}
         except requests.exceptions.SSLError as e:
             logger.error(f"SSL Error: {e}")
+            err = str(e)
+            if "handshake" in err.lower() or "cipher" in err.lower() or "alert" in err.lower():
+                raise Exception(f"SSL Handshake gagal ke {self.host}:{self.port} - cipher mismatch antara server dan MikroTik. Coba ganti ke HTTP (port 80) di konfigurasi device.")
             raise Exception(f"SSL Error - pastikan pilih protokol yang benar (HTTP/HTTPS)")
         except requests.exceptions.ConnectionError as e:
             logger.error(f"Connection Error to {url}: {e}")
