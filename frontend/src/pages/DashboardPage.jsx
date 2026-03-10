@@ -48,26 +48,35 @@ export default function DashboardPage() {
       const r = await api.get("/dashboard/stats", { params });
       const data = r.data;
 
-      // Fallback: jika SNMP tidak punya health data (ROS 7.19+),
-      // ambil dari REST API /devices/{id}/system-health
+      // Selalu merge REST API health data dengan SNMP untuk device spesifik.
+      // SNMP hanya punya board_temp/cpu_temp/voltage dari private OIDs,
+      // sementara REST API punya sfp_temp, switch_temp, fan speeds, PSU states.
       if (selectedDevice !== "all" && data.system_health) {
-        const h = data.system_health;
-        const noHealth = h.cpu_temp === 0 && h.board_temp === 0 && h.voltage === 0 && h.power === 0;
-        if (noHealth) {
-          try {
-            const hr = await api.get(`/devices/${selectedDevice}/system-health`);
-            if (hr.data && Object.keys(hr.data).length > 0) {
-              data.system_health = {
-                ...h,
-                cpu_temp: hr.data.cpu_temp ?? 0,
-                board_temp: hr.data.board_temp ?? 0,
-                voltage: hr.data.voltage ?? 0,
-                power: hr.data.power ?? 0,
-              };
-            }
-          } catch (_) {
-            // REST API health not available, keep SNMP values (all 0)
+        try {
+          const hr = await api.get(`/devices/${selectedDevice}/system-health`);
+          if (hr.data && Object.keys(hr.data).length > 0) {
+            const rd = hr.data;
+            const h = data.system_health;
+            data.system_health = {
+              ...h,
+              // Prefer REST API values, fallback ke SNMP jika REST API = 0
+              cpu_temp: rd.cpu_temp || h.cpu_temp || 0,
+              board_temp: rd.board_temp || h.board_temp || 0,
+              sfp_temp: rd.sfp_temp || 0,
+              switch_temp: rd.switch_temp || 0,
+              voltage: rd.voltage || h.voltage || 0,
+              power: rd.power || h.power || 0,
+              // Sensor ino hanya ada di REST API
+              fans: rd.fans || {},
+              fan_state: rd.fan_state || "",
+              psu: rd.psu || {},
+              extra_temps: rd.extra_temps || {},
+            };
           }
+        } catch (_) {
+          // REST API tidak bisa dijangkau (SSL error dll), pakai SNMP saja
+          const h = data.system_health;
+          data.system_health = { ...h, fans: {}, fan_state: "", psu: {}, extra_temps: {} };
         }
       }
 
