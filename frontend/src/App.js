@@ -17,6 +17,7 @@ import BGPPage from "@/pages/BGPPage";
 import RoutingPage from "@/pages/RoutingPage";
 import ConnectionsPage from "@/pages/ConnectionsPage";
 import FirewallPage from "@/pages/FirewallPage";
+import GenieACSPage from "@/pages/GenieACSPage";
 import Layout from "@/components/Layout";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -114,6 +115,7 @@ function App() {
             <Route path="routing" element={<RoutingPage />} />
             <Route path="connections" element={<ConnectionsPage />} />
             <Route path="firewall" element={<FirewallPage />} />
+            <Route path="genieacs" element={<GenieACSPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
