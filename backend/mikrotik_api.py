@@ -258,32 +258,99 @@ class MikroTikRestAPI(MikroTikBase):
     async def get_system_health(self):
         """
         Ambil data sensor hardware dari /rest/system/health.
-        ROS 7.x mengembalikan list: [{"name": "cpu-temperature", "value": "52", "type": "C"}, ...]
-        Normalized ke: {"cpu_temp": 52, "board_temp": 48, "voltage": 24.0, "power": 0}
+        Field nyata dari MikroTik ROS 7.x:
+          {name: cpu-temperature, value: 47, type: C}
+          {name: sfp-temperature, value: 38, type: C}
+          {name: switch-temperature, value: 39, type: C}
+          {name: board-temperature1, value: 39, type: C}
+          {name: fan1-speed, value: 4080, type: RPM}
+          {name: fan-state, value: ok}
+          {name: psu1-state, value: fail}
+          {name: psu2-state, value: ok}
+          {name: voltage, value: 240, type: dV}   (some devices)
         """
         try:
             items = await self._async_req("GET", "system/health")
             if not isinstance(items, list):
                 return {}
-            result = {}
+
+            result = {
+                "cpu_temp": 0,
+                "board_temp": 0,
+                "sfp_temp": 0,
+                "switch_temp": 0,
+                "voltage": 0,
+                "power": 0,
+                "fans": {},        # {fan1: 4080, fan2: 4020, ...}
+                "fan_state": "",   # "ok" / "fail"
+                "psu": {},         # {psu1: "ok", psu2: "fail", ...}
+                "extra_temps": {}, # {sfp: 38, switch: 39, ...}
+            }
+
             for item in items:
                 name = (item.get("name") or "").lower()
-                val_str = str(item.get("value", "0"))
+                raw_val = item.get("value", "")
+                unit = (item.get("type") or "").upper()
+
+                # Try numeric conversion
                 try:
-                    val = float(val_str)
+                    num_val = float(str(raw_val))
                 except (ValueError, TypeError):
-                    val = 0.0
-                # Map ke field names yang dipakai frontend
-                if "cpu-temperature" in name or "cpu-temp" in name:
-                    result["cpu_temp"] = val
-                elif "board-temperature" in name or "board-temp" in name or ("temperature" in name and "cpu" not in name):
-                    result.setdefault("board_temp", val)
-                elif "voltage" in name or "psu-voltage" in name:
-                    result.setdefault("voltage", round(val / 10.0 if val > 100 else val, 1))
-                elif "power-consumption" in name or "power" in name:
-                    result.setdefault("power", val)
-                elif "current" in name:
-                    result.setdefault("current", val)
+                    num_val = None
+
+                # ── Temperatures ──────────────────────────────────
+                if name == "cpu-temperature":
+                    result["cpu_temp"] = num_val or 0
+
+                elif name.startswith("board-temperature"):
+                    # board-temperature, board-temperature1, board-temperature2
+                    if result["board_temp"] == 0:
+                        result["board_temp"] = num_val or 0
+
+                elif name == "sfp-temperature":
+                    result["sfp_temp"] = num_val or 0
+                    result["extra_temps"]["sfp"] = num_val or 0
+
+                elif name == "switch-temperature":
+                    result["switch_temp"] = num_val or 0
+                    result["extra_temps"]["switch"] = num_val or 0
+
+                elif "temperature" in name:
+                    # catch-all for other temperature sensors
+                    key = name.replace("-temperature", "").replace("-temp", "")
+                    result["extra_temps"][key] = num_val or 0
+                    if result["board_temp"] == 0:
+                        result["board_temp"] = num_val or 0
+
+                # ── Voltage ───────────────────────────────────────
+                elif "voltage" in name:
+                    if num_val is not None:
+                        # MikroTik may return dV (deci-volt): 240 dV = 24.0 V
+                        voltage = num_val / 10.0 if unit == "DV" or num_val > 100 else num_val
+                        result.setdefault("voltage", round(voltage, 1))
+
+                # ── Power ─────────────────────────────────────────
+                elif "power" in name and "psu" not in name:
+                    result.setdefault("power", num_val or 0)
+
+                # ── Current ───────────────────────────────────────
+                elif name == "current":
+                    result["current"] = num_val or 0
+
+                # ── Fan speed (fan1-speed, fan2-speed ...) ────────
+                elif name.endswith("-speed") and "fan" in name:
+                    fan_key = name.replace("-speed", "")  # fan1, fan2, ...
+                    result["fans"][fan_key] = int(num_val) if num_val else 0
+
+                # ── Fan state (ok / fail) ─────────────────────────
+                elif name == "fan-state":
+                    result["fan_state"] = str(raw_val).lower()
+
+                # ── PSU state (psu1-state, psu2-state) ───────────
+                elif name.endswith("-state") and "psu" in name:
+                    psu_key = name.replace("-state", "")  # psu1, psu2, ...
+                    result["psu"][psu_key] = str(raw_val).lower()
+
             return result
         except Exception:
             return {}

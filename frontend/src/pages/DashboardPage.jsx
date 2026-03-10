@@ -235,7 +235,7 @@ export default function DashboardPage() {
               </div>
             ))}
 
-            {/* Temperature, Voltage, Power metrics */}
+            {/* Temperature sensors */}
             <div className="grid grid-cols-2 gap-3 pt-2 border-t border-border/50">
               {stats.system_health.cpu_temp > 0 && (
                 <div className="flex items-center gap-2 p-2 rounded-sm bg-secondary/30">
@@ -252,6 +252,24 @@ export default function DashboardPage() {
                   <div>
                     <p className="text-[10px] text-muted-foreground">Board Temp</p>
                     <p className="text-sm font-mono" style={{ color: stats.system_health.board_temp > 60 ? "#ef4444" : stats.system_health.board_temp > 45 ? "#f59e0b" : "#10b981" }}>{stats.system_health.board_temp}°C</p>
+                  </div>
+                </div>
+              )}
+              {stats.system_health.sfp_temp > 0 && (
+                <div className="flex items-center gap-2 p-2 rounded-sm bg-secondary/30">
+                  <Thermometer className="w-4 h-4 text-blue-500" />
+                  <div>
+                    <p className="text-[10px] text-muted-foreground">SFP Temp</p>
+                    <p className="text-sm font-mono" style={{ color: stats.system_health.sfp_temp > 70 ? "#ef4444" : stats.system_health.sfp_temp > 50 ? "#f59e0b" : "#10b981" }}>{stats.system_health.sfp_temp}°C</p>
+                  </div>
+                </div>
+              )}
+              {stats.system_health.switch_temp > 0 && (
+                <div className="flex items-center gap-2 p-2 rounded-sm bg-secondary/30">
+                  <Thermometer className="w-4 h-4 text-purple-500" />
+                  <div>
+                    <p className="text-[10px] text-muted-foreground">Switch Temp</p>
+                    <p className="text-sm font-mono" style={{ color: stats.system_health.switch_temp > 70 ? "#ef4444" : stats.system_health.switch_temp > 50 ? "#f59e0b" : "#10b981" }}>{stats.system_health.switch_temp}°C</p>
                   </div>
                 </div>
               )}
@@ -275,8 +293,38 @@ export default function DashboardPage() {
               )}
             </div>
 
+            {/* PSU Status — tampilkan jika ada */}
+            {stats.system_health.psu && Object.keys(stats.system_health.psu).length > 0 && (
+              <div className="pt-2 border-t border-border/50">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">PSU Status</p>
+                <div className="flex gap-2 flex-wrap">
+                  {Object.entries(stats.system_health.psu).map(([psu, state]) => (
+                    <div key={psu} className={`flex items-center gap-1.5 px-2 py-1 rounded-sm text-xs font-mono border ${state === "ok" ? "bg-green-500/10 text-green-400 border-green-500/20" : "bg-red-500/10 text-red-400 border-red-500/20"}`}>
+                      <div className={`w-1.5 h-1.5 rounded-full ${state === "ok" ? "bg-green-500" : "bg-red-500 animate-pulse"}`} />
+                      {psu.toUpperCase()}: {state.toUpperCase()}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Fan Speeds */}
+            {stats.system_health.fans && Object.keys(stats.system_health.fans).length > 0 && (
+              <div className="pt-2 border-t border-border/50">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">Fan Speeds</p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {Object.entries(stats.system_health.fans).map(([fan, rpm]) => (
+                    <div key={fan} className="flex items-center justify-between px-2 py-1 rounded-sm bg-secondary/30 text-xs">
+                      <span className="text-muted-foreground">{fan.replace("fan", "Fan ")}</span>
+                      <span className="font-mono text-blue-400">{rpm.toLocaleString()} RPM</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Show message if no extended metrics available */}
-            {stats.system_health.cpu_temp === 0 && stats.system_health.board_temp === 0 && stats.system_health.voltage === 0 && stats.system_health.power === 0 && (
+            {stats.system_health.cpu_temp === 0 && stats.system_health.board_temp === 0 && stats.system_health.voltage === 0 && (
               <p className="text-xs text-muted-foreground/50 text-center pt-2">Extended metrics not available for this device</p>
             )}
           </div>
