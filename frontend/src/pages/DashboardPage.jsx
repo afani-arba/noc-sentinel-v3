@@ -31,13 +31,13 @@ export default function DashboardPage() {
       if (r.data.length > 0) {
         setSelectedDevice(r.data[0].id);
       }
-    }).catch(() => {});
+    }).catch(() => { });
   }, []);
 
   useEffect(() => {
     if (selectedDevice === "all") { setInterfaces(["all"]); setSelectedInterface("all"); return; }
     api.get("/dashboard/interfaces", { params: { device_id: selectedDevice } })
-      .then(r => { setInterfaces(r.data); setSelectedInterface("all"); }).catch(() => {});
+      .then(r => { setInterfaces(r.data); setSelectedInterface("all"); }).catch(() => { });
   }, [selectedDevice]);
 
   const fetchStats = useCallback(async () => {
@@ -46,7 +46,32 @@ export default function DashboardPage() {
       if (selectedDevice !== "all") params.device_id = selectedDevice;
       if (selectedInterface !== "all") params.interface = selectedInterface;
       const r = await api.get("/dashboard/stats", { params });
-      setStats(r.data);
+      const data = r.data;
+
+      // Fallback: jika SNMP tidak punya health data (ROS 7.19+),
+      // ambil dari REST API /devices/{id}/system-health
+      if (selectedDevice !== "all" && data.system_health) {
+        const h = data.system_health;
+        const noHealth = h.cpu_temp === 0 && h.board_temp === 0 && h.voltage === 0 && h.power === 0;
+        if (noHealth) {
+          try {
+            const hr = await api.get(`/devices/${selectedDevice}/system-health`);
+            if (hr.data && Object.keys(hr.data).length > 0) {
+              data.system_health = {
+                ...h,
+                cpu_temp: hr.data.cpu_temp ?? 0,
+                board_temp: hr.data.board_temp ?? 0,
+                voltage: hr.data.voltage ?? 0,
+                power: hr.data.power ?? 0,
+              };
+            }
+          } catch (_) {
+            // REST API health not available, keep SNMP values (all 0)
+          }
+        }
+      }
+
+      setStats(data);
     } catch (e) { console.error(e); }
     setLoading(false);
   }, [selectedDevice, selectedInterface]);
@@ -64,8 +89,8 @@ export default function DashboardPage() {
   // Calculate averages only from non-zero values
   const pingValues = td.filter(d => d.ping > 0).map(d => d.ping);
   const jitterValues = td.filter(d => d.jitter > 0).map(d => d.jitter);
-  const avgPing = pingValues.length ? Math.round(pingValues.reduce((s,v) => s+v, 0) / pingValues.length) : 0;
-  const avgJitter = jitterValues.length ? (jitterValues.reduce((s,v) => s+v, 0) / jitterValues.length).toFixed(1) : "0";
+  const avgPing = pingValues.length ? Math.round(pingValues.reduce((s, v) => s + v, 0) / pingValues.length) : 0;
+  const avgJitter = jitterValues.length ? (jitterValues.reduce((s, v) => s + v, 0) / jitterValues.length).toFixed(1) : "0";
   const sd = stats.selected_device;
   const noData = td.length === 0;
 
@@ -84,7 +109,7 @@ export default function DashboardPage() {
               <SelectContent>
                 <SelectItem value="all"><span className="flex items-center gap-2"><Server className="w-3 h-3 text-muted-foreground" /> All Devices</span></SelectItem>
                 {devices.map(d => (
-                  <SelectItem key={d.id} value={d.id}><span className="flex items-center gap-2"><div className={`w-1.5 h-1.5 rounded-full ${d.status==="online"?"bg-green-500":"bg-red-500"}`} /><span className="font-mono text-xs">{d.name}</span></span></SelectItem>
+                  <SelectItem key={d.id} value={d.id}><span className="flex items-center gap-2"><div className={`w-1.5 h-1.5 rounded-full ${d.status === "online" ? "bg-green-500" : "bg-red-500"}`} /><span className="font-mono text-xs">{d.name}</span></span></SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -94,7 +119,7 @@ export default function DashboardPage() {
             <Select value={selectedInterface} onValueChange={setSelectedInterface}>
               <SelectTrigger className="w-full sm:w-36 rounded-sm bg-card text-xs h-9" data-testid="dashboard-interface-select"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {interfaces.map(i => <SelectItem key={i} value={i}><span className="font-mono text-xs">{i==="all"?"All Interfaces":i}</span></SelectItem>)}
+                {interfaces.map(i => <SelectItem key={i} value={i}><span className="font-mono text-xs">{i === "all" ? "All Interfaces" : i}</span></SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -104,7 +129,7 @@ export default function DashboardPage() {
 
       {sd && (
         <div className="flex flex-wrap items-center gap-2 sm:gap-4 px-3 py-2 bg-card border border-border rounded-sm text-[10px] sm:text-xs animate-fade-in" data-testid="device-info-bar">
-          <div className={`w-2 h-2 rounded-full flex-shrink-0 ${sd.status==="online"?"bg-green-500 animate-pulse":"bg-red-500"}`} />
+          <div className={`w-2 h-2 rounded-full flex-shrink-0 ${sd.status === "online" ? "bg-green-500 animate-pulse" : "bg-red-500"}`} />
           <span className="font-semibold truncate max-w-[100px] sm:max-w-none">{sd.identity || sd.name}</span>
           <span className="text-muted-foreground font-mono hidden sm:inline">{sd.ip_address}</span>
           {sd.ros_version && <Badge variant="outline" className="rounded-sm text-[10px]">v{sd.ros_version}</Badge>}
@@ -120,8 +145,8 @@ export default function DashboardPage() {
           { label: "Upload", value: `${stats.total_bandwidth.upload}`, sub: "Mbps", icon: ArrowUp, color: "text-green-500", bg: "bg-green-500/10" },
           { label: "Avg Ping", value: `${avgPing}`, sub: "ms", icon: Activity, color: "text-cyan-500", bg: "bg-cyan-500/10" },
           { label: "Avg Jitter", value: avgJitter, sub: "ms", icon: Activity, color: "text-rose-500", bg: "bg-rose-500/10" },
-        ].map((c,i) => (
-          <div key={c.label} className="bg-card border border-border rounded-sm p-3 sm:p-4 opacity-0 animate-slide-up" style={{ animationDelay:`${i*0.04}s`, animationFillMode:'forwards' }} data-testid={`stat-card-${c.label.toLowerCase().replace(/\s/g,'-')}`}>
+        ].map((c, i) => (
+          <div key={c.label} className="bg-card border border-border rounded-sm p-3 sm:p-4 opacity-0 animate-slide-up" style={{ animationDelay: `${i * 0.04}s`, animationFillMode: 'forwards' }} data-testid={`stat-card-${c.label.toLowerCase().replace(/\s/g, '-')}`}>
             <div className="flex items-start justify-between">
               <div><p className="text-[9px] sm:text-[10px] text-muted-foreground uppercase tracking-wider">{c.label}</p><p className="text-lg sm:text-xl font-bold font-['Rajdhani'] mt-0.5 sm:mt-1">{c.value} <span className="text-xs sm:text-sm font-normal text-muted-foreground">{c.sub}</span></p></div>
               <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-sm ${c.bg} flex items-center justify-center`}><c.icon className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${c.color}`} /></div>
@@ -143,10 +168,10 @@ export default function DashboardPage() {
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={td}>
                   <defs>
-                    <linearGradient id="gDl" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/><stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/></linearGradient>
-                    <linearGradient id="gUl" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/><stop offset="95%" stopColor="#10b981" stopOpacity={0}/></linearGradient>
+                    <linearGradient id="gDl" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} /><stop offset="95%" stopColor="#3b82f6" stopOpacity={0} /></linearGradient>
+                    <linearGradient id="gUl" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#10b981" stopOpacity={0.3} /><stop offset="95%" stopColor="#10b981" stopOpacity={0} /></linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" /><XAxis dataKey="time" tick={{ fill:"#a1a1aa", fontSize:10 }} tickLine={false} axisLine={{ stroke:"#27272a" }} /><YAxis tick={{ fill:"#a1a1aa", fontSize:10 }} tickLine={false} axisLine={{ stroke:"#27272a" }} width={40} /><Tooltip {...ttStyle} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" /><XAxis dataKey="time" tick={{ fill: "#a1a1aa", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#27272a" }} /><YAxis tick={{ fill: "#a1a1aa", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#27272a" }} width={40} /><Tooltip {...ttStyle} />
                   <Area type="monotone" dataKey="download" stroke="#3b82f6" fill="url(#gDl)" strokeWidth={2} name="Download (Mbps)" />
                   <Area type="monotone" dataKey="upload" stroke="#10b981" fill="url(#gUl)" strokeWidth={2} name="Upload (Mbps)" />
                 </AreaChart>
@@ -172,15 +197,15 @@ export default function DashboardPage() {
                 <div className="text-center">
                   <Activity className="w-8 h-8 mx-auto mb-2 text-muted-foreground/30" />
                   <p className="text-sm text-muted-foreground">Ping data tidak tersedia</p>
-                  <p className="text-xs text-muted-foreground/70 mt-1">Server monitoring tidak dapat menjangkau IP device via ICMP.<br/>Pastikan firewall MikroTik mengizinkan ICMP dari server monitoring.</p>
+                  <p className="text-xs text-muted-foreground/70 mt-1">Server monitoring tidak dapat menjangkau IP device via ICMP.<br />Pastikan firewall MikroTik mengizinkan ICMP dari server monitoring.</p>
                 </div>
               </div>
             ) : (
               <div className="h-48">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={td}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" /><XAxis dataKey="time" tick={{ fill:"#a1a1aa", fontSize:11 }} tickLine={false} axisLine={{ stroke:"#27272a" }} /><YAxis tick={{ fill:"#a1a1aa", fontSize:11 }} tickLine={false} axisLine={{ stroke:"#27272a" }} domain={[0,'auto']} /><Tooltip {...ttStyle} />
-                    <Legend iconType="line" wrapperStyle={{ fontSize:"11px", color:"#a1a1aa" }} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" /><XAxis dataKey="time" tick={{ fill: "#a1a1aa", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "#27272a" }} /><YAxis tick={{ fill: "#a1a1aa", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "#27272a" }} domain={[0, 'auto']} /><Tooltip {...ttStyle} />
+                    <Legend iconType="line" wrapperStyle={{ fontSize: "11px", color: "#a1a1aa" }} />
                     <Line type="monotone" dataKey="ping" stroke="#06b6d4" strokeWidth={2} dot={false} name="Ping (ms)" />
                     <Line type="monotone" dataKey="jitter" stroke="#f43f5e" strokeWidth={2} dot={false} strokeDasharray="5 3" name="Jitter (ms)" />
                   </LineChart>
@@ -204,12 +229,12 @@ export default function DashboardPage() {
               <div key={m.label} className="flex items-center gap-3">
                 <m.icon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                 <div className="flex-1">
-                  <div className="flex items-center justify-between mb-1"><span className="text-xs text-muted-foreground">{m.label}</span><span className="text-xs font-mono" style={{ color: m.value>80?"#ef4444":m.value>60?"#f59e0b":"#10b981" }}>{m.value}{m.unit}</span></div>
-                  <div className="w-full h-1.5 bg-secondary rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-1000" style={{ width:`${m.value}%`, backgroundColor: m.value>80?"#ef4444":m.value>60?"#f59e0b":"#10b981" }} /></div>
+                  <div className="flex items-center justify-between mb-1"><span className="text-xs text-muted-foreground">{m.label}</span><span className="text-xs font-mono" style={{ color: m.value > 80 ? "#ef4444" : m.value > 60 ? "#f59e0b" : "#10b981" }}>{m.value}{m.unit}</span></div>
+                  <div className="w-full h-1.5 bg-secondary rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-1000" style={{ width: `${m.value}%`, backgroundColor: m.value > 80 ? "#ef4444" : m.value > 60 ? "#f59e0b" : "#10b981" }} /></div>
                 </div>
               </div>
             ))}
-            
+
             {/* Temperature, Voltage, Power metrics */}
             <div className="grid grid-cols-2 gap-3 pt-2 border-t border-border/50">
               {stats.system_health.cpu_temp > 0 && (
@@ -249,7 +274,7 @@ export default function DashboardPage() {
                 </div>
               )}
             </div>
-            
+
             {/* Show message if no extended metrics available */}
             {stats.system_health.cpu_temp === 0 && stats.system_health.board_temp === 0 && stats.system_health.voltage === 0 && stats.system_health.power === 0 && (
               <p className="text-xs text-muted-foreground/50 text-center pt-2">Extended metrics not available for this device</p>
@@ -259,12 +284,14 @@ export default function DashboardPage() {
         <div className="bg-card border border-border rounded-sm p-5" data-testid="recent-alerts">
           <h3 className="text-lg font-semibold font-['Rajdhani'] mb-4">Alerts</h3>
           <div className="space-y-3">
-            {stats.alerts.map(a => { const Icon = alertIcons[a.type]||Info; return (
-              <div key={a.id} className="flex items-start gap-3 p-2.5 rounded-sm bg-secondary/30 border border-border/50 hover:bg-secondary/50 transition-colors">
-                <Icon className={`w-4 h-4 mt-0.5 flex-shrink-0 ${alertColors[a.type]}`} />
-                <div className="flex-1 min-w-0"><p className="text-sm text-foreground">{a.message}</p><p className="text-xs text-muted-foreground mt-0.5 font-mono">{a.time}</p></div>
-              </div>
-            );})}
+            {stats.alerts.map(a => {
+              const Icon = alertIcons[a.type] || Info; return (
+                <div key={a.id} className="flex items-start gap-3 p-2.5 rounded-sm bg-secondary/30 border border-border/50 hover:bg-secondary/50 transition-colors">
+                  <Icon className={`w-4 h-4 mt-0.5 flex-shrink-0 ${alertColors[a.type]}`} />
+                  <div className="flex-1 min-w-0"><p className="text-sm text-foreground">{a.message}</p><p className="text-xs text-muted-foreground mt-0.5 font-mono">{a.time}</p></div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

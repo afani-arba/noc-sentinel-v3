@@ -209,6 +209,40 @@ class MikroTikRestAPI(MikroTikBase):
         except Exception:
             return {}
 
+    # ── System Health (ROS 7.x: temperature, voltage, power) ──
+    async def get_system_health(self):
+        """
+        Ambil data sensor hardware dari /rest/system/health.
+        ROS 7.x mengembalikan list: [{"name": "cpu-temperature", "value": "52", "type": "C"}, ...]
+        Normalized ke: {"cpu_temp": 52, "board_temp": 48, "voltage": 24.0, "power": 0}
+        """
+        try:
+            items = await self._async_req("GET", "system/health")
+            if not isinstance(items, list):
+                return {}
+            result = {}
+            for item in items:
+                name = (item.get("name") or "").lower()
+                val_str = str(item.get("value", "0"))
+                try:
+                    val = float(val_str)
+                except (ValueError, TypeError):
+                    val = 0.0
+                # Map ke field names yang dipakai frontend
+                if "cpu-temperature" in name or "cpu-temp" in name:
+                    result["cpu_temp"] = val
+                elif "board-temperature" in name or "board-temp" in name or ("temperature" in name and "cpu" not in name):
+                    result.setdefault("board_temp", val)
+                elif "voltage" in name or "psu-voltage" in name:
+                    result.setdefault("voltage", round(val / 10.0 if val > 100 else val, 1))
+                elif "power-consumption" in name or "power" in name:
+                    result.setdefault("power", val)
+                elif "current" in name:
+                    result.setdefault("current", val)
+            return result
+        except Exception:
+            return {}
+
     # ── Interface List ──
     async def list_interfaces(self):
         """List semua interface beserta status running/disabled."""

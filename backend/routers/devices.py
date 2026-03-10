@@ -185,6 +185,25 @@ async def get_ip_addresses(device_id: str, user=Depends(get_current_user)):
         raise HTTPException(502, f"MikroTik API error: {e}")
 
 
+@router.get("/devices/{device_id}/system-health")
+async def get_system_health(device_id: str, user=Depends(get_current_user)):
+    """
+    Ambil data sensor hardware dari MikroTik REST API /rest/system/health.
+    ROS 7.x: cpu-temperature, board-temperature, voltage, power-consumption.
+    Lebih reliable dari SNMP untuk device yang tidak support MikroTik private MIB.
+    """
+    db = get_db()
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(404, "Device not found")
+    mt = get_api_client(device)
+    try:
+        health = await mt.get_system_health()
+        return health
+    except Exception as e:
+        raise HTTPException(502, f"MikroTik API error: {e}")
+
+
 @router.post("/devices/{device_id}/poll")
 async def trigger_poll(device_id: str, user=Depends(get_current_user)):
     db = get_db()
