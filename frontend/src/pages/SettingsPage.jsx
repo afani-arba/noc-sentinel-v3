@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import api from "@/lib/api";
-import { Download, RefreshCw, CheckCircle2, Github, Terminal, Clock, Database, Wifi, WifiOff, Save, Info, Eye, EyeOff, AlertCircle } from "lucide-react";
+import { Download, RefreshCw, CheckCircle2, Github, Terminal, Clock, Database, Wifi, WifiOff, Save, Info, Eye, EyeOff, AlertCircle, Cpu, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -171,6 +171,122 @@ function InfluxDBSection() {
   );
 }
 
+// ─── GenieACS Section ────────────────────────────────────────────────────────
+function GenieACSSection() {
+  const [cfg, setCfg] = useState({ url: "", username: "", password: "" });
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [showPwd, setShowPwd] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+
+  useEffect(() => {
+    api.get("/system/genieacs-config").then(r => {
+      setCfg(c => ({ ...c, url: r.data.url || "", username: r.data.username || "" }));
+    }).catch(() => {});
+  }, []);
+
+  const handleSave = async () => {
+    if (!cfg.url) { toast.error("GENIEACS_URL wajib diisi"); return; }
+    setSaving(true);
+    try {
+      const r = await api.post("/system/save-genieacs-config", cfg);
+      toast.success(r.data.message);
+    } catch (e) { toast.error(e.response?.data?.detail || "Gagal simpan"); }
+    setSaving(false);
+  };
+
+  const handleTest = async () => {
+    if (!cfg.url) { toast.error("Isi URL dahulu"); return; }
+    setTesting(true);
+    setTestResult(null);
+    try {
+      await api.post("/system/save-genieacs-config", cfg);
+      const r = await api.get("/genieacs/test-connection");
+      setTestResult(r.data);
+      if (r.data.success) toast.success(r.data.message);
+      else toast.error(r.data.error || "Koneksi gagal");
+    } catch (e) { toast.error(e.response?.data?.detail || "Koneksi gagal"); }
+    setTesting(false);
+  };
+
+  return (
+    <div className="bg-card border border-border rounded-sm p-4 sm:p-6 space-y-4" data-testid="genieacs-section">
+      <div className="flex items-start justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-sm bg-cyan-500/10 flex items-center justify-center">
+            <Cpu className="w-4 h-4 text-cyan-400" />
+          </div>
+          <div>
+            <h2 className="text-base sm:text-lg font-semibold font-['Rajdhani']">GenieACS / TR-069</h2>
+            <p className="text-[10px] sm:text-xs text-muted-foreground">Konfigurasi ACS server untuk manajemen CPE pelanggan</p>
+          </div>
+        </div>
+        {testResult && (
+          <div className={`flex items-center gap-1.5 px-2 py-1 rounded-sm text-[10px] font-medium border ${
+            testResult.success ? "bg-green-500/10 text-green-400 border-green-500/20" : "bg-red-500/10 text-red-400 border-red-500/20"
+          }`}>
+            {testResult.success ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+            {testResult.success ? `Terhubung — ${testResult.stats?.total ?? 0} CPE` : "Gagal Terhubung"}
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="sm:col-span-2 space-y-1.5">
+          <Label className="text-xs text-muted-foreground">GenieACS URL (NBI)<span className="text-destructive ml-1">*</span></Label>
+          <Input value={cfg.url} onChange={e => setCfg(c => ({ ...c, url: e.target.value }))}
+            placeholder="http://10.x.x.x:7557" className="rounded-sm font-mono text-xs" />
+          <p className="text-[10px] text-muted-foreground">Port NBI default GenieACS adalah 7557</p>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Username</Label>
+          <Input value={cfg.username} onChange={e => setCfg(c => ({ ...c, username: e.target.value }))}
+            placeholder="admin" className="rounded-sm text-xs" />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Password</Label>
+          <div className="relative">
+            <Input value={cfg.password} onChange={e => setCfg(c => ({ ...c, password: e.target.value }))}
+              type={showPwd ? "text" : "password"} placeholder={cfg.url ? "(tidak berubah jika kosong)" : ""}
+              className="rounded-sm text-xs pr-9" />
+            <button type="button" className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+              onClick={() => setShowPwd(v => !v)}>
+              {showPwd ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {testResult && !testResult.success && (
+        <div className="flex items-start gap-2 p-3 rounded-sm bg-red-500/10 border border-red-500/20 text-xs text-red-300">
+          <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+          <span>{testResult.error}</span>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={handleSave} disabled={saving} className="rounded-sm gap-2 h-8 text-xs">
+          <Save className="w-3.5 h-3.5" />{saving ? "Menyimpan..." : "Simpan"}
+        </Button>
+        <Button onClick={handleTest} variant="outline" disabled={testing || saving} className="rounded-sm gap-2 h-8 text-xs">
+          <Zap className="w-3.5 h-3.5" />{testing ? "Testing..." : "Test Koneksi"}
+        </Button>
+      </div>
+
+      <details className="text-xs">
+        <summary className="cursor-pointer text-muted-foreground hover:text-foreground transition-colors">Cara konfigurasi GenieACS ▸</summary>
+        <div className="mt-3 space-y-2 font-mono text-[11px] bg-secondary/20 border border-border rounded-sm p-3">
+          <p className="font-sans text-muted-foreground font-semibold">1. Pastikan genieacs-nbi aktif di node GenieACS:</p>
+          <p className="text-green-400">systemctl status genieacs-nbi</p>
+          <p className="font-sans text-muted-foreground font-semibold mt-2">2. Cek koneksi dari node NOC ke GenieACS:</p>
+          <p className="text-green-400">curl http://10.x.x.x:7557/devices?limit=1</p>
+          <p className="font-sans text-[10px] text-muted-foreground">Jika dapat JSON → isi URL di atas → Test Koneksi</p>
+        </div>
+      </details>
+    </div>
+  );
+}
+
 // ─── Main Page ───────────────────────────────────────────────────────────────
 export default function SettingsPage() {
   const [checking, setChecking] = useState(false);
@@ -331,6 +447,9 @@ export default function SettingsPage() {
 
       {/* InfluxDB Section */}
       <InfluxDBSection />
+
+      {/* GenieACS Section */}
+      <GenieACSSection />
 
       {/* System Info */}
       <div className="bg-card border border-border rounded-sm p-6">

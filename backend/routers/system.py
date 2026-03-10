@@ -302,3 +302,78 @@ async def save_influxdb_config(data: dict, user=Depends(require_admin)):
 @router.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@router.post("/save-genieacs-config")
+async def save_genieacs_config(data: dict, user=Depends(require_admin)):
+    """
+    Save GenieACS NBI configuration to the backend .env file.
+    Updates GENIEACS_URL, GENIEACS_USERNAME, GENIEACS_PASSWORD.
+    """
+    backend_dir = Path(__file__).parent.parent
+    env_path = backend_dir / ".env"
+
+    url = (data.get("url") or "").strip()
+    username = (data.get("username") or "").strip()
+    password = (data.get("password") or "").strip()
+
+    if not url:
+        from fastapi import HTTPException
+        raise HTTPException(400, "GENIEACS_URL wajib diisi")
+
+    # Read existing .env
+    lines = []
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+
+    new_values = {
+        "GENIEACS_URL": url,
+        "GENIEACS_USERNAME": username,
+        "GENIEACS_PASSWORD": password,
+    }
+
+    updated = set()
+    new_lines = []
+    for line in lines:
+        key = line.split("=")[0].strip() if "=" in line else ""
+        if key in new_values:
+            new_lines.append(f"{key}={new_values[key]}")
+            updated.add(key)
+        else:
+            new_lines.append(line)
+
+    for key, val in new_values.items():
+        if key not in updated:
+            new_lines.append(f"{key}={val}")
+
+    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+    # Apply to current process immediately (no restart needed)
+    import os as _os
+    _os.environ["GENIEACS_URL"] = url
+    _os.environ["GENIEACS_USERNAME"] = username
+    _os.environ["GENIEACS_PASSWORD"] = password
+
+    # Refresh genieacs_service module globals
+    try:
+        import services.genieacs_service as _gs
+        _gs.GENIEACS_URL = url
+        _gs.GENIEACS_USER = username
+        _gs.GENIEACS_PASS = password
+    except Exception:
+        pass
+
+    logger.info(f"GenieACS config saved: {url}, user={username}")
+    return {"message": "Konfigurasi GenieACS disimpan dan langsung aktif. Tidak perlu restart."}
+
+
+@router.get("/genieacs-config")
+async def get_genieacs_config(user=Depends(require_admin)):
+    """Return current GenieACS config (URL only, password masked)."""
+    import os as _os
+    return {
+        "url": _os.environ.get("GENIEACS_URL", ""),
+        "username": _os.environ.get("GENIEACS_USERNAME", ""),
+        "password_set": bool(_os.environ.get("GENIEACS_PASSWORD", "")),
+    }
+
