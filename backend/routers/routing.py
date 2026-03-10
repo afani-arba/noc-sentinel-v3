@@ -1,5 +1,10 @@
 """
 BGP & OSPF Routing router: monitor BGP peers, OSPF neighbors, IP routes.
+ROS 7.x REST API field mapping:
+  BGP connection: name, remote.as, remote.address, local.role, output.default-originate
+  BGP session:    name, remote-as, remote-address, state, uptime, prefix-count, ...
+  OSPF neighbor:  address, interface, state, priority, dr, bdr
+  IP route:       dst-address, gateway, distance, scope, bgp, ospf, type, active
 """
 import asyncio
 from fastapi import APIRouter, HTTPException, Depends
@@ -18,11 +23,103 @@ async def _get_mt(device_id: str):
     return get_api_client(device), device
 
 
+def _state_to_status(raw: str) -> str:
+    """Normalize any BGP state string to standard label."""
+    s = (raw or "").lower()
+    if "established" in s:
+        return "established"
+    if "active" in s:
+        return "active"
+    if "idle" in s:
+        return "idle"
+    if "connect" in s:
+        return "connect"
+    if "opensent" in s or "openconfirm" in s:
+        return "opening"
+    return s or "unknown"
+
+
+def _normalize_bgp_peer(p: dict, sessions: list) -> dict:
+    """
+    Merge BGP connection + session.
+
+    ROS 7.x  /routing/bgp/connection  → name, remote.as, remote.address, nexthop.address
+    ROS 7.x  /routing/bgp/session     → name, remote-as, remote-address, state, uptime, prefix-count
+    ROS 6.x  /routing/bgp/peer        → name, remote-as, remote-address, state, uptime
+    """
+    # ── Peer name ──────────────────────────────
+    name = (
+        p.get("name") or
+        p.get("instance") or
+        p.get(".id", "")
+    )
+
+    # ── Remote AS ─────────────────────────────
+    # ROS 7 connection uses "remote.as"; ROS 6/session uses "remote-as"
+    remote_as = (
+        p.get("remote.as") or
+        p.get("remote-as") or
+        p.get("remote_as") or
+        ""
+    )
+
+    # ── Remote Address ─────────────────────────
+    remote_addr = (
+        p.get("remote.address") or
+        p.get("remote-address") or
+        p.get("address") or
+        ""
+    )
+
+    # ── State/Uptime — try matching session first ──
+    matched_session = next(
+        (s for s in sessions if s.get("name") == name or s.get("remote-address") == remote_addr),
+        None
+    )
+
+    if matched_session:
+        raw_state = (
+            matched_session.get("state") or
+            matched_session.get("established") or
+            ""
+        )
+        uptime = matched_session.get("uptime", "")
+        prefix_count = matched_session.get("prefix-count", matched_session.get("prefix_count", ""))
+        # Fill missing remote-as from session if not in connection
+        if not remote_as:
+            remote_as = matched_session.get("remote-as", matched_session.get("remote_as", ""))
+        if not remote_addr:
+            remote_addr = matched_session.get("remote-address", "")
+    else:
+        raw_state = (
+            p.get("state") or
+            p.get("established") or
+            p.get("status") or
+            ""
+        )
+        uptime = p.get("uptime", "")
+        prefix_count = p.get("prefix-count", p.get("prefix_count", ""))
+
+    status = _state_to_status(raw_state)
+
+    return {
+        **p,
+        # Normalized fields for frontend
+        "name": name,
+        "remote-as": str(remote_as),
+        "remote-address": remote_addr,
+        "uptime": uptime,
+        "prefix-count": prefix_count,
+        "_status": status,
+        "_is_up": status == "established",
+    }
+
+
 # ── BGP ──────────────────────────────────────────────────────
 
 @router.get("/routing/bgp")
 async def get_bgp(device_id: str, user=Depends(get_current_user)):
-    """Get BGP peers + sessions status from MikroTik."""
+    """Get BGP peers + sessions status from MikroTik (ROS 6 & ROS 7 compatible)."""
     if not device_id:
         return {"peers": [], "sessions": []}
     try:
@@ -35,34 +132,7 @@ async def get_bgp(device_id: str, user=Depends(get_current_user)):
         peers = peers if isinstance(peers, list) else []
         sessions = sessions if isinstance(sessions, list) else []
 
-        # Normalize status field
-        normalized_peers = []
-        for p in peers:
-            state = (
-                p.get("state", "") or
-                p.get("established", "") or
-                p.get("status", "unknown")
-            ).lower()
-
-            # Map raw state to clean label
-            if "established" in state:
-                status = "established"
-            elif "active" in state:
-                status = "active"
-            elif "idle" in state:
-                status = "idle"
-            elif "connect" in state:
-                status = "connect"
-            elif "opensent" in state or "openconfirm" in state:
-                status = "opening"
-            else:
-                status = state or "unknown"
-
-            normalized_peers.append({
-                **p,
-                "_status": status,
-                "_is_up": status == "established",
-            })
+        normalized_peers = [_normalize_bgp_peer(p, sessions) for p in peers]
 
         return {"peers": normalized_peers, "sessions": sessions}
     except Exception as e:
@@ -86,10 +156,9 @@ async def get_ospf(device_id: str, user=Depends(get_current_user)):
         neighbors = neighbors if isinstance(neighbors, list) else []
         instances = instances if isinstance(instances, list) else []
 
-        # Normalize neighbor state
         normalized = []
         for n in neighbors:
-            state = (n.get("state", "") or n.get("status", "")).lower()
+            state = (n.get("state") or n.get("status") or "").lower()
             is_full = "full" in state
             normalized.append({**n, "_state": state, "_is_full": is_full})
 
@@ -102,34 +171,46 @@ async def get_ospf(device_id: str, user=Depends(get_current_user)):
 
 @router.get("/routing/routes")
 async def get_routes(device_id: str, search: str = "", limit: int = 100, user=Depends(get_current_user)):
-    """Get IP routing table from MikroTik."""
+    """Get IP routing table from MikroTik (ROS 6 & ROS 7 compatible)."""
     if not device_id:
         return []
     try:
         mt, _ = await _get_mt(device_id)
         routes = await mt.list_ip_routes(limit=limit)
 
-        # Normalize and filter
         result = []
         for r in routes:
-            # Determine route type (protocol)
-            proto = (
-                r.get("routing-mark", "") or
-                r.get("protocol", "") or
-                ("bgp" if r.get("bgp") == "true" else "") or
-                ("ospf" if r.get("ospf") == "true" else "") or
-                ("connected" if r.get("type") == "C" else "") or
-                ("static" if r.get("type") == "S" else "") or
-                "unknown"
-            )
+            # ── Protocol detection (ROS 7 vs ROS 6) ──────────
+            # ROS 7: "bgp" key contains "true", "ospf" key, "static" key, "connected" key
+            # ROS 6: "type" key or flags
+            is_bgp = r.get("bgp") in ("true", True) or "bgp" in (r.get("routing-mark", "") or "").lower()
+            is_ospf = r.get("ospf") in ("true", True)
+            is_static = r.get("static") in ("true", True) or r.get("type") == "S"
+            is_connected = r.get("connect") in ("true", True) or r.get("type") == "C"
 
-            active = r.get("active", "true") == "true"
-            dst = r.get("dst-address", r.get("dst_address", ""))
+            if is_bgp:
+                proto = "bgp"
+            elif is_ospf:
+                proto = "ospf"
+            elif is_connected:
+                proto = "connected"
+            elif is_static:
+                proto = "static"
+            else:
+                proto = r.get("protocol", r.get("routing-mark", "unknown")) or "unknown"
+
+            # ── Active detection ──────────────────────────────
+            active_raw = r.get("active", r.get("dst-active", "false"))
+            active = active_raw in ("true", True)
+
+            # ── Destination & Gateway ─────────────────────────
+            dst = r.get("dst-address") or r.get("dst_address") or ""
+            gw = r.get("gateway") or r.get("nexthop") or ""
 
             entry = {
                 **r,
                 "_dst": dst,
-                "_gateway": r.get("gateway", ""),
+                "_gateway": gw,
                 "_protocol": proto,
                 "_active": active,
                 "_distance": r.get("distance", ""),
