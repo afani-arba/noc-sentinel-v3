@@ -7,7 +7,11 @@ from typing import Optional
 from datetime import datetime, timezone, timedelta
 from core.db import get_db
 from core.auth import get_current_user
+from mikrotik_api import get_api_client
+import asyncio
+import logging
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 
@@ -146,6 +150,41 @@ async def generate_report(data: ReportRequest, user=Depends(get_current_user)):
     online_count = len(online_devs)
     uptime_pct = round((online_count / total_devs * 100) if total_devs > 0 else 100, 1)
 
+    # ── PPPoE & Hotspot active user count (query MikroTik per device) ──
+    pppoe_active = pppoe_total = hotspot_active = hotspot_total = 0
+    target_devs = report_devs if data.device_id else all_devs
+    for dev in target_devs:
+        if dev.get("status") != "online":
+            continue
+        try:
+            mt = get_api_client(dev)
+            # PPPoE
+            def _get_pppoe(mt=mt):
+                try: return mt.get("/ppp/secret")
+                except: return []
+            def _get_pppoe_active(mt=mt):
+                try: return mt.get("/ppp/active")
+                except: return []
+            def _get_hs(mt=mt):
+                try: return mt.get("/ip/hotspot/user")
+                except: return []
+            def _get_hs_active(mt=mt):
+                try: return mt.get("/ip/hotspot/active")
+                except: return []
+            pppoe_secrets, pppoe_sessions, hs_users, hs_sessions = await asyncio.gather(
+                asyncio.to_thread(_get_pppoe),
+                asyncio.to_thread(_get_pppoe_active),
+                asyncio.to_thread(_get_hs),
+                asyncio.to_thread(_get_hs_active),
+                return_exceptions=True
+            )
+            pppoe_total += len(pppoe_secrets) if isinstance(pppoe_secrets, list) else 0
+            pppoe_active += len(pppoe_sessions) if isinstance(pppoe_sessions, list) else 0
+            hotspot_total += len(hs_users) if isinstance(hs_users, list) else 0
+            hotspot_active += len(hs_sessions) if isinstance(hs_sessions, list) else 0
+        except Exception as e:
+            logger.debug(f"PPPoE/Hotspot count failed for {dev.get('name')}: {e}")
+
     return {
         "label": label, "period": data.period,
         "generated_at": now.isoformat(),
@@ -153,6 +192,8 @@ async def generate_report(data: ReportRequest, user=Depends(get_current_user)):
         "company_name": data.company_name or "PT ARSYA BAROKAH ABADI",
         "client_name": data.client_name or "",
         "engineer_name": data.engineer_name or "",
+        "pppoe_stats": {"active": pppoe_active, "total": pppoe_total},
+        "hotspot_stats": {"active": hotspot_active, "total": hotspot_total},
         "summary": {
             "devices": {"total": total_devs, "online": online_count},
             "avg_bandwidth": {"download": avg_dl, "upload": avg_ul},

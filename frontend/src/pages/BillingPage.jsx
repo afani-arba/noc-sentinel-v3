@@ -1187,6 +1187,8 @@ export default function BillingPage() {
   const [tab, setTab] = useState("dashboard");
   const [packages, setPackages] = useState([]);
   const [customers, setCustomers] = useState([]);
+  const [unbilledPPPoE, setUnbilledPPPoE] = useState([]);
+  const [notifDismissed, setNotifDismissed] = useState(false);
   const today = new Date();
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [year, setYear] = useState(today.getFullYear());
@@ -1200,6 +1202,32 @@ export default function BillingPage() {
   }, []);
 
   useEffect(() => { loadPackages(); loadCustomers(); }, [loadPackages, loadCustomers]);
+
+  // Deteksi PPPoE user baru yang belum ada billing record
+  useEffect(() => {
+    const checkUnbilled = async () => {
+      try {
+        const [devRes, custRes] = await Promise.all([
+          api.get("/devices"),
+          api.get("/customers")
+        ]);
+        const onlineDevs = (devRes.data || []).filter(d => d.status === "online");
+        const billedSet = new Set(
+          (custRes.data || []).map(c => c.pppoe_username || c.username).filter(Boolean)
+        );
+        let allPPPoE = [];
+        for (const dev of onlineDevs.slice(0, 5)) {
+          try {
+            const r = await api.get("/pppoe-users", { params: { device_id: dev.id } });
+            allPPPoE.push(...(r.data || []).map(u => ({ ...u, device_name: dev.name })));
+          } catch {}
+        }
+        const unregistered = allPPPoE.filter(u => u.name && !billedSet.has(u.name));
+        setUnbilledPPPoE(unregistered);
+      } catch {}
+    };
+    checkUnbilled();
+  }, []);
 
   const tabs = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -1230,6 +1258,32 @@ export default function BillingPage() {
             className="h-8 w-20 rounded-sm text-xs" min="2020" max="2099" />
         </div>
       </div>
+
+      {/* Notifikasi PPPoE user belum ada billing */}
+      {unbilledPPPoE.length > 0 && !notifDismissed && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-sm p-3 flex items-start gap-3">
+          <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-400">
+              {unbilledPPPoE.length} user PPPoE baru belum diatur paket billing
+            </p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              User: {unbilledPPPoE.slice(0, 4).map(u => u.name).join(", ")}
+              {unbilledPPPoE.length > 4 && ` +${unbilledPPPoE.length - 4} lainnya`}
+            </p>
+          </div>
+          <div className="flex gap-1.5 flex-shrink-0">
+            <Button size="sm" variant="outline"
+              className="rounded-sm text-xs h-7 border-amber-500/30 text-amber-400 hover:bg-amber-500/10"
+              onClick={() => setTab("customers")}>
+              Atur Paket
+            </Button>
+            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setNotifDismissed(true)}>
+              <X className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex border-b border-border gap-1">

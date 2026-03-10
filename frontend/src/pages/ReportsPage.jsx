@@ -18,7 +18,7 @@ function getInitials(name = "") {
 }
 
 // ─── Print (export PDF via browser) ──────────────────────────────────────────
-function printReport(report, companyName) {
+function printReport(report, companyName, clientName, engineerName) {
   if (!report) return;
   const win = window.open("", "_blank");
   if (!win) { toast.error("Popup diblokir browser. Izinkan popup lalu coba lagi."); return; }
@@ -27,10 +27,16 @@ function printReport(report, companyName) {
   const av = report.availability || {};
   const devices = report.device_summary || [];
   const incidents = report.incidents || [];
+  const pppoe = report.pppoe_stats || { active: 0, total: 0 };
+  const hotspot = report.hotspot_stats || { active: 0, total: 0 };
   const health = s.devices.online / s.devices.total >= 0.9 ? "STABLE"
     : s.devices.online / s.devices.total >= 0.7 ? "WARNING" : "CRITICAL";
   const healthy = health === "STABLE";
   const initials = getInitials(companyName);
+  // Use form state values directly (do NOT rely on report.client_name from API)
+  const displayClient = clientName || report.client_name || "—";
+  const displayEngineer = engineerName || report.engineer_name || "—";
+  const displayDate = tgl(new Date().toISOString()); // always use current local date
 
   const statusStyle = (status) => {
     if (status === "online") return "background:#dcfce7;color:#15803d;border:1px solid #86efac;";
@@ -182,9 +188,9 @@ function printReport(report, companyName) {
 
 <!-- ── META ──────────────────────────────────────────────────── -->
 <div class="meta-bar">
-  <div><div class="mkey">Client Name:</div><div class="mval">${report.client_name || "—"}</div></div>
-  <div><div class="mkey">Tanggal Laporan:</div><div class="mval">${tgl(report.generated_at)}</div></div>
-  <div><div class="mkey">Engineer on Duty:</div><div class="mval">${report.engineer_name || "—"}</div></div>
+  <div><div class="mkey">Client Name:</div><div class="mval">${displayClient}</div></div>
+  <div><div class="mkey">Tanggal Laporan:</div><div class="mval">${displayDate}</div></div>
+  <div><div class="mkey">Engineer on Duty:</div><div class="mval">${displayEngineer}</div></div>
   <div><div class="mkey">Periode Monitoring:</div><div class="mval">00:00 – 23:59 WIB</div></div>
 </div>
 
@@ -246,7 +252,7 @@ function printReport(report, companyName) {
 
 <!-- ── SECTION 2 ───────────────────────────────────────────────── -->
 <div class="section-hdr" style="margin-top:0">Section 2: Analisis Performa</div>
-<div class="perf-grid">
+<div class="perf-grid" style="grid-template-columns:1fr 1fr 1fr 1fr">
   <div class="perf-box">
     <h4>A. CPU Usage Analysis</h4>
     <div class="perf-row"><span class="plabel">Normal (0-60%)</span><span class="pval pval-green">${s.cpu_categories?.normal ?? 0} Devices</span></div>
@@ -265,6 +271,13 @@ function printReport(report, companyName) {
     <div class="perf-row"><span class="plabel">Peak Traffic</span><span class="pval">${s.peak_bandwidth.download} Mbps</span></div>
     <div class="perf-row"><span class="plabel">Avg Ping</span><span class="pval">${s.avg_ping} ms</span></div>
     <div class="perf-row"><span class="plabel">Avg Jitter</span><span class="pval">${s.avg_jitter} ms</span></div>
+  </div>
+  <div class="perf-box">
+    <h4>D. User Active Analysis</h4>
+    <div class="perf-row"><span class="plabel">PPPoE Aktif</span><span class="pval pval-green">${pppoe.active} User</span></div>
+    <div class="perf-row"><span class="plabel">PPPoE Total</span><span class="pval">${pppoe.total} User</span></div>
+    <div class="perf-row"><span class="plabel">Hotspot Aktif</span><span class="pval pval-green">${hotspot.active} User</span></div>
+    <div class="perf-row"><span class="plabel">Hotspot Total</span><span class="pval">${hotspot.total} User</span></div>
   </div>
 </div>
 
@@ -443,7 +456,7 @@ export default function ReportsPage() {
             {loading ? "Memproses..." : "Generate Laporan"}
           </Button>
           {report && (
-            <Button onClick={() => printReport(report, companyName)} variant="outline" size="sm"
+            <Button onClick={() => printReport(report, companyName, clientName, engineerName)} variant="outline" size="sm"
               className="rounded-sm gap-2" data-testid="export-pdf-btn">
               <Printer className="w-4 h-4" /> Export PDF
             </Button>
@@ -470,10 +483,10 @@ export default function ReportsPage() {
           {/* META BAR */}
           <div className="bg-slate-100 dark:bg-slate-800/60 border-y border-border grid grid-cols-2 sm:grid-cols-4 px-6 py-2.5 gap-x-8 gap-y-1">
             {[
-              ["Client Name:", report.client_name || "—"],
-              ["Tanggal Laporan:", tgl(report.generated_at)],
-              ["Engineer on Duty:", report.engineer_name || "—"],
-              ["Periode Monitoring:", "00:00 – 23:59 WIB"],
+            ["Client Name:", clientName || report.client_name || "—"],
+            ["Tanggal Laporan:", tgl(new Date().toISOString())],
+            ["Engineer on Duty:", engineerName || report.engineer_name || "—"],
+            ["Periode Monitoring:", "00:00 – 23:59 WIB"],
             ].map(([k, v]) => (
               <div key={k} className="text-xs">
                 <span className="text-muted-foreground">{k} </span>
