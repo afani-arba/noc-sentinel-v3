@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import api from "@/lib/api";
-import { Bell, Plus, Trash2, Send, Save, Phone, Settings2, AlertTriangle, Info } from "lucide-react";
+import { Bell, Plus, Trash2, Send, Save, Phone, Settings2, AlertTriangle, Info, Activity, Network, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 
 function PhoneRow({ r, idx, onChange, onRemove }) {
@@ -44,8 +45,10 @@ const DEFAULT_SETTINGS = {
   recipients: [],
   notify_offline: true,
   notify_cpu: true,
-  notify_memory: true,
-  thresholds: { cpu: 80, memory: 80 },
+  notify_ping_high: false,
+  notify_interface_down: false,
+  watched_interfaces: [],
+  thresholds: { cpu: 80, ping_ms: 100 },
 };
 
 export default function NotificationsPage() {
@@ -99,6 +102,41 @@ export default function NotificationsPage() {
 
   const removeRecipient = (idx) => {
     setSettings(s => ({ ...s, recipients: s.recipients.filter((_, i) => i !== idx) }));
+  };
+
+  // Interface list for interface-down monitoring
+  const [devices, setDevices] = useState([]);
+  const [ifaceDevice, setIfaceDevice] = useState("");
+  const [interfaces, setInterfaces] = useState([]);
+  const [loadingIfaces, setLoadingIfaces] = useState(false);
+
+  useEffect(() => {
+    api.get("/devices").then(r => {
+      const onlineDevs = (r.data || []).filter(d => d.status === "online");
+      setDevices(onlineDevs);
+      if (onlineDevs.length > 0 && !ifaceDevice) setIfaceDevice(onlineDevs[0].id);
+    }).catch(() => {});
+  }, []);
+
+  const fetchInterfaces = async (devId) => {
+    if (!devId) return;
+    setLoadingIfaces(true);
+    try {
+      const r = await api.get(`/devices/${devId}/interfaces`);
+      setInterfaces((r.data || []).map(i => i.name).filter(Boolean));
+    } catch {
+      toast.error("Gagal mengambil daftar interface");
+      setInterfaces([]);
+    }
+    setLoadingIfaces(false);
+  };
+
+  const toggleInterface = (name) => {
+    const watched = settings.watched_interfaces || [];
+    const updated = watched.includes(name)
+      ? watched.filter(i => i !== name)
+      : [...watched, name];
+    setSettings(s => ({ ...s, watched_interfaces: updated }));
   };
 
   if (loading) return <div className="text-center text-muted-foreground py-12 text-sm">Loading...</div>;
@@ -210,42 +248,159 @@ export default function NotificationsPage() {
       {/* Alert Types & Thresholds */}
       <div className="bg-card border border-border rounded-sm p-4 space-y-4">
         <h2 className="text-base font-semibold font-['Rajdhani'] flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 text-yellow-500" /> Jenis Alert & Threshold
+          <AlertTriangle className="w-4 h-4 text-yellow-500" /> Jenis Alert &amp; Threshold
         </h2>
         <div className="space-y-3">
-          {[
-            { key: "notify_offline", label: "Device Offline", desc: "Kirim alert saat router tidak dapat dijangkau", noThreshold: true },
-            { key: "notify_cpu", label: "CPU Tinggi", desc: "Alert saat CPU melebihi threshold", threshKey: "cpu", unit: "%" },
-            { key: "notify_memory", label: "Memori Tinggi", desc: "Alert saat memory melebihi threshold", threshKey: "memory", unit: "%" },
-          ].map(item => (
-            <div key={item.key} className="flex items-center gap-3 p-3 rounded-sm bg-secondary/20 border border-border/50">
+
+          {/* Device Offline */}
+          <div className="flex items-center gap-3 p-3 rounded-sm bg-secondary/20 border border-border/50">
+            <button
+              onClick={() => setSettings(s => ({ ...s, notify_offline: !s.notify_offline }))}
+              className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${settings.notify_offline ? "bg-green-500" : "bg-secondary"}`}
+            >
+              <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${settings.notify_offline ? "left-5" : "left-0.5"}`} />
+            </button>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Device Offline</p>
+              <p className="text-[10px] text-muted-foreground">Kirim alert saat router tidak dapat dijangkau</p>
+            </div>
+          </div>
+
+          {/* CPU Tinggi */}
+          <div className="flex items-center gap-3 p-3 rounded-sm bg-secondary/20 border border-border/50">
+            <button
+              onClick={() => setSettings(s => ({ ...s, notify_cpu: !s.notify_cpu }))}
+              className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${settings.notify_cpu ? "bg-green-500" : "bg-secondary"}`}
+            >
+              <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${settings.notify_cpu ? "left-5" : "left-0.5"}`} />
+            </button>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">CPU Tinggi</p>
+              <p className="text-[10px] text-muted-foreground">Alert saat CPU melebihi threshold</p>
+            </div>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <Input
+                type="number"
+                value={settings.thresholds?.cpu ?? 80}
+                onChange={e => setSettings(s => ({ ...s, thresholds: { ...s.thresholds, cpu: parseInt(e.target.value) || 80 } }))}
+                className="w-16 h-7 rounded-sm bg-background font-mono text-xs text-center"
+                min={1} max={100}
+              />
+              <span className="text-xs text-muted-foreground">%</span>
+            </div>
+          </div>
+
+          {/* Ping Tinggi */}
+          <div className="flex items-center gap-3 p-3 rounded-sm bg-secondary/20 border border-border/50">
+            <button
+              onClick={() => setSettings(s => ({ ...s, notify_ping_high: !s.notify_ping_high }))}
+              className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${settings.notify_ping_high ? "bg-green-500" : "bg-secondary"}`}
+            >
+              <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${settings.notify_ping_high ? "left-5" : "left-0.5"}`} />
+            </button>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium flex items-center gap-1.5"><Activity className="w-3.5 h-3.5 text-cyan-500" /> Ping Tinggi</p>
+              <p className="text-[10px] text-muted-foreground">Alert saat latensi melebihi threshold</p>
+            </div>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <Input
+                type="number"
+                value={settings.thresholds?.ping_ms ?? 100}
+                onChange={e => setSettings(s => ({ ...s, thresholds: { ...s.thresholds, ping_ms: parseInt(e.target.value) || 100 } }))}
+                className="w-20 h-7 rounded-sm bg-background font-mono text-xs text-center"
+                min={1} max={5000}
+              />
+              <span className="text-xs text-muted-foreground">ms</span>
+            </div>
+          </div>
+
+          {/* Interface Down */}
+          <div className="space-y-0">
+            <div className="flex items-center gap-3 p-3 rounded-sm bg-secondary/20 border border-border/50">
               <button
-                onClick={() => setSettings(s => ({ ...s, [item.key]: !s[item.key] }))}
-                className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${settings[item.key] ? "bg-green-500" : "bg-secondary"}`}
+                onClick={() => setSettings(s => ({ ...s, notify_interface_down: !s.notify_interface_down }))}
+                className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${settings.notify_interface_down ? "bg-green-500" : "bg-secondary"}`}
               >
-                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${settings[item.key] ? "left-5" : "left-0.5"}`} />
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${settings.notify_interface_down ? "left-5" : "left-0.5"}`} />
               </button>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium">{item.label}</p>
-                <p className="text-[10px] text-muted-foreground">{item.desc}</p>
+                <p className="text-sm font-medium flex items-center gap-1.5"><Network className="w-3.5 h-3.5 text-orange-500" /> Interface Down</p>
+                <p className="text-[10px] text-muted-foreground">
+                  Alert saat interface yang dipilih turun
+                  {(settings.watched_interfaces?.length ?? 0) > 0 && (
+                    <span className="ml-1 text-orange-400 font-medium">({settings.watched_interfaces.length} dipilih)</span>
+                  )}
+                </p>
               </div>
-              {!item.noThreshold && item.threshKey && (
-                <div className="flex items-center gap-1.5 flex-shrink-0">
-                  <Input
-                    type="number"
-                    value={settings.thresholds[item.threshKey]}
-                    onChange={e => setSettings(s => ({
-                      ...s,
-                      thresholds: { ...s.thresholds, [item.threshKey]: parseInt(e.target.value) || 80 }
-                    }))}
-                    className="w-16 h-7 rounded-sm bg-background font-mono text-xs text-center"
-                    min={1} max={100}
-                  />
-                  <span className="text-xs text-muted-foreground">{item.unit}</span>
-                </div>
-              )}
             </div>
-          ))}
+
+            {/* Interface picker – hanya tampil jika toggle aktif */}
+            {settings.notify_interface_down && (
+              <div className="border border-t-0 border-border/50 rounded-b-sm p-3 bg-secondary/10 space-y-2">
+                <div className="flex items-center gap-2">
+                  <Select value={ifaceDevice} onValueChange={v => { setIfaceDevice(v); setInterfaces([]); }}>
+                    <SelectTrigger className="rounded-sm bg-background h-8 text-xs flex-1">
+                      <SelectValue placeholder="Pilih device..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {devices.map(d => (
+                        <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    onClick={() => fetchInterfaces(ifaceDevice)}
+                    disabled={!ifaceDevice || loadingIfaces}
+                    size="sm" variant="outline"
+                    className="rounded-sm text-xs h-8 gap-1 flex-shrink-0"
+                  >
+                    {loadingIfaces ? "..." : "Ambil Interface"}
+                  </Button>
+                </div>
+
+                {interfaces.length > 0 && (
+                  <div>
+                    <p className="text-[10px] text-muted-foreground mb-1.5">Pilih interface yang ingin dimonitor (bisa lebih dari 1):</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {interfaces.map(iface => {
+                        const isWatched = (settings.watched_interfaces || []).includes(iface);
+                        return (
+                          <button
+                            key={iface}
+                            onClick={() => toggleInterface(iface)}
+                            className={`px-2.5 py-1 rounded-sm text-xs font-mono border transition-colors ${
+                              isWatched
+                                ? "bg-orange-500/20 text-orange-400 border-orange-500/40"
+                                : "bg-secondary text-muted-foreground border-border hover:border-orange-500/30"
+                            }`}
+                          >
+                            {isWatched && "✓ "}{iface}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {(settings.watched_interfaces?.length ?? 0) > 0 && (
+                  <div className="pt-1">
+                    <p className="text-[10px] text-muted-foreground mb-1">Interface yang dimonitor:</p>
+                    <div className="flex flex-wrap gap-1">
+                      {settings.watched_interfaces.map(i => (
+                        <Badge key={i} variant="outline"
+                          className="text-[10px] rounded-sm font-mono text-orange-400 border-orange-500/30 cursor-pointer"
+                          onClick={() => toggleInterface(i)}
+                        >
+                          {i} ✕
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
         </div>
         <p className="text-[10px] text-muted-foreground/70 pt-1 border-t border-border/50">
           ℹ️ Alert tidak akan dikirim ulang selama kondisi masih berlanjut. Sistem baru kirim ulang setelah kondisi kembali normal lalu muncul lagi.

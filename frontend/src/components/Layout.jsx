@@ -15,14 +15,14 @@ const navItems = [
   { to: "/pppoe", icon: Users, label: "PPPoE Users" },
   { to: "/hotspot", icon: Wifi, label: "Hotspot Users" },
   { to: "/reports", icon: FileText, label: "Reports" },
-  { to: "/devices", icon: Server, label: "Devices" },
-  { separator: true, label: "Routing & Security" },
-  { to: "/bgp", icon: GitBranch, label: "BGP Peers" },
-  { to: "/routing", icon: Route, label: "OSPF / Routes" },
-  { to: "/connections", icon: Cable, label: "Active Connections" },
-  { to: "/firewall", icon: ShieldAlert, label: "Firewall Rules" },
-  { separator: true, label: "CPE Management" },
-  { to: "/genieacs", icon: Cpu, label: "GenieACS / TR-069" },
+  { to: "/devices", icon: Server, label: "Devices", adminOnly: true },
+  { separator: true, label: "Routing & Security", adminOnly: true },
+  { to: "/bgp", icon: GitBranch, label: "BGP Peers", adminOnly: true },
+  { to: "/routing", icon: Route, label: "OSPF / Routes", adminOnly: true },
+  { to: "/connections", icon: Cable, label: "Active Connections", adminOnly: true },
+  { to: "/firewall", icon: ShieldAlert, label: "Firewall Rules", adminOnly: true },
+  { separator: true, label: "CPE Management", adminOnly: true },
+  { to: "/genieacs", icon: Cpu, label: "GenieACS / TR-069", adminOnly: true },
   { separator: true, label: "Admin", adminOnly: true },
   { to: "/billing", icon: Receipt, label: "Billing", adminOnly: true },
   { to: "/notifications", icon: Bell, label: "Notifikasi", adminOnly: true },
@@ -43,8 +43,12 @@ export default function Layout() {
     navigate("/login");
   };
 
+  const isAdmin = user?.role === "administrator";
+  const isViewer = user?.role === "viewer";
+
+  // Filter navItems by role: non-admin roles only see Dashboard, PPPoE, Hotspot, Reports
   const filteredNav = navItems.filter(
-    (item) => item.separator ? (!item.adminOnly || user?.role === "administrator") : (!item.adminOnly || user?.role === "administrator")
+    (item) => !item.adminOnly || isAdmin
   );
 
   const SidebarContent = ({ prefix = "" }) => (

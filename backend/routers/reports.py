@@ -72,12 +72,18 @@ async def generate_report(data: ReportRequest, user=Depends(get_current_user)):
         ul = sum(v.get("upload_bps", 0) for v in bw.values())
         dev_bw[did] = {"dl": round(dl / 1e6, 0), "ul": round(ul / 1e6, 0)}
 
+    # Filter devices for summary (if specific device chosen)
+    if data.device_id and data.device_id != "all":
+        report_devs = [d for d in all_devs if d.get("id") == data.device_id]
+    else:
+        report_devs = all_devs
+
     # CPU/memory categorization
     cpu_normal = cpu_warn = cpu_crit = 0
     mem_normal = mem_warn = mem_crit = 0
 
     dev_summary = []
-    for d in all_devs:
+    for d in report_devs:
         dev_id = d.get("id", "")
         cpu = d.get("cpu_load", 0)
         mem = d.get("memory_usage", 0)

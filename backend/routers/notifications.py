@@ -25,8 +25,10 @@ class NotificationSettings(BaseModel):
     recipients: List[Recipient] = []
     notify_offline: bool = True
     notify_cpu: bool = True
-    notify_memory: bool = True
-    thresholds: dict = {"cpu": 80, "memory": 80}
+    notify_ping_high: bool = False
+    notify_interface_down: bool = False
+    watched_interfaces: List[str] = []   # interface names to monitor for down events
+    thresholds: dict = {"cpu": 80, "ping_ms": 100}
 
 
 class TestMessage(BaseModel):

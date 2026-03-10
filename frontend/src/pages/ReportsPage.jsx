@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import api from "@/lib/api";
-import { BarChart3, Download, RefreshCw, Building2, User, Calendar, Shield, Printer } from "lucide-react";
+import { BarChart3, Download, RefreshCw, Building2, User, Calendar, Shield, Printer, Server } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -332,17 +332,27 @@ function StatusBadge({ status }) {
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 export default function ReportsPage() {
   const [period, setPeriod] = useState("daily");
+  const [selectedDevice, setSelectedDevice] = useState("all");
+  const [deviceList, setDeviceList] = useState([]);
   const [clientName, setClientName] = useState("");
   const [engineerName, setEngineerName] = useState("");
   const [companyName, setCompanyName] = useState("PT ARSYA BAROKAH ABADI");
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    api.get("/devices").then(r => setDeviceList(r.data || [])).catch(() => {});
+  }, []);
+
   const generate = async () => {
     setLoading(true);
     try {
       const r = await api.post("/reports/generate", {
-        period, client_name: clientName, engineer_name: engineerName, company_name: companyName,
+        period,
+        device_id: selectedDevice === "all" ? null : selectedDevice,
+        client_name: clientName,
+        engineer_name: engineerName,
+        company_name: companyName,
       });
       setReport(r.data);
       toast.success("Laporan berhasil dibuat");
@@ -368,7 +378,7 @@ export default function ReportsPage() {
         <h3 className="text-sm font-semibold font-['Rajdhani'] mb-3 flex items-center gap-2">
           <BarChart3 className="w-4 h-4 text-primary" /> Konfigurasi Laporan
         </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-3">
           <div className="space-y-1">
             <label className="text-[10px] text-muted-foreground uppercase tracking-wider flex items-center gap-1">
               <Building2 className="w-3 h-3" /> Nama Perusahaan
@@ -402,6 +412,27 @@ export default function ReportsPage() {
                 <SelectItem value="daily">Harian (24 Jam)</SelectItem>
                 <SelectItem value="weekly">Mingguan (7 Hari)</SelectItem>
                 <SelectItem value="monthly">Bulanan (30 Hari)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+              <Server className="w-3 h-3" /> Device
+            </label>
+            <Select value={selectedDevice} onValueChange={setSelectedDevice}>
+              <SelectTrigger className="rounded-sm bg-background h-9 text-xs" data-testid="report-device-select">
+                <SelectValue placeholder="Pilih device..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">🌐 Semua Device</SelectItem>
+                {deviceList.map(d => (
+                  <SelectItem key={d.id} value={d.id}>
+                    <span className="flex items-center gap-2">
+                      <span className={`inline-block w-1.5 h-1.5 rounded-full ${d.status === "online" ? "bg-green-500" : "bg-red-500"}`} />
+                      {d.name}
+                    </span>
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

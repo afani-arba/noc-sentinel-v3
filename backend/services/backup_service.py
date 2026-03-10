@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 BACKUP_DIR = Path(__file__).parent.parent / "backups"
 BACKUP_DIR.mkdir(exist_ok=True)
 
-SSH_PORT = 22
+SSH_PORT = 42
 SSH_TIMEOUT = 20
 
 
