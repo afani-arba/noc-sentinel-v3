@@ -317,11 +317,12 @@ cd "$APP_DIR/backend"
 "$APP_DIR/backend/venv/bin/python3" - <<PYEOF
 import asyncio, sys, os
 
-# Load .env
+# Load .env dengan path eksplisit (find_dotenv() gagal di heredoc stdin)
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv('$APP_DIR/backend/.env')
 
 sys.path.insert(0, '$APP_DIR/backend')
+
 
 async def create_admin():
     from core.db import init_db
