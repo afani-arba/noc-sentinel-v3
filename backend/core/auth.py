@@ -14,11 +14,11 @@ import warnings
 security = HTTPBearer()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-JWT_SECRET = os.environ.get("JWT_SECRET")
+JWT_SECRET = os.environ.get("JWT_SECRET") or os.environ.get("SECRET_KEY")
 if not JWT_SECRET:
     JWT_SECRET = "dev_secret_change_in_production"
     warnings.warn(
-        "JWT_SECRET not set! Using insecure default. Set JWT_SECRET in production.",
+        "JWT_SECRET (or SECRET_KEY) not set! Using insecure default. Set SECRET_KEY in .env",
         UserWarning,
     )
 
