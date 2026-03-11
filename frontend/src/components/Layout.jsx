@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/App";
 import {
   LayoutDashboard, Users, Wifi, FileText, Server, Shield, LogOut, Menu, X, ChevronLeft, Settings, Bell, HardDrive, Terminal,
-  GitBranch, Route, Cable, ShieldAlert, Cpu, Receipt
+  GitBranch, Route, Cable, ShieldAlert, Cpu, Receipt, Monitor, BarChart2, AlertTriangle, ClipboardList
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +23,11 @@ const navItems = [
   { to: "/firewall", icon: ShieldAlert, label: "Firewall Rules", adminOnly: true },
   { separator: true, label: "CPE Management", adminOnly: true },
   { to: "/genieacs", icon: Cpu, label: "GenieACS / TR-069", adminOnly: true },
+  { separator: true, label: "v3 — NOC Features" },
+  { to: "/wallboard", icon: Monitor, label: "Wall Display" },
+  { to: "/sla", icon: BarChart2, label: "SLA Monitor" },
+  { to: "/incidents", icon: AlertTriangle, label: "Incidents" },
+  { to: "/audit", icon: ClipboardList, label: "Audit Log", adminOnly: true },
   { separator: true, label: "Admin", adminOnly: true },
   { to: "/billing", icon: Receipt, label: "Billing", adminOnly: true },
   { to: "/notifications", icon: Bell, label: "Notifikasi", adminOnly: true },

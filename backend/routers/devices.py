@@ -522,3 +522,120 @@ async def traffic_history_range(
             })
         return result
 
+
+
+# -- Top Talkers (v3) ---------------------------------------------------------
+@router.get("/dashboard/top-talkers")
+async def top_talkers(
+    limit: int = 10,
+    range: str = "1h",
+    user=Depends(get_current_user)
+):
+    """Top N devices/interfaces by total bandwidth - last range period."""
+    db = get_db()
+    now_utc = datetime.now(timezone.utc)
+    range_map = {"1h": timedelta(hours=1), "12h": timedelta(hours=12), "24h": timedelta(hours=24)}
+    delta = range_map.get(range, timedelta(hours=1))
+    start = (now_utc - delta).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
+    records = await db.traffic_history.find(
+        {"timestamp": {"$gte": start}},
+        {"_id": 0, "device_id": 1, "bandwidth": 1}
+    ).to_list(5000)
+
+    devices = await db.devices.find({}, {"_id": 0, "id": 1, "name": 1, "ip_address": 1}).to_list(100)
+    dev_map = {d["id"]: d for d in devices}
+
+    tally = {}
+    for rec in records:
+        did = rec.get("device_id", "")
+        for iface, bw in (rec.get("bandwidth") or {}).items():
+            if not isinstance(bw, dict):
+                continue
+            key = (did, iface)
+            if key not in tally:
+                tally[key] = {"dl": 0, "ul": 0, "count": 0}
+            tally[key]["dl"] += bw.get("download_bps", 0)
+            tally[key]["ul"] += bw.get("upload_bps", 0)
+            tally[key]["count"] += 1
+
+    result = []
+    for (did, iface), vals in tally.items():
+        cnt = max(vals["count"], 1)
+        avg_dl = vals["dl"] / cnt
+        avg_ul = vals["ul"] / cnt
+        total_avg_mbps = round((avg_dl + avg_ul) / 1_000_000, 2)
+        dev = dev_map.get(did, {})
+        result.append({
+            "device_id": did,
+            "device_name": dev.get("name", did),
+            "ip_address": dev.get("ip_address", ""),
+            "interface": iface,
+            "label": f"{dev.get('name', did)} / {iface}",
+            "download_mbps": round(avg_dl / 1_000_000, 2),
+            "upload_mbps": round(avg_ul / 1_000_000, 2),
+            "total_mbps": total_avg_mbps,
+        })
+
+    result.sort(key=lambda x: x["total_mbps"], reverse=True)
+    return result[:limit]
+
+
+# -- Heatmap (v3) -------------------------------------------------------------
+@router.get("/dashboard/heatmap")
+async def bandwidth_heatmap(
+    device_id: str = "",
+    metric: str = "bandwidth",
+    days: int = 7,
+    user=Depends(get_current_user)
+):
+    """7x24 heatmap: average metric (bandwidth/cpu/memory) per day x hour."""
+    db = get_db()
+    now_utc = datetime.now(timezone.utc)
+    start = (now_utc - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
+    match_filter = {"timestamp": {"$gte": start}}
+    if device_id:
+        match_filter["device_id"] = device_id
+
+    records = await db.traffic_history.find(
+        match_filter,
+        {"_id": 0, "timestamp": 1, "bandwidth": 1, "cpu": 1, "memory_percent": 1}
+    ).to_list(50000)
+
+    matrix = {}
+    for rec in records:
+        try:
+            utc_dt = datetime.fromisoformat(rec["timestamp"].replace("Z", "+00:00"))
+            local_dt = utc_dt + timedelta(hours=7)
+            day_idx = local_dt.weekday()
+            hour_idx = local_dt.hour
+        except Exception:
+            continue
+
+        if metric == "bandwidth":
+            bw = rec.get("bandwidth") or {}
+            total_bps = sum(
+                (v.get("download_bps", 0) + v.get("upload_bps", 0))
+                for v in bw.values() if isinstance(v, dict)
+            )
+            value = total_bps / 1_000_000
+        elif metric == "cpu":
+            value = rec.get("cpu", 0)
+        elif metric == "memory":
+            value = rec.get("memory_percent", 0)
+        else:
+            value = 0
+
+        key = (day_idx, hour_idx)
+        matrix.setdefault(key, []).append(value)
+
+    day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    result = []
+    for day_idx in range(7):
+        for hour in range(24):
+            vals = matrix.get((day_idx, hour), [])
+            avg = round(sum(vals) / len(vals), 2) if vals else 0
+            result.append({"day": day_names[day_idx], "day_idx": day_idx, "hour": hour, "value": avg, "count": len(vals)})
+
+    return {"metric": metric, "days": days, "data": result, "unit": "Mbps" if metric == "bandwidth" else "%"}

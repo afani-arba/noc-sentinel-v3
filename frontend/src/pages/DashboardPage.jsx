@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  LineChart, Line, Legend
+  LineChart, Line, Legend, BarChart, Bar, Cell
 } from "recharts";
 
 const alertIcons = { warning: AlertTriangle, error: AlertCircle, info: Info, success: CheckCircle2 };
@@ -32,6 +32,9 @@ export default function DashboardPage() {
   // WAN detect
   const [wanDetecting, setWanDetecting] = useState(false);
   const [wanInterface, setWanInterface] = useState("");
+  // v3 — Top Talkers
+  const [topTalkers, setTopTalkers] = useState([]);
+  const [topTalkersRange, setTopTalkersRange] = useState("1h");
 
   useEffect(() => {
     api.get("/devices").then(r => {
@@ -129,6 +132,13 @@ export default function DashboardPage() {
   }, [fetchStats]);
 
   useEffect(() => { fetchTrafficHistory(); }, [fetchTrafficHistory]);
+
+  // v3 — Top Talkers
+  useEffect(() => {
+    api.get("/dashboard/top-talkers", { params: { range: topTalkersRange, limit: 10 } })
+      .then(r => setTopTalkers(r.data || []))
+      .catch(() => setTopTalkers([]));
+  }, [topTalkersRange]);
 
   if (loading && !stats) return <div className="flex items-center justify-center h-64" data-testid="dashboard-loading"><span className="text-muted-foreground text-sm">Loading dashboard...</span></div>;
   if (!stats) return null;
@@ -421,6 +431,55 @@ export default function DashboardPage() {
             })}
           </div>
         </div>
+      </div>
+
+      {/* ── v3: Top Talkers ──────────────────────────────────────────────── */}
+      <div className="bg-card border border-border rounded-sm p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold font-['Rajdhani'] flex items-center gap-2">
+            <ArrowUp className="w-4 h-4 text-orange-400" /> Top Talkers
+            <span className="text-xs text-muted-foreground font-normal">— top bandwidth consumers</span>
+          </h3>
+          <div className="flex gap-1">
+            {["1h", "12h", "24h"].map(r => (
+              <button key={r} onClick={() => setTopTalkersRange(r)}
+                className={`text-[10px] px-2 py-1 rounded-sm border transition-colors ${
+                  topTalkersRange === r ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:border-primary/50"
+                }`}>{r}</button>
+            ))}
+          </div>
+        </div>
+        {topTalkers.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <Activity className="w-8 h-8 mx-auto mb-2 opacity-30" />
+            <p className="text-sm">No bandwidth data yet for this period.</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {topTalkers.map((t, i) => {
+              const maxBw = topTalkers[0]?.total_mbps || 1;
+              const pct = Math.round((t.total_mbps / maxBw) * 100);
+              return (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="w-5 text-[10px] text-muted-foreground text-right">{i + 1}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between mb-0.5">
+                      <span className="text-xs font-mono truncate text-foreground/80">{t.label}</span>
+                      <span className="text-xs font-mono font-bold text-orange-400 flex-shrink-0 ml-2">{t.total_mbps} Mbps</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-secondary rounded-full">
+                      <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: `linear-gradient(90deg, #f97316, #ef4444)` }} />
+                    </div>
+                    <div className="flex gap-3 mt-0.5 text-[9px] text-muted-foreground">
+                      <span className="text-blue-400">↓ {t.download_mbps}M</span>
+                      <span className="text-green-400">↑ {t.upload_mbps}M</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

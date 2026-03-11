@@ -53,6 +53,23 @@ async def poll_single_device(device: dict) -> dict:
             "power": health.get("power", 0),
         })
 
+    # ── SLA Event Recording: detect status transitions ────────────────────────
+    # Compare new status vs stored status to record online/offline events
+    old_status = device.get("status", "unknown")
+    new_status = update["status"]
+    if old_status != new_status and new_status in ("online", "offline"):
+        try:
+            await db.sla_events.insert_one({
+                "device_id": did,
+                "device_name": device.get("name", did),
+                "event_type": new_status,     # "online" or "offline"
+                "from_status": old_status,
+                "timestamp": now,
+            })
+            logger.info(f"SLA event recorded: {device.get('name', did)} → {new_status}")
+        except Exception as sla_err:
+            logger.debug(f"SLA event write failed: {sla_err}")
+
     await db.devices.update_one({"id": did}, {"$set": update})
 
     # Fire WhatsApp notifications if enabled

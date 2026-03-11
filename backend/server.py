@@ -1,6 +1,7 @@
 """
-NOC-Sentinel Backend - Modular Entry Point (v2.5)
-Refactored from monolithic server.py to modular architecture.
+NOC-Sentinel Backend - Modular Entry Point (v3.0)
+v3: Added Wall Display, SLA Monitoring, Incident Management, Audit Log,
+    Top Talkers, Heatmap features.
 
 Structure:
   core/       - db singleton, auth helpers, polling loop
@@ -48,9 +49,13 @@ from routers.firewall import router as firewall_router
 from routers.genieacs import router as genieacs_router
 from routers.customers import router as customers_router
 from routers.billing import router as billing_router
+from routers.wallboard import router as wallboard_router
+from routers.sla import router as sla_router
+from routers.incidents import router as incidents_router
+from routers.audit import router as audit_router
 
 # ── App factory ────────────────────────────────────────────────────────────
-app = FastAPI(title="NOC-Sentinel API", version="2.5.0")
+app = FastAPI(title="NOC-Sentinel API", version="3.0.0")
 
 # CORS
 app.add_middleware(
@@ -79,12 +84,16 @@ api.include_router(firewall_router)
 api.include_router(genieacs_router)
 api.include_router(customers_router)
 api.include_router(billing_router)
+api.include_router(wallboard_router)
+api.include_router(sla_router)
+api.include_router(incidents_router)
+api.include_router(audit_router)
 app.include_router(api)
 
 # ── Lifecycle ──────────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
-    logger.info("NOC-Sentinel v2.5 starting up...")
+    logger.info("NOC-Sentinel v3.0 starting up...")
 
     # Start device polling background task
     from core.polling import polling_loop
@@ -108,4 +117,4 @@ async def shutdown():
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "service": "NOC-Sentinel", "version": "2.5.0"}
+    return {"status": "ok", "service": "NOC-Sentinel", "version": "3.0.0"}

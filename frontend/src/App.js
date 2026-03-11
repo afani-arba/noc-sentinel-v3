@@ -19,6 +19,10 @@ import ConnectionsPage from "@/pages/ConnectionsPage";
 import FirewallPage from "@/pages/FirewallPage";
 import GenieACSPage from "@/pages/GenieACSPage";
 import BillingPage from "@/pages/BillingPage";
+import WallDisplayPage from "@/pages/WallDisplayPage";
+import SLAPage from "@/pages/SLAPage";
+import IncidentsPage from "@/pages/IncidentsPage";
+import AuditLogPage from "@/pages/AuditLogPage";
 import Layout from "@/components/Layout";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -118,6 +122,11 @@ function App() {
             <Route path="firewall" element={<FirewallPage />} />
             <Route path="genieacs" element={<GenieACSPage />} />
             <Route path="billing" element={<ProtectedRoute allowedRoles={["administrator"]}><BillingPage /></ProtectedRoute>} />
+            {/* v3 New Features */}
+            <Route path="wallboard" element={<WallDisplayPage />} />
+            <Route path="sla" element={<SLAPage />} />
+            <Route path="incidents" element={<IncidentsPage />} />
+            <Route path="audit" element={<ProtectedRoute allowedRoles={["administrator"]}><AuditLogPage /></ProtectedRoute>} />
           </Route>
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
