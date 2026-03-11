@@ -18,9 +18,14 @@ def get_db():
 
 def init_db():
     global _client, _db
-    mongo_url = os.environ["MONGO_URL"]
+    # Support both MONGO_URI (new) and MONGO_URL (legacy)
+    mongo_url = os.environ.get("MONGO_URI") or os.environ.get("MONGO_URL")
+    if not mongo_url:
+        raise RuntimeError("MONGO_URI (or MONGO_URL) environment variable is not set. Check your .env file.")
+    # Support both MONGO_DB_NAME (new) and DB_NAME (legacy)
+    db_name = os.environ.get("MONGO_DB_NAME") or os.environ.get("DB_NAME", "nocsentinel")
     _client = AsyncIOMotorClient(mongo_url)
-    _db = _client[os.environ["DB_NAME"]]
+    _db = _client[db_name]
     return _db
 
 
