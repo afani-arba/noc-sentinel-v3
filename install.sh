@@ -180,9 +180,13 @@ fi
 print_step "8/10 Build frontend React"
 # ─────────────────────────────────────────────────────────────────────────────
 cd "$APP_DIR/frontend"
-npm install --silent
-npm run build
+
+# legacy-peer-deps: fix konflik antara date-fns v4 & react-day-picker v8
+# NODE_OPTIONS: batas RAM untuk mencegah OOM pada server dengan RAM < 2GB
+npm install --legacy-peer-deps
+NODE_OPTIONS="--max-old-space-size=512" npm run build
 print_ok "Frontend built → $APP_DIR/frontend/build/"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 print_step "9/10 Konfigurasi Nginx"

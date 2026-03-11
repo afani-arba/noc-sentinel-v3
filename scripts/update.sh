@@ -11,8 +11,8 @@ echo -e "${BOLD}🔄 Updating NOC Sentinel v3...${NC}"
 # Rebuild frontend
 echo -e "${YELLOW}→ Building frontend...${NC}"
 cd "$APP_DIR/frontend"
-npm install --silent
-npm run build
+npm install --legacy-peer-deps
+NODE_OPTIONS="--max-old-space-size=512" npm run build
 echo -e "${GREEN}✓ Frontend built${NC}"
 
 # Update Python packages
