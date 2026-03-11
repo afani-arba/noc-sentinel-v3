@@ -1,7 +1,8 @@
 import axios from 'axios';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API_BASE = `${BACKEND_URL}/api`;
+// Use relative URL so Nginx proxies /api/ to backend automatically.
+// Works regardless of IP/domain — no need for REACT_APP_BACKEND_URL.
+const API_BASE = '/api';
 
 const api = axios.create({ baseURL: API_BASE });
 
