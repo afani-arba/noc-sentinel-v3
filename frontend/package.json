@@ -61,7 +61,7 @@
     "start": "craco start",
     "build": "DISABLE_ESLINT_PLUGIN=true craco build",
     "test": "craco test",
-    "postinstall": "node -e \"const fs=require('fs'),path=require('path');['babel-loader','file-loader','fork-ts-checker-webpack-plugin'].forEach(p=>{const d=path.join('node_modules',p,'node_modules','ajv-keywords');if(fs.existsSync(d)){fs.rmSync(d,{recursive:true,force:true});console.log('Removed nested ajv-keywords in '+p)}})\""
+    "postinstall": "node -e \"const fs=require('fs'),path=require('path');const targets=[['babel-loader','ajv-keywords'],['file-loader','ajv-keywords'],['fork-ts-checker-webpack-plugin','node_modules']];targets.forEach(([p,sub])=>{const d=path.join('node_modules',p,'node_modules',sub);if(fs.existsSync(d)){fs.rmSync(d,{recursive:true,force:true});console.log('Removed '+sub+' from '+p)}})\""
   },
   "browserslist": {
     "production": [
