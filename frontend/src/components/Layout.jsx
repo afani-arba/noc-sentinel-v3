@@ -188,7 +188,7 @@ export default function Layout() {
 
           <div className="flex items-center gap-3">
             {/* Live Clock */}
-            <div className="hidden md:flex flex-col items-end">
+            <div className="flex flex-col items-end">
               <span className="text-sm font-mono font-semibold text-foreground tabular-nums">{timeStr}</span>
               <span className="text-[10px] text-muted-foreground">{dateStr}</span>
             </div>
