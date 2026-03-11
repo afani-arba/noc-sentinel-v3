@@ -315,18 +315,16 @@ source "$APP_DIR/backend/.env" 2>/dev/null || true
 
 cd "$APP_DIR/backend"
 "$APP_DIR/backend/venv/bin/python3" - <<PYEOF
-import asyncio, sys, os
+import asyncio, sys, os, uuid
 
-# Load .env dengan path eksplisit (find_dotenv() gagal di heredoc stdin)
+# Load .env dengan path eksplisit
 from dotenv import load_dotenv
 load_dotenv('$APP_DIR/backend/.env')
 
-sys.path.insert(0, '$APP_DIR/backend')
-
+from passlib.context import CryptContext
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 async def create_admin():
-    from core.db import init_db
-    from core.auth import hash_password
     from motor.motor_asyncio import AsyncIOMotorClient
 
     mongo_url = os.environ.get('MONGO_URI') or os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
@@ -335,15 +333,17 @@ async def create_admin():
     client = AsyncIOMotorClient(mongo_url)
     db = client[db_name]
 
-    existing = await db.users.find_one({"username": "admin"})
+    # Backend auth.py query ke admin_users — pastikan insert ke sini
+    existing = await db.admin_users.find_one({"username": "admin"})
     if existing:
         print("⚠  Admin user sudah ada, skip")
         client.close()
         return
 
-    await db.users.insert_one({
+    await db.admin_users.insert_one({
+        "id": str(uuid.uuid4()),
         "username": "admin",
-        "password": hash_password("${ADMIN_PASS}"),
+        "password": pwd_context.hash("${ADMIN_PASS}"),
         "role": "administrator",
         "full_name": "Administrator",
         "email": "admin@nocsentinel.local",
@@ -354,6 +354,7 @@ async def create_admin():
 
 asyncio.run(create_admin())
 PYEOF
+
 
 # Firewall
 ufw --force enable > /dev/null 2>&1
