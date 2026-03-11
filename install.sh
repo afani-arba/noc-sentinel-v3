@@ -135,10 +135,10 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-print_step "5/10 Install Node.js 20"
+print_step "5/10 Install Node.js 18 LTS"
 # ─────────────────────────────────────────────────────────────────────────────
-if ! command -v node &>/dev/null || [[ $(node --version | cut -d'v' -f2 | cut -d'.' -f1) -lt 18 ]]; then
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - > /dev/null 2>&1
+if ! command -v node &>/dev/null || [[ $(node --version | cut -d'v' -f2 | cut -d'.' -f1) -lt 16 ]]; then
+    curl -fsSL https://deb.nodesource.com/setup_18.x | bash - > /dev/null 2>&1
     apt install -y -qq nodejs
     print_ok "Node.js $(node --version) installed"
 else
