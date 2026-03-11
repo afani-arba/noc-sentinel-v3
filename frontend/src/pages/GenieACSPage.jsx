@@ -18,17 +18,19 @@ import {
 function timeAgo(isoStr) {
   if (!isoStr) return "—";
   const diff = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
-  if (diff < 60) return `${diff}d lalu`;
+  if (diff < 60) return `${diff}dtk lalu`;      // FIX: was 'd lalu' (hari), seharusnya 'dtk' (detik)
   if (diff < 3600) return `${Math.floor(diff / 60)}m lalu`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}j lalu`;
   return `${Math.floor(diff / 86400)}h lalu`;
 }
 
 function RxPowerBadge({ value }) {
-  if (!value || value === "0") return <span className="text-muted-foreground">—</span>;
+  // FIX: cek lebih robust — handle "0", "0.0", angka nol, string kosong, N/A
+  if (!value) return <span className="text-muted-foreground">—</span>;
   const num = parseFloat(value);
+  if (isNaN(num)) return <span className="font-mono text-xs text-muted-foreground">—</span>;
+  if (num === 0) return <span className="text-muted-foreground">—</span>;
   let color = "text-green-400";
-  if (isNaN(num)) return <span className="font-mono text-xs text-muted-foreground">{value}</span>;
   if (num < -27) color = "text-red-400";
   else if (num < -25) color = "text-yellow-400";
   return (
@@ -201,7 +203,14 @@ function DeviceModal({ device, onClose, isAdmin, onRefreshed }) {
               {infoRows.map(r => (
                 <div key={r.label} className="flex items-start justify-between py-1 border-b border-border/30 last:border-0 col-span-1">
                   <span className="text-[11px] text-muted-foreground flex-shrink-0">{r.label}</span>
-                  <span className={`text-[11px] text-right max-w-[180px] truncate ${r.mono ? "font-mono" : ""} ${r.label === "Redaman ONT" ? (parseFloat(device.rx_power) < -27 ? "text-red-400" : parseFloat(device.rx_power) < -25 ? "text-yellow-400" : "text-green-400") : "text-foreground"}`}>
+                  <span className={`text-[11px] text-right max-w-[180px] truncate ${r.mono ? "font-mono" : ""} ${
+                    r.label === "Redaman ONT" && device.rx_power
+                      // FIX: pastikan rx_power ada dan bukan nol sebelum cek threshold
+                      ? (parseFloat(device.rx_power) < -27 ? "text-red-400"
+                          : parseFloat(device.rx_power) < -25 ? "text-yellow-400"
+                          : "text-green-400")
+                      : "text-foreground"
+                  }`}>
                     {r.value}
                   </span>
                 </div>

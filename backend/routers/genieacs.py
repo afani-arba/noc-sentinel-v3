@@ -181,6 +181,24 @@ async def summon_device(device_id: str, user=Depends(require_admin)):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _valid_rx(v: str) -> bool:
+    """
+    Return True jika nilai RX power bermakna (bukan kosong / nol / N/A).
+    Alasan: GenieACS kadang mengirim "0", "0.0", integer 0, "-0.0", atau "N/A"
+    untuk perangkat yang belum punya data PON — harus di-skip agar fallback
+    ke path alternatif.
+    """
+    if not v or not v.strip():
+        return False
+    s = v.strip().lower()
+    if s in ("n/a", "na", "null", "none", "-"):
+        return False
+    try:
+        return float(s) != 0.0
+    except ValueError:
+        return bool(s)
+
+
 def _normalize_devices(devices: list) -> list:
     """Extract key fields from raw GenieACS device objects for list view."""
     from datetime import datetime, timezone, timedelta
@@ -229,18 +247,32 @@ def _normalize_devices(devices: list) -> list:
 
         # Redaman ONT — try VirtualParameters first, then vendor-specific IGD paths
         rx_power = ""
+        device_id = d.get("_id", "")
 
-        # 1. VirtualParameters — nama exact dari GenieACS config:
-        #    VirtualParameters.RXPower  (kapital RX, lihat GenieACS admin config)
-        vp = d.get("VirtualParameters", {})
+        # LOG: catat VP keys dan WANDevice.1 keys untuk diagnosa
+        vp = d.get("VirtualParameters") or {}
+        wan_device_obj = igd.get("WANDevice") or {}
+        wan_dev1 = wan_device_obj.get("1") or {} if isinstance(wan_device_obj, dict) else {}
+        logger.debug(
+            "[rxpower] device=%s vp_keys=%s wan1_keys=%s",
+            device_id,
+            list(vp.keys()),
+            list(wan_dev1.keys()) if isinstance(wan_dev1, dict) else [],
+        )
         for vp_key in [
-            "RXPower",             # ← EXACT match dari GenieACS config listing
+            # ── Nama-nama dengan SPASI (dari screenshot GenieACS UI) ──
+            "Optic Rx Power",      # ← EXACT: terlihat di GenieACS UI F663NV3A EPON
+            "Optic RX Power",
+            "Optic RxPower",
+            "RX Power",
+            "Rx Power",
+            # ── Nama tanpa spasi (camelCase / snake_case) ──
+            "RXPower",
             "RxPower",
-            "OpticRxPower",        # "Optic Rx Power" label ZTE EPON
+            "OpticRxPower",
             "opticRxPower",
             "optic_rx_power",
             "OpticalRxPower",
-            "RxPower",
             "rxPower",
             "rx_power",
             "EponRxPower",
@@ -250,51 +282,50 @@ def _normalize_devices(devices: list) -> list:
             "RxSignal",
             "RxOpticalPower",
             "optical_rx_power",
-            "TransmitPower",       # fallback: kadang ada "Transmit Power" bukan RX
+            "TransmitPower",
         ]:
             v = _val(vp, vp_key)
-            if v and v not in ("0", "0.0", "N/A", "n/a"):
+            if _valid_rx(v):
                 rx_power = v
+                logger.debug("[rxpower] device=%s found via VP key='%s' val=%s", device_id, vp_key, v)
                 break
 
-        # wan_dev: shortcut ke WANDevice.1 (tempat path ZTE PON berada)
-        wan_dev1 = igd.get("WANDevice", {}).get("1", {})
 
         if not rx_power:
             # 2. Path UTAMA ZTE EPON/GPON via WANDevice.1
-            #    Dari GenieACS config: WANDevice.1.X_ZTE-COM_WANPONInterfaceConfig.RXPower
             zte_wan_configs = [
-                "X_ZTE-COM_WANPONInterfaceConfig",   # ← EXACT dari GenieACS config
+                "X_ZTE-COM_WANPONInterfaceConfig",
                 "X_ZTE-COM_WANEPONInterfaceConfig",
                 "X_ZTE-COM_WANGPONInterfaceConfig",
             ]
             for cfg_key in zte_wan_configs:
-                cfg_obj = wan_dev1.get(cfg_key, {})
+                cfg_obj = wan_dev1.get(cfg_key, {}) if isinstance(wan_dev1, dict) else {}
                 if isinstance(cfg_obj, dict):
-                    v = _val(cfg_obj, "RXPower") or _val(cfg_obj, "RxPower") or _val(cfg_obj, "Rx_Power")
-                    if v and v not in ("0", "0.0", "N/A"):
+                    v = (_val(cfg_obj, "RXPower") or _val(cfg_obj, "RxPower")
+                         or _val(cfg_obj, "Rx_Power") or _val(cfg_obj, "RxOpticalPower"))
+                    if _valid_rx(v):
                         rx_power = v
+                        logger.debug("[rxpower] device=%s found via ZTE WANDevice.1.%s val=%s", device_id, cfg_key, v)
                         break
 
         if not rx_power:
             # 3. CT-COM paths via WANDevice.1
-            #    Dari GenieACS config: WANDevice.1.X_CT-COM_GponInterfaceConfig.RXPower
-            #                          WANDevice.1.X_CT-COM_EponInterfaceConfig.RXPower
             ct_wan_configs = [
                 "X_CT-COM_GponInterfaceConfig",
                 "X_CT-COM_EponInterfaceConfig",
                 "X_CT-COM_WANPONInterfaceConfig",
             ]
             for cfg_key in ct_wan_configs:
-                cfg_obj = wan_dev1.get(cfg_key, {})
+                cfg_obj = wan_dev1.get(cfg_key, {}) if isinstance(wan_dev1, dict) else {}
                 if isinstance(cfg_obj, dict):
                     v = _val(cfg_obj, "RXPower") or _val(cfg_obj, "RxPower")
-                    if v and v not in ("0", "0.0", "N/A"):
+                    if _valid_rx(v):   # FIX: was using old inline check
                         rx_power = v
+                        logger.debug("[rxpower] device=%s found via CT-COM WANDevice.1.%s val=%s", device_id, cfg_key, v)
                         break
 
         if not rx_power:
-            # 4. Nested ZTE paths langsung di IGD (older firmware)
+            # 4. Nested ZTE paths langsung di IGD root (older firmware)
             for parent_key, child_key in [
                 ("X_ZTE-COM_ONU_PonPower",     "RxPower"),
                 ("X_ZTE-COM_ONU_PonPower",     "Rx_Power"),
@@ -309,9 +340,15 @@ def _normalize_devices(devices: list) -> list:
                 parent = igd.get(parent_key, {})
                 if isinstance(parent, dict):
                     v = _val(parent, child_key)
-                    if v and v not in ("0", "0.0", "N/A"):
+                    if _valid_rx(v):
                         rx_power = v
+                        logger.debug("[rxpower] device=%s found via IGD.%s.%s val=%s", device_id, parent_key, child_key, v)
                         break
+
+        if not rx_power:
+            logger.debug("[rxpower] device=%s NOT FOUND — vp_keys=%s wan1_keys=%s",
+                         device_id, list(vp.keys()),
+                         list(wan_dev1.keys()) if isinstance(wan_dev1, dict) else [])
 
 
         result.append({
@@ -336,13 +373,25 @@ def _normalize_devices(devices: list) -> list:
 
 
 def _val(obj: dict, key: str) -> str:
-    """Extract ._value from GenieACS parameter dict."""
+    """
+    Extract ._value from GenieACS parameter dict.
+    Handles 3 cases GenieACS mengirim data:
+      1. {"_value": -23.5, "_type": "xsd:int"}  → ambil _value
+      2. Nilai langsung (str/int/float) tanpa wrapper dict
+      3. Key tidak ada atau obj kosong → return ""
+    """
     if not obj or key not in obj:
         return ""
     item = obj[key]
     if isinstance(item, dict):
-        return str(item.get("_value", ""))
-    return str(item)
+        v = item.get("_value")
+        if v is None:
+            return ""
+        return str(v).strip()
+    # Nilai langsung (bukan dict)
+    if isinstance(item, (int, float)):
+        return str(item)
+    return str(item).strip()
 
 
 # ── Debug Endpoint ──────────────────────────────────────────────────────────────
@@ -350,39 +399,64 @@ def _val(obj: dict, key: str) -> str:
 @router.get("/devices/{device_id:path}/debug")
 async def debug_device(device_id: str, user=Depends(require_admin)):
     """
-    Return raw InternetGatewayDevice keys and VirtualParameters for a device.
-    Useful for finding the correct rx_power path for a specific ONT model.
+    Return raw data struktur device untuk diagnosa path RXPower.
+    Cek: VirtualParameters, WANDevice.1 (ZTE/CT-COM PON path), IGD root keys.
     """
-    import asyncio
     try:
         raw = await asyncio.to_thread(svc.get_device, device_id)
         if isinstance(raw, list):
             raw = raw[0] if raw else {}
-        igd = raw.get("InternetGatewayDevice", {})
-        vp  = raw.get("VirtualParameters", {})
 
-        # List all top-level IGD keys (to find vendor-specific keys)
-        igd_keys = list(igd.keys())
-        vendor_keys = [k for k in igd_keys if k.startswith("X_") or "PON" in k.upper() or "GPON" in k.upper() or "EPON" in k.upper() or "ONU" in k.upper()]
+        igd     = raw.get("InternetGatewayDevice", {}) or {}
+        vp      = raw.get("VirtualParameters", {}) or {}
+        wan1    = igd.get("WANDevice", {}).get("1", {}) if isinstance(igd.get("WANDevice"), dict) else {}
 
-        # Sample values from known vendor keys
-        vendor_data = {}
-        for k in vendor_keys:
-            v = igd.get(k, {})
-            if isinstance(v, dict):
-                # Show sub-keys with their values
-                vendor_data[k] = {sk: sv.get("_value") if isinstance(sv, dict) else sv
-                                   for sk, sv in list(v.items())[:20]}
-            else:
-                vendor_data[k] = v
+        # ── VirtualParameters lengkap ──────────────────────────────────────────
+        vp_values = {}
+        for k, v in vp.items():
+            vp_values[k] = v.get("_value") if isinstance(v, dict) else v
+
+        # ── WANDevice.1 top-level keys ─────────────────────────────────────────
+        wan1_keys = list(wan1.keys()) if isinstance(wan1, dict) else []
+
+        # ── Cari semua key PON yang mengandung RXPower / RxPower ──────────────
+        pon_configs = {}
+        pon_keywords = ["PON", "GPON", "EPON", "ONU", "OLT", "Optic", "Fiber"]
+        for k in wan1_keys:
+            if any(kw.upper() in k.upper() for kw in pon_keywords) or k.startswith("X_"):
+                obj = wan1.get(k, {})
+                if isinstance(obj, dict):
+                    pon_configs[f"WANDevice.1.{k}"] = {
+                        sk: sv.get("_value") if isinstance(sv, dict) else sv
+                        for sk, sv in obj.items()
+                    }
+
+        # ── IGD root level vendor keys ─────────────────────────────────────────
+        igd_vendor = {}
+        for k in igd.keys():
+            if k.startswith("X_") or any(kw.upper() in k.upper() for kw in pon_keywords):
+                obj = igd.get(k, {})
+                if isinstance(obj, dict):
+                    igd_vendor[k] = {
+                        sk: sv.get("_value") if isinstance(sv, dict) else sv
+                        for sk, sv in list(obj.items())[:30]
+                    }
+
+        # ── Coba extract rx_power pakai logika normalizer ──────────────────────
+        [norm] = _normalize_devices([raw])
+        rx_found = norm.get("rx_power", "")
 
         return {
             "device_id": device_id,
-            "igd_all_keys": igd_keys,
-            "vendor_zte_keys": vendor_keys,
-            "vendor_data": vendor_data,
-            "virtual_parameters": {k: v.get("_value") if isinstance(v, dict) else v
-                                    for k, v in vp.items()},
+            "rx_power_extracted": rx_found,   # hasil dari normalizer — apakah berhasil?
+            "raw_top_keys": list(raw.keys()),
+            "igd_top_keys": list(igd.keys()),
+            "wan1_top_keys": wan1_keys,
+            "virtual_parameters": vp_values,       # semua VP + nilainya
+            "pon_configs_in_wan1": pon_configs,    # KUNCI: ZTE/CT-COM PON di WANDevice.1
+            "igd_vendor_keys": igd_vendor,         # fallback: vendor key di IGD root
         }
     except Exception as e:
         _err(e, "Debug failed")
+
+

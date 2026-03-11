@@ -131,8 +131,9 @@ async def polling_loop():
             devices = await db.devices.find({}, {"_id": 0}).to_list(100)
             if devices:
                 await asyncio.gather(*[poll_single_device(d) for d in devices], return_exceptions=True)
-            # Cleanup old traffic data (> 7 days)
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+            # Cleanup data lama: simpan 31 hari agar tombol "Bulan" berfungsi
+            # BUG FIX: sebelumnya 7 hari → data "Bulan" tidak pernah ada
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
             await db.traffic_history.delete_many({"timestamp": {"$lt": cutoff}})
         except asyncio.CancelledError:
             break

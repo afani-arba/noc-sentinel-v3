@@ -57,16 +57,32 @@ def get_devices(limit: int = 200, search: str = "", model: str = "") -> list:
     List all CPE devices from GenieACS.
     GenieACS query uses MongoDB-style queries via 'query' param.
     """
-    # Eksplisit projection agar VirtualParameters & WANDevice fields pasti disertakan
+    # Eksplisit projection agar VirtualParameters & WANDevice fields pasti disertakan.
+    # PENTING: path ZTE PON ada di DALAM WANDevice.1, bukan langsung di IGD root.
     projection_fields = [
         "_id", "_lastInform", "_registered",
         "VirtualParameters",
         "InternetGatewayDevice.DeviceInfo",
-        "InternetGatewayDevice.WANDevice",
         "InternetGatewayDevice.LANDevice",
+        # --- WANDevice (PPPoE IP + koneksi + PON interface) ---
+        "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1",
+        "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1",
+        # --- ZTE EPON/GPON via WANDevice.1 (path utama F663NV3A) ---
+        "InternetGatewayDevice.WANDevice.1.X_ZTE-COM_WANPONInterfaceConfig",
+        "InternetGatewayDevice.WANDevice.1.X_ZTE-COM_WANEPONInterfaceConfig",
+        "InternetGatewayDevice.WANDevice.1.X_ZTE-COM_WANGPONInterfaceConfig",
+        # --- CT-COM GPON/EPON via WANDevice.1 ---
+        "InternetGatewayDevice.WANDevice.1.X_CT-COM_GponInterfaceConfig",
+        "InternetGatewayDevice.WANDevice.1.X_CT-COM_EponInterfaceConfig",
+        "InternetGatewayDevice.WANDevice.1.X_CT-COM_WANPONInterfaceConfig",
+        # --- ZTE path langsung di IGD (older firmware) ---
         "InternetGatewayDevice.X_ZTE-COM_ONU_PonPower",
         "InternetGatewayDevice.X_ZTE-COM_GponOnu",
         "InternetGatewayDevice.X_ZTE-COM_OntOptics",
+        "InternetGatewayDevice.X_ZTE-COM_EponOnu",
+        "InternetGatewayDevice.X_ZTE-COM_GPON",
+        "InternetGatewayDevice.X_FIBERHOME-COM_GponStatus",
+        "InternetGatewayDevice.X_CT-COM_GponOntPower",
     ]
     params = {
         "limit": limit,

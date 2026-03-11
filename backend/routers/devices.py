@@ -232,27 +232,27 @@ async def dashboard_stats(device_id: str = "", interface: str = "", user=Depends
     device = await db.devices.find_one({"id": device_id}, {"_id": 0}) if device_id else None
 
     query = {"device_id": device_id} if device_id else {}
-    history = await db.traffic_history.find(query, {"_id": 0}).sort("timestamp", -1).to_list(200)
+    # BUG 3 FIX: limit 200→300 agar cukup untuk 144 titik terbaru
+    history = await db.traffic_history.find(query, {"_id": 0}).sort("timestamp", -1).to_list(300)
     history.reverse()
 
     traffic_data = []
-    for h in history[-60:]:
+    for h in history[-144:]:   # BUG 3 FIX: was -60 (30 menit), now 144×30s = 72 menit
         try:
             utc_time = datetime.fromisoformat(h["timestamp"].replace("Z", "+00:00"))
-            local_time = utc_time.replace(tzinfo=None) + timedelta(hours=7)
+            local_time = (utc_time.replace(tzinfo=None) if utc_time.tzinfo else utc_time) + timedelta(hours=7)
             time_label = local_time.strftime("%H:%M")
         except Exception:
             time_label = ""
-        bw = h.get("bandwidth", {})
+        bw = h.get("bandwidth") or {}
         if interface and interface != "all":
             ib = bw.get(interface, {})
             dl, ul = ib.get("download_bps", 0), ib.get("upload_bps", 0)
         else:
-            dl = sum(v.get("download_bps", 0) for v in bw.values())
-            ul = sum(v.get("upload_bps", 0) for v in bw.values())
-        ping_data = h
+            dl = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
+            ul = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
         traffic_data.append({
-            "time": time_label, "download": round(dl / 1e6, 2), "upload": round(ul / 1e6, 2),
+            "time": time_label, "download": round(dl / 1_000_000, 2), "upload": round(ul / 1_000_000, 2),
             "ping": h.get("ping_ms", 0), "jitter": h.get("jitter_ms", 0)
         })
 
@@ -362,67 +362,163 @@ async def detect_wan_interface(device_id: str, user=Depends(get_current_user)):
 async def traffic_history_range(
     device_id: str = "",
     range: str = "24h",         # 1h, 12h, 24h, week, month
-    date: str = "",             # specific date YYYY-MM-DD for daily view
+    date: str = "",             # specific date YYYY-MM-DD
     interface: str = "",
     user=Depends(get_current_user)
 ):
-    """Return traffic history with flexible time range filter."""
+    """
+    Return traffic history dengan time-bucketed downsampling.
+    Menggunakan MongoDB aggregation agar data week/month bisa diambil
+    secara representatif tanpa harus fetch semua dokumen.
+    """
     db = get_db()
     now_utc = datetime.now(timezone.utc)
 
     if date:
-        # View specific date (00:00 to 23:59 local = UTC-7 adjusted)
-        from datetime import date as date_type
         try:
             d = datetime.strptime(date, "%Y-%m-%d")
-            start = d.replace(tzinfo=timezone.utc)
-            end = start + timedelta(days=1)
+            # Treat as local WIB (UTC+7), convert to UTC for query
+            start = d.replace(tzinfo=timezone.utc) - timedelta(hours=7)
+            end   = start + timedelta(days=1)
         except ValueError:
             raise HTTPException(400, "Invalid date format, use YYYY-MM-DD")
     elif range == "1h":
-        start, end = now_utc - timedelta(hours=1), now_utc
+        start, end = now_utc - timedelta(hours=1),  now_utc
     elif range == "12h":
         start, end = now_utc - timedelta(hours=12), now_utc
     elif range == "week":
-        start, end = now_utc - timedelta(days=7), now_utc
+        start, end = now_utc - timedelta(days=7),   now_utc
     elif range == "month":
-        start, end = now_utc - timedelta(days=30), now_utc
-    else:  # default 24h
+        start, end = now_utc - timedelta(days=30),  now_utc
+    else:  # 24h default
         start, end = now_utc - timedelta(hours=24), now_utc
 
-    query: dict = {"timestamp": {"$gte": start.isoformat(), "$lte": end.isoformat()}}
+    # BUG 1 FIX: gunakan format yang sama dengan cara polling menyimpan (+00:00 isoformat)
+    # polling.py: datetime.now(timezone.utc).isoformat() → "2024-03-11T12:00:00.123456+00:00"
+    # Sebelumnya ".isoformat()" bisa berbeda microsecond precision, sekarang di-floor ke detik
+    start_str = start.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    end_str   = now_utc.strftime("%Y-%m-%dT%H:%M:%S+00:00")  # always use current time as end
+
+    # BUG 2 FIX: interval bucket untuk downsampling
+    # Polling setiap 30 detik → target ~100–200 titik per grafik
+    interval_ms = {
+        "1h":    60_000,        # 1-menit bucket  → ~60  titik
+        "12h":   300_000,       # 5-menit bucket  → ~144 titik
+        "24h":   600_000,       # 10-menit bucket → ~144 titik
+        "week":  3_600_000,     # 1-jam bucket    → ~168 titik
+        "month": 10_800_000,    # 3-jam bucket    → ~240 titik
+    }.get(range, 600_000)
+
+    base_match: dict = {"timestamp": {"$gte": start_str, "$lte": end_str}}
     if device_id:
-        query["device_id"] = device_id
+        base_match["device_id"] = device_id
 
-    # Limit points: for 1h load all (fine), for longer ranges sample
-    limit = 500 if range in ("week", "month") else 200
-    history = await db.traffic_history.find(query, {"_id": 0}).sort("timestamp", 1).to_list(limit)
-
-    result = []
-    for h in history:
-        try:
-            utc_time = datetime.fromisoformat(h["timestamp"].replace("Z", "+00:00"))
-            local_time = utc_time.replace(tzinfo=None) + timedelta(hours=7)
-            if range in ("week", "month"):
-                label = local_time.strftime("%d/%m %H:%M")
-            elif date:
-                label = local_time.strftime("%H:%M")
-            else:
-                label = local_time.strftime("%H:%M")
-        except Exception:
-            label = ""
-
-        bw = h.get("bandwidth", {})
+    try:
+        # MongoDB Aggregation pipeline dengan $dateFromString time-bucketing
+        # Bekerja di MongoDB 3.6+ (aman untuk semua instalasi modern)
         if interface and interface != "all":
-            ib = bw.get(interface, {})
-            dl, ul = ib.get("download_bps", 0), ib.get("upload_bps", 0)
+            # Interface spesifik: akses nested bandwidth.<iface>
+            pipeline = [
+                {"$match": base_match},
+                {"$addFields": {
+                    "ts_ms": {"$toLong": {"$dateFromString": {"dateString": "$timestamp"}}},
+                    "dl_bps": {"$ifNull": [f"$bandwidth.{interface}.download_bps", 0]},
+                    "ul_bps": {"$ifNull": [f"$bandwidth.{interface}.upload_bps", 0]},
+                }},
+                {"$group": {
+                    "_id": {"$subtract": ["$ts_ms", {"$mod": ["$ts_ms", interval_ms]}]},
+                    "download_bps": {"$avg": "$dl_bps"},
+                    "upload_bps":   {"$avg": "$ul_bps"},
+                    "ping_ms":      {"$avg": {"$ifNull": ["$ping_ms",  0]}},
+                    "jitter_ms":    {"$avg": {"$ifNull": ["$jitter_ms",0]}},
+                }},
+                {"$sort": {"_id": 1}},
+            ]
         else:
-            dl = sum(v.get("download_bps", 0) for v in bw.values())
-            ul = sum(v.get("upload_bps", 0) for v in bw.values())
+            # Semua interface: jumlahkan semua bandwidth lalu rata-ratakan per bucket
+            pipeline = [
+                {"$match": base_match},
+                {"$addFields": {
+                    "ts_ms": {"$toLong": {"$dateFromString": {"dateString": "$timestamp"}}},
+                    "total_dl": {"$reduce": {
+                        "input": {"$objectToArray": {"$ifNull": ["$bandwidth", {}]}},
+                        "initialValue": 0,
+                        "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.download_bps", 0]}]},
+                    }},
+                    "total_ul": {"$reduce": {
+                        "input": {"$objectToArray": {"$ifNull": ["$bandwidth", {}]}},
+                        "initialValue": 0,
+                        "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.upload_bps", 0]}]},
+                    }},
+                }},
+                {"$group": {
+                    "_id": {"$subtract": ["$ts_ms", {"$mod": ["$ts_ms", interval_ms]}]},
+                    "download_bps": {"$avg": "$total_dl"},
+                    "upload_bps":   {"$avg": "$total_ul"},
+                    "ping_ms":      {"$avg": {"$ifNull": ["$ping_ms",  0]}},
+                    "jitter_ms":    {"$avg": {"$ifNull": ["$jitter_ms",0]}},
+                }},
+                {"$sort": {"_id": 1}},
+            ]
 
-        result.append({
-            "time": label, "download": round(dl / 1e6, 2), "upload": round(ul / 1e6, 2),
-            "ping": h.get("ping_ms", 0), "jitter": h.get("jitter_ms", 0)
-        })
+        buckets = await db.traffic_history.aggregate(pipeline).to_list(5000)
 
-    return result
+        result = []
+        for b in buckets:
+            ts_ms = b.get("_id")
+            if not isinstance(ts_ms, (int, float)) or ts_ms <= 0:
+                continue
+            utc_dt   = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+            local_dt = utc_dt + timedelta(hours=7)  # WIB
+            label = (
+                local_dt.strftime("%d/%m %H:00") if range in ("week", "month")
+                else local_dt.strftime("%H:%M")
+            )
+            result.append({
+                "time":     label,
+                "download": round((b.get("download_bps") or 0) / 1_000_000, 2),
+                "upload":   round((b.get("upload_bps")   or 0) / 1_000_000, 2),
+                "ping":     round(b.get("ping_ms")   or 0, 1),
+                "jitter":   round(b.get("jitter_ms") or 0, 1),
+            })
+        return result
+
+    except Exception as agg_err:
+        # Fallback untuk MongoDB < 3.6 atau jika $dateFromString tidak tersedia
+        logger.warning(f"traffic-history aggregation failed (fallback): {agg_err}")
+
+        # Simple fetch dengan limit tinggi, lalu Python-level subsampling
+        fetch_limit = {"1h": 200, "12h": 2000, "24h": 4000, "week": 5000, "month": 5000}.get(range, 2000)
+        target_pts  = {"1h": 60,  "12h": 144,  "24h": 144,  "week": 168,  "month": 240 }.get(range, 144)
+
+        raw = await db.traffic_history.find(base_match, {"_id": 0}).sort("timestamp", 1).to_list(fetch_limit)
+        # Subsample
+        step = max(1, len(raw) // target_pts)
+        sampled = raw[::step]
+
+        result = []
+        for h in sampled:
+            try:
+                t = datetime.fromisoformat(h["timestamp"].replace("Z", "+00:00"))
+                local = (t.replace(tzinfo=None) if t.tzinfo else t) + timedelta(hours=7)
+                label = local.strftime("%d/%m %H:00") if range in ("week","month") else local.strftime("%H:%M")
+            except Exception:
+                label = ""
+
+            bw = h.get("bandwidth") or {}
+            if interface and interface != "all":
+                ib = bw.get(interface, {})
+                dl, ul = ib.get("download_bps", 0), ib.get("upload_bps", 0)
+            else:
+                dl = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
+                ul = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
+
+            result.append({
+                "time":     label,
+                "download": round(dl / 1_000_000, 2),
+                "upload":   round(ul / 1_000_000, 2),
+                "ping":     h.get("ping_ms",   0),
+                "jitter":   h.get("jitter_ms", 0),
+            })
+        return result
+

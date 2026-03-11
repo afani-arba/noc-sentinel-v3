@@ -89,7 +89,8 @@ export default function DashboardPage() {
   }, [selectedDevice, selectedInterface]);
 
   const fetchTrafficHistory = useCallback(async () => {
-    if (trafficRange === "24h" && !dateFilter) { setTrafficData(null); return; }
+    // BUG 5 FIX: sebelumnya "24h" di-bypass dan tidak fetch dari traffic-history
+    // Sekarang SEMUA range (1h, 12h, 24h, week, month) fetch dari endpoint yang benar
     setLoadingTraffic(true);
     try {
       const params = { range: trafficRange };
@@ -97,10 +98,13 @@ export default function DashboardPage() {
       if (selectedInterface !== "all") params.interface = selectedInterface;
       if (dateFilter) params.date = dateFilter;
       const r = await api.get("/dashboard/traffic-history", { params });
-      setTrafficData(r.data);
-    } catch { setTrafficData(null); }
+      setTrafficData(r.data.length > 0 ? r.data : null);
+    } catch {
+      setTrafficData(null);
+    }
     setLoadingTraffic(false);
   }, [trafficRange, dateFilter, selectedDevice, selectedInterface]);
+
 
   const detectWan = async () => {
     if (!selectedDevice || selectedDevice === "all") return;
