@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/App";
 import {
-  LayoutDashboard, Users, Wifi, FileText, Server, Shield, LogOut, Menu, X, ChevronLeft, Settings, Bell, HardDrive, Terminal,
+  LayoutDashboard, Users, Wifi, FileText, Server, Shield, LogOut, Menu, ChevronLeft, Settings, Bell, HardDrive, Terminal,
   GitBranch, Route, Cable, ShieldAlert, Cpu, Receipt, Monitor, BarChart2, AlertTriangle, ClipboardList
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -37,37 +37,14 @@ const navItems = [
   { to: "/admin", icon: Shield, label: "Admin", adminOnly: true },
 ];
 
-export default function Layout() {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
-  const [collapsed, setCollapsed] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [now, setNow] = useState(new Date());
-
-  useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const dateStr = now.toLocaleDateString('id-ID', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
-
-  const handleLogout = () => {
-    logout();
-    navigate("/login");
-  };
-
-  const isAdmin = user?.role === "administrator";
-  const isViewer = user?.role === "viewer";
-
-  // Filter navItems by role: non-admin roles only see Dashboard, PPPoE, Hotspot, Reports
-  const filteredNav = navItems.filter(
-    (item) => !item.adminOnly || isAdmin
-  );
-
-  const SidebarContent = ({ prefix = "" }) => (
+// ─── SidebarContent sebagai komponen TERPISAH di luar Layout ──────────────────
+// PENTING: jangan definisikan komponen di dalam komponen lain —
+// setiap render akan dianggap komponen baru → remount → scroll reset
+function SidebarContent({ collapsed, filteredNav, user, onNavClick }) {
+  return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center gap-3 px-4 h-16 border-b border-border/50">
+      {/* Logo */}
+      <div className="flex items-center gap-3 px-4 h-16 border-b border-border/50 flex-shrink-0">
         <div className="w-8 h-8 rounded-sm bg-primary/20 flex items-center justify-center flex-shrink-0">
           <Server className="w-4 h-4 text-primary" />
         </div>
@@ -79,6 +56,7 @@ export default function Layout() {
         )}
       </div>
 
+      {/* Nav — scrollable */}
       <nav className="flex-1 min-h-0 px-2 py-4 space-y-1 overflow-y-auto">
         {filteredNav.map((item, idx) => {
           if (item.separator) {
@@ -96,15 +74,14 @@ export default function Layout() {
               key={item.to}
               to={item.to}
               end={item.end}
-              onClick={() => setMobileOpen(false)}
+              onClick={onNavClick}
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2.5 rounded-sm text-sm transition-all duration-200 group ${
                   isActive
-                    ? "bg-primary/10 text-primary border-l-2 border-primary ml-0"
+                    ? "bg-primary/10 text-primary border-l-2 border-primary"
                     : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
                 }`
               }
-              data-testid={`${prefix}nav-${item.to === "/" ? "dashboard" : item.to.slice(1)}`}
             >
               <item.icon className="w-4 h-4 flex-shrink-0" />
               {!collapsed && <span>{item.label}</span>}
@@ -113,7 +90,8 @@ export default function Layout() {
         })}
       </nav>
 
-      <div className="p-3 border-t border-border/50">
+      {/* User info */}
+      <div className="p-3 border-t border-border/50 flex-shrink-0">
         {!collapsed ? (
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-sm bg-secondary flex items-center justify-center text-xs font-semibold text-foreground">
@@ -132,33 +110,66 @@ export default function Layout() {
       </div>
     </div>
   );
+}
+
+// ─── Layout ───────────────────────────────────────────────────────────────────
+export default function Layout() {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const timeStr = now.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const dateStr = now.toLocaleDateString("id-ID", { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
+
+  const handleLogout = () => {
+    logout();
+    navigate("/login");
+  };
+
+  const isAdmin = user?.role === "administrator";
+  const filteredNav = navItems.filter((item) => !item.adminOnly || isAdmin);
+  const closeMobile = () => setMobileOpen(false);
 
   return (
     <div className="flex h-screen overflow-hidden noise-bg" data-testid="app-layout">
       {/* Mobile overlay */}
       {mobileOpen && (
-        <div
-          className="fixed inset-0 bg-black/60 z-40 lg:hidden"
-          onClick={() => setMobileOpen(false)}
-        />
+        <div className="fixed inset-0 bg-black/60 z-40 lg:hidden" onClick={closeMobile} />
       )}
 
-      {/* Sidebar - Mobile */}
+      {/* Sidebar — Mobile */}
       <aside
         className={`fixed inset-y-0 left-0 z-50 w-60 bg-card border-r border-border transform transition-transform duration-300 lg:hidden ${
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <SidebarContent prefix="mobile-" />
+        <SidebarContent
+          collapsed={false}
+          filteredNav={filteredNav}
+          user={user}
+          onNavClick={closeMobile}
+        />
       </aside>
 
-      {/* Sidebar - Desktop */}
+      {/* Sidebar — Desktop */}
       <aside
         className={`hidden lg:flex flex-col border-r border-border bg-card transition-all duration-300 ${
           collapsed ? "w-16" : "w-60"
         }`}
       >
-        <SidebarContent />
+        <SidebarContent
+          collapsed={collapsed}
+          filteredNav={filteredNav}
+          user={user}
+          onNavClick={() => {}}
+        />
       </aside>
 
       {/* Main */}
