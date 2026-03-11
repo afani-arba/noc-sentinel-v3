@@ -198,6 +198,7 @@ def _normalize_devices(devices: list) -> list:
 
         igd = d.get("InternetGatewayDevice", {})
         dev_info = igd.get("DeviceInfo", {})
+        device_id = d.get("_id", "")
 
         # WAN connection — try PPP first then IP
         wan_conn_dev = (
@@ -219,29 +220,58 @@ def _normalize_devices(devices: list) -> list:
         ssid          = _val(wlan, "SSID")
         active_devices = _val(hosts, "HostNumberOfEntries") or "0"
 
-        # Redaman ONT — try common vendor-specific paths
+        # Product Class — from DeviceInfo, fallback parse from device ID (OUI-ProductClass-Serial)
+        product_class = _val(dev_info, "ProductClass")
+        if not product_class and device_id:
+            parts = device_id.split("-")
+            if len(parts) >= 2:
+                product_class = parts[1]  # e.g. "688AF0-F663NV3A-ZTEGCA8..." → "F663NV3A"
+
+        # Redaman ONT — try VirtualParameters first, then vendor-specific IGD paths
         rx_power = ""
-        # Try VirtualParameters first (custom GenieACS virtualParameters)
         vp = d.get("VirtualParameters", {})
-        for vp_key in ["OpticalRxPower", "RxPower", "RxSignal", "PonRxPower", "GponRxPower"]:
+        for vp_key in ["OpticalRxPower", "RxPower", "RxSignal", "PonRxPower", "GponRxPower",
+                       "rx_power", "rxPower", "optical_rx_power"]:
             rx_power = _val(vp, vp_key)
-            if rx_power:
+            if rx_power and rx_power not in ("0", "0.0"):
                 break
-        # Fallback: vendor OUI paths inside IGD (ZTE, FiberHome, Huawei variants)
-        if not rx_power:
-            for xkey in ["X_ZTE-COM_ONU_PonPower_RxPower", "X_FIBERHOME-COM_GponStatus_RxPower",
-                         "X_HW_ReceivedOpticalPower", "X_GponRxPower"]:
+
+        # Fallback: vendor OUI paths inside IGD
+        if not rx_power or rx_power in ("0", "0.0"):
+            rx_power = ""
+            # ZTE paths
+            for xkey in [
+                "X_ZTE-COM_ONU_PonPower_RxPower",
+                "X_ZTE-COM_GponOnu_RxPower",
+                "X_ZTE-COM_OntOptics_RxPower",
+                "X_ZTE-COM_EponOnu_RxPower",
+            ]:
                 val = igd.get(xkey, {})
                 if isinstance(val, dict):
-                    rx_power = str(val.get("_value", "")) or ""
-                if rx_power:
-                    break
+                    v = str(val.get("_value", ""))
+                    if v and v not in ("0", "0.0"):
+                        rx_power = v
+                        break
+            # FiberHome / Huawei paths
+            if not rx_power:
+                for xkey in [
+                    "X_FIBERHOME-COM_GponStatus_RxPower",
+                    "X_HW_ReceivedOpticalPower",
+                    "X_GponRxPower",
+                    "X_CT-COM_GponOntPower_RxPower",
+                ]:
+                    val = igd.get(xkey, {})
+                    if isinstance(val, dict):
+                        v = str(val.get("_value", ""))
+                        if v and v not in ("0", "0.0"):
+                            rx_power = v
+                            break
 
         result.append({
-            "id": d.get("_id", ""),
+            "id": device_id,
             "manufacturer": _val(dev_info, "Manufacturer"),
             "model": _val(dev_info, "ModelName"),
-            "product_class": _val(dev_info, "ProductClass"),
+            "product_class": product_class,
             "serial": _val(dev_info, "SerialNumber"),
             "firmware": _val(dev_info, "SoftwareVersion"),
             "uptime": _val(dev_info, "UpTime"),

@@ -296,17 +296,12 @@ function DeviceRow({ device, isAdmin, onOpenModal }) {
 
   return (
     <tr className="border-b border-border/30 hover:bg-secondary/20 transition-colors group">
-      {/* Device ID */}
-      <td className="px-3 py-2.5">
-        <div className="flex items-center gap-1.5">
-          <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${device.online ? "bg-green-500 animate-pulse" : "bg-red-500"}`} />
-          <p className="text-[11px] font-mono text-foreground truncate max-w-[160px]" title={device.id}>{device.id}</p>
-        </div>
-      </td>
-
       {/* ID PPPoE */}
       <td className="px-3 py-2.5">
-        <span className="text-[11px] font-mono text-cyan-400">{device.pppoe_username || "—"}</span>
+        <div className="flex items-center gap-1.5">
+          <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 flex-shrink-0 ${device.online ? "bg-green-500 animate-pulse" : "bg-red-500"}`} />
+          <span className="text-[11px] font-mono text-cyan-400">{device.pppoe_username || "—"}</span>
+        </div>
       </td>
 
       {/* Status */}
@@ -619,7 +614,7 @@ export default function GenieACSPage() {
 
   // Column headers
   const headers = [
-    "Device ID", "ID PPPoE", "Status", "Redaman ONT",
+    "ID PPPoE", "Status", "Redaman ONT",
     "Product Class", "SSID", "Active Device", "IP PPPoE", "Aksi"
   ];
 
