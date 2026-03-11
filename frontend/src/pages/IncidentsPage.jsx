@@ -236,8 +236,9 @@ function NewIncidentModal({ onClose, onCreated, devices }) {
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   const handleDeviceChange = (id) => {
-    const dev = devices.find(d => d.id === id);
-    set("device_id", id);
+    const actualId = id === "__none__" ? "" : id;
+    const dev = devices.find(d => d.id === actualId);
+    set("device_id", actualId);
     set("device_name", dev?.name || "");
   };
 
@@ -282,10 +283,10 @@ function NewIncidentModal({ onClose, onCreated, devices }) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-[10px] uppercase text-muted-foreground tracking-wider">Device</label>
-              <Select value={form.device_id} onValueChange={handleDeviceChange}>
+              <Select value={form.device_id || "__none__"} onValueChange={handleDeviceChange}>
                 <SelectTrigger className="mt-1 h-9 text-xs rounded-sm"><SelectValue placeholder="Select device" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">None</SelectItem>
+                  <SelectItem value="__none__">None</SelectItem>
                   {devices.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -358,7 +359,7 @@ export default function IncidentsPage() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filterSeverity, setFilterSeverity] = useState("");
+  const [filterSeverity, setFilterSeverity] = useState("__all__");
   const [filterSearch, setFilterSearch] = useState("");
   const [stats, setStats] = useState(null);
 
@@ -401,7 +402,7 @@ export default function IncidentsPage() {
   // Apply frontend filters
   const filterTickets = (tickets) => {
     return tickets.filter(t => {
-      if (filterSeverity && t.severity !== filterSeverity) return false;
+      if (filterSeverity && filterSeverity !== "__all__" && t.severity !== filterSeverity) return false;
       if (filterSearch) {
         const q = filterSearch.toLowerCase();
         return t.title?.toLowerCase().includes(q) || t.device_name?.toLowerCase().includes(q) || t.id?.toLowerCase().includes(q);
@@ -462,12 +463,12 @@ export default function IncidentsPage() {
         <Select value={filterSeverity} onValueChange={setFilterSeverity}>
           <SelectTrigger className="w-32 h-8 text-xs rounded-sm"><SelectValue placeholder="All Severity" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="">All Severity</SelectItem>
+            <SelectItem value="__all__">All Severity</SelectItem>
             {["critical", "high", "medium", "low"].map(s => <SelectItem key={s} value={s}>{s.toUpperCase()}</SelectItem>)}
           </SelectContent>
         </Select>
-        {(filterSeverity || filterSearch) && (
-          <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => { setFilterSeverity(""); setFilterSearch(""); }}>
+        {(filterSeverity !== "__all__" || filterSearch) && (
+          <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => { setFilterSeverity("__all__"); setFilterSearch(""); }}>
             <X className="w-3 h-3 mr-1" /> Clear
           </Button>
         )}

@@ -35,7 +35,7 @@ export default function AuditLogPage() {
 
   // Filters
   const [filterUsername, setFilterUsername] = useState("");
-  const [filterAction, setFilterAction] = useState("");
+  const [filterAction, setFilterAction] = useState("__all__");
   const [filterResource, setFilterResource] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -52,7 +52,7 @@ export default function AuditLogPage() {
         skip: page * LIMIT,
       };
       if (filterUsername) params.username = filterUsername;
-      if (filterAction) params.action = filterAction;
+      if (filterAction && filterAction !== "__all__") params.action = filterAction;
       if (filterResource) params.resource = filterResource;
       if (dateFrom) params.date_from = dateFrom;
       if (dateTo) params.date_to = dateTo;
@@ -77,7 +77,7 @@ export default function AuditLogPage() {
 
   const handleClear = () => {
     setFilterUsername("");
-    setFilterAction("");
+    setFilterAction("__all__");
     setFilterResource("");
     setDateFrom("");
     setDateTo("");
@@ -85,7 +85,7 @@ export default function AuditLogPage() {
   };
 
   const totalPages = Math.ceil(total / LIMIT);
-  const hasFilters = filterUsername || filterAction || filterResource || dateFrom || dateTo;
+  const hasFilters = filterUsername || (filterAction && filterAction !== "__all__") || filterResource || dateFrom || dateTo;
 
   return (
     <div className="space-y-6 pb-16">
@@ -138,7 +138,7 @@ export default function AuditLogPage() {
         <Select value={filterAction} onValueChange={v => { setFilterAction(v); setPage(0); }}>
           <SelectTrigger className="w-32 h-8 text-xs rounded-sm"><SelectValue placeholder="All Actions" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="">All Actions</SelectItem>
+            <SelectItem value="__all__">All Actions</SelectItem>
             {["CREATE", "UPDATE", "DELETE", "LOGIN", "LOGOUT"].map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
           </SelectContent>
         </Select>
