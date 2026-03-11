@@ -93,6 +93,14 @@ async def create_device(data: DeviceCreate, user=Depends(require_admin)):
     })
     await db.devices.insert_one(doc)
     asyncio.create_task(poll_single_device(doc))
+    # Audit log
+    try:
+        from routers.audit import log_action
+        await log_action(action="CREATE", resource="devices", resource_id=doc["id"],
+                         details=f"Added device: {data.name} ({data.ip_address})",
+                         username=user.get("username", ""), user_id=user.get("id", ""))
+    except Exception:
+        pass
     return {k: v for k, v in doc.items() if k not in ("_id", "snmp_community", "api_password", "last_poll_data")}
 
 
@@ -105,17 +113,37 @@ async def update_device(device_id: str, data: DeviceUpdate, user=Depends(require
     r = await db.devices.update_one({"id": device_id}, {"$set": upd})
     if r.matched_count == 0:
         raise HTTPException(404, "Device not found")
+    # Audit log
+    try:
+        from routers.audit import log_action
+        fields = ", ".join(upd.keys())
+        await log_action(action="UPDATE", resource="devices", resource_id=device_id,
+                         details=f"Updated fields: {fields}",
+                         username=user.get("username", ""), user_id=user.get("id", ""))
+    except Exception:
+        pass
     return await db.devices.find_one({"id": device_id}, SAFE_DEVICE_FIELDS)
 
 
 @router.delete("/devices/{device_id}")
 async def delete_device(device_id: str, user=Depends(require_admin)):
     db = get_db()
+    # Get device name before deleting for audit log
+    dev = await db.devices.find_one({"id": device_id}, {"_id": 0, "name": 1, "ip_address": 1})
     r = await db.devices.delete_one({"id": device_id})
     if r.deleted_count == 0:
         raise HTTPException(404, "Device not found")
     await db.traffic_history.delete_many({"device_id": device_id})
     await db.traffic_snapshots.delete_one({"device_id": device_id})
+    # Audit log
+    try:
+        from routers.audit import log_action
+        name = dev.get("name", device_id) if dev else device_id
+        await log_action(action="DELETE", resource="devices", resource_id=device_id,
+                         details=f"Deleted device: {name}",
+                         username=user.get("username", ""), user_id=user.get("id", ""))
+    except Exception:
+        pass
     return {"message": "Deleted"}
 
 
