@@ -61,7 +61,7 @@
     "start": "craco start",
     "build": "DISABLE_ESLINT_PLUGIN=true craco build",
     "test": "craco test",
-    "postinstall": "node -e \"const fs=require('fs'),p=require('path');const d=p.join('node_modules','fork-ts-checker-webpack-plugin','dist');fs.mkdirSync(d,{recursive:true});fs.writeFileSync(p.join(d,'index.js'),\\\"'use strict';class F{apply(){}static getCompilerHooks(){return{}}}module.exports=F;module.exports.default=F;\\\");['babel-loader','file-loader'].forEach(x=>{const a=p.join('node_modules',x,'node_modules','ajv-keywords');if(fs.existsSync(a))fs.rmSync(a,{recursive:true,force:true})})\""
+    "postinstall": "node -e \"const fs=require('fs'),p=require('path');const ftc=p.join('node_modules','fork-ts-checker-webpack-plugin');const nm=p.join(ftc,'node_modules');if(fs.existsSync(nm))fs.rmSync(nm,{recursive:true,force:true});const d=p.join(ftc,'dist');fs.mkdirSync(d,{recursive:true});fs.writeFileSync(p.join(d,'index.js'),\\\"'use strict';class F{apply(){}static getCompilerHooks(){return{}}}module.exports=F;module.exports.default=F;\\\");['babel-loader','file-loader'].forEach(x=>{const a=p.join('node_modules',x,'node_modules','ajv-keywords');if(fs.existsSync(a))fs.rmSync(a,{recursive:true,force:true})})\""
   },
   "browserslist": {
     "production": [
