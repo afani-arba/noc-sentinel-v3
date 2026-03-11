@@ -57,9 +57,22 @@ def get_devices(limit: int = 200, search: str = "", model: str = "") -> list:
     List all CPE devices from GenieACS.
     GenieACS query uses MongoDB-style queries via 'query' param.
     """
-    params = {"limit": limit}
+    # Eksplisit projection agar VirtualParameters & WANDevice fields pasti disertakan
+    projection_fields = [
+        "_id", "_lastInform", "_registered",
+        "VirtualParameters",
+        "InternetGatewayDevice.DeviceInfo",
+        "InternetGatewayDevice.WANDevice",
+        "InternetGatewayDevice.LANDevice",
+        "InternetGatewayDevice.X_ZTE-COM_ONU_PonPower",
+        "InternetGatewayDevice.X_ZTE-COM_GponOnu",
+        "InternetGatewayDevice.X_ZTE-COM_OntOptics",
+    ]
+    params = {
+        "limit": limit,
+        "projection": ",".join(projection_fields),
+    }
     if search:
-        # Search by deviceId, serial, model, or IP (use $regex on common fields)
         params["query"] = (
             '{"$or":['
             f'{{"_id":{{"$regex":"{search}","$options":"i"}}}},'
@@ -75,6 +88,50 @@ def get_devices(limit: int = 200, search: str = "", model: str = "") -> list:
 def get_device(device_id: str) -> dict:
     """Get full parameter tree of one device."""
     return _get(f"/devices/{requests.utils.quote(device_id, safe='')}")
+
+
+def get_rx_power_raw(device_id: str) -> str:
+    """
+    Fetch RXPower directly with minimal projection — untuk fallback / debug.
+    Tries VirtualParameters.RXPower then WANDevice ZTE path.
+    """
+    fields = [
+        "VirtualParameters.RXPower",
+        "InternetGatewayDevice.WANDevice.1.X_ZTE-COM_WANPONInterfaceConfig.RXPower",
+        "InternetGatewayDevice.WANDevice.1.X_ZTE-COM_WANEPONInterfaceConfig.RXPower",
+        "InternetGatewayDevice.WANDevice.1.X_CT-COM_GponInterfaceConfig.RXPower",
+        "InternetGatewayDevice.WANDevice.1.X_CT-COM_EponInterfaceConfig.RXPower",
+    ]
+    params = {
+        "projection": ",".join(fields),
+        "limit": 1,
+        "query": '{"_id":"' + device_id.replace('"', '\\"') + '"}',
+    }
+    try:
+        results = _get("/devices", params)
+        if not results:
+            return ""
+        d = results[0]
+        vp = d.get("VirtualParameters", {})
+        rxp = vp.get("RXPower", {})
+        if isinstance(rxp, dict) and rxp.get("_value") not in (None, "", "0", "0.0"):
+            return str(rxp["_value"])
+        igd = d.get("InternetGatewayDevice", {})
+        wan1 = igd.get("WANDevice", {}).get("1", {})
+        for cfg_key in [
+            "X_ZTE-COM_WANPONInterfaceConfig",
+            "X_ZTE-COM_WANEPONInterfaceConfig",
+            "X_CT-COM_GponInterfaceConfig",
+            "X_CT-COM_EponInterfaceConfig",
+        ]:
+            cfg = wan1.get(cfg_key, {})
+            if isinstance(cfg, dict):
+                rx = cfg.get("RXPower", {})
+                if isinstance(rx, dict) and rx.get("_value") not in (None, "", "0", "0.0"):
+                    return str(rx["_value"])
+        return ""
+    except Exception:
+        return ""
 
 
 def get_device_summary(device_id: str) -> dict:
