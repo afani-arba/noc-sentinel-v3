@@ -5,12 +5,35 @@ import os
 import asyncio
 import subprocess
 import logging
+import threading
+import time
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from core.auth import require_admin
 
 router = APIRouter(prefix="/system", tags=["system"])
 logger = logging.getLogger(__name__)
+
+# Project root: /opt/noc-sentinel  (parent of backend/)
+APP_DIR = str(Path(__file__).parent.parent.parent)
+BACKEND_DIR = str(Path(__file__).parent.parent)
+FRONTEND_DIR = str(Path(__file__).parent.parent.parent / "frontend")
+
+# Candidate paths
+VENV_PIP  = str(Path(BACKEND_DIR) / "venv" / "bin" / "pip")
+UPDATE_SH = str(Path(APP_DIR) / "update.sh")
+# Baca dari env agar bisa dikonfigurasi tanpa edit kode
+SERVICE_NAME = os.environ.get("NOC_SERVICE_NAME", "noc-backend")
+
+# ── Background Update State ───────────────────────────────────────────────────
+_update_state = {
+    "running": False,
+    "done": False,
+    "success": None,
+    "log": [],
+    "error": "",
+    "started_at": None,
+}
 
 # Project root: /opt/noc-sentinel  (parent of backend/)
 APP_DIR = str(Path(__file__).parent.parent.parent)
@@ -112,127 +135,145 @@ async def check_update(user=Depends(require_admin)):
 
 @router.post("/perform-update")
 async def perform_update(user=Depends(require_admin)):
-    """Pull latest changes from GitHub and rebuild frontend."""
-    log = []
+    """Jalankan update di background thread, langsung return job id untuk polling."""
+    global _update_state
+
+    if _update_state["running"]:
+        return {"started": False, "message": "Update sudah berjalan, cek /system/update-status"}
+
     svc_name = os.environ.get("NOC_SERVICE_NAME", "noc-backend")
 
-    def _check_sudo():
-        """Cek apakah sudo systemctl diizinkan."""
-        test = subprocess.run(
-            ["sudo", "-n", "systemctl", "status", svc_name],
-            capture_output=True, text=True, timeout=5
-        )
-        return test.returncode == 0
+    # Reset state
+    _update_state = {
+        "running": True,
+        "done": False,
+        "success": None,
+        "log": ["🚀 Memulai proses update..."],
+        "error": "",
+        "started_at": time.time(),
+    }
 
-    def _do_update():
-        nonlocal log
+    def _run():
+        log = _update_state["log"]
 
-        # ── Cek sudo permission lebih awal ──────────────────────────
-        sudo_ok = _check_sudo()
-        if not sudo_ok:
-            log.append("⚠️  sudo tidak dikonfigurasi untuk restart service!")
-            log.append(f"   Jalankan di server sebagai root:")
-            log.append(f"   echo 'www-data ALL=(ALL) NOPASSWD: /bin/systemctl restart {svc_name}' | sudo tee /etc/sudoers.d/noc-sentinel")
-            log.append(f"   sudo chmod 0440 /etc/sudoers.d/noc-sentinel")
-            log.append("   Lanjut proses update, tapi restart otomatis akan dilewati...")
+        def _append(msg):
+            log.append(msg)
+            logger.info(msg)
 
-        # ── Try update.sh first (most reliable) ─────────────────────
-        if Path(UPDATE_SH).exists():
-            log.append("Menjalankan update.sh...")
-            result = subprocess.run(
-                ["bash", UPDATE_SH],
-                capture_output=True, text=True, cwd=APP_DIR, timeout=600
-            )
-            output_lines = (result.stdout + result.stderr).splitlines()
-            for line in output_lines:
-                if line.strip():
-                    log.append(line.strip())
-            if result.returncode == 0:
-                log.append("✅ Update selesai via update.sh!")
-                return {"success": True, "log": log}
-            else:
-                log.append(f"❌ update.sh gagal (exit code {result.returncode}), fallback ke metode manual...")
-                log = ["Fallback ke metode manual..."]
+        try:
+            # ── cek sudo ──────────────────────────────────────────────
+            sudo_ok = subprocess.run(
+                ["sudo", "-n", "systemctl", "status", svc_name],
+                capture_output=True, text=True, timeout=5
+            ).returncode == 0
 
-        # ── Fallback: inline steps ───────────────────────────────
-        log.append("[1/4] Git pull...")
-        pull = subprocess.run(
-            ["git", "pull", "origin", "main"], capture_output=True, text=True, cwd=APP_DIR, timeout=60
-        )
-        if pull.returncode != 0:
+            if not sudo_ok:
+                _append("⚠️  sudo belum dikonfigurasi — restart service akan dilewati")
+
+            # ── coba update.sh ────────────────────────────────────────
+            if Path(UPDATE_SH).exists():
+                _append("[1/1] Menjalankan update.sh...")
+                proc = subprocess.Popen(
+                    ["bash", UPDATE_SH],
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, cwd=APP_DIR
+                )
+                for line in proc.stdout:
+                    line = line.rstrip()
+                    if line:
+                        _append(line)
+                proc.wait(timeout=600)
+                if proc.returncode == 0:
+                    _append("✅ Update selesai via update.sh!")
+                    _update_state.update({"running": False, "done": True, "success": True})
+                    return
+                else:
+                    _append(f"❌ update.sh gagal (exit {proc.returncode}), fallback ke metode manual...")
+
+            # ── fallback: manual steps ────────────────────────────────
+            _append("[1/4] Git pull...")
             pull = subprocess.run(
-                ["git", "pull", "origin", "master"], capture_output=True, text=True, cwd=APP_DIR, timeout=60
+                ["git", "pull", "origin", "main"],
+                capture_output=True, text=True, cwd=APP_DIR, timeout=60
             )
-        if pull.returncode != 0:
-            err = pull.stderr.strip() or pull.stdout.strip()
-            log.append(f"❌ Git pull GAGAL: {err}")
-            return {"success": False, "log": log, "error": err}
-        log.append(f"✅ {pull.stdout.strip() or 'Git pull berhasil'}")
+            if pull.returncode != 0:
+                pull = subprocess.run(
+                    ["git", "pull", "origin", "master"],
+                    capture_output=True, text=True, cwd=APP_DIR, timeout=60
+                )
+            if pull.returncode != 0:
+                err = pull.stderr.strip() or pull.stdout.strip()
+                _append(f"❌ Git pull GAGAL: {err}")
+                _update_state.update({"running": False, "done": True, "success": False, "error": err})
+                return
+            _append(f"✅ {pull.stdout.strip() or 'Git pull berhasil'}")
 
-        # Install backend deps
-        log.append("[2/4] Install dependensi backend...")
-        pip_cmd = VENV_PIP if Path(VENV_PIP).exists() else "pip3"
-        pip = subprocess.run(
-            [pip_cmd, "install", "-r", "requirements.txt", "-q"],
-            capture_output=True, text=True, cwd=BACKEND_DIR, timeout=180
-        )
-        if pip.returncode == 0:
-            log.append("✅ Backend deps OK")
-        else:
-            log.append(f"⚠️ pip warning: {pip.stderr[:300]}")
+            _append("[2/4] Install dependensi backend...")
+            pip_cmd = VENV_PIP if Path(VENV_PIP).exists() else "pip3"
+            pip = subprocess.run(
+                [pip_cmd, "install", "-r", "requirements.txt", "-q"],
+                capture_output=True, text=True, cwd=BACKEND_DIR, timeout=180
+            )
+            _append("✅ Backend deps OK" if pip.returncode == 0 else f"⚠️ pip: {pip.stderr[:200]}")
 
-        # Install frontend deps
-        log.append("[3/4] Install + build frontend...")
-        yarn_path = subprocess.run(["which", "yarn"], capture_output=True, text=True).stdout.strip() or "yarn"
-        yarn_install = subprocess.run(
-            [yarn_path, "install", "--silent"],
-            capture_output=True, text=True, cwd=FRONTEND_DIR, timeout=180
-        )
-        if yarn_install.returncode != 0:
-            log.append(f"⚠️ yarn install warning: {yarn_install.stderr[:200]}")
+            _append("[3/4] Install + build frontend...")
+            yarn_path = subprocess.run(["which", "yarn"], capture_output=True, text=True).stdout.strip() or "yarn"
+            subprocess.run([yarn_path, "install", "--silent"], capture_output=True, cwd=FRONTEND_DIR, timeout=180)
 
-        # Build frontend
-        yarn_build = subprocess.run(
-            [yarn_path, "build"],
-            capture_output=True, text=True, cwd=FRONTEND_DIR, timeout=600,
-            env={**dict(os.environ), "CI": "false", "DISABLE_ESLINT_PLUGIN": "true"}
-        )
-        if yarn_build.returncode == 0:
-            log.append("✅ Frontend build berhasil")
-        else:
-            err_short = (yarn_build.stderr or yarn_build.stdout)[:500]
-            log.append(f"❌ Frontend build GAGAL:\n{err_short}")
-            return {"success": False, "log": log, "error": "Frontend build failed"}
+            build_env = {**dict(os.environ), "CI": "false", "DISABLE_ESLINT_PLUGIN": "true"}
+            build_proc = subprocess.Popen(
+                [yarn_path, "build"],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, cwd=FRONTEND_DIR, env=build_env
+            )
+            for line in build_proc.stdout:
+                line = line.rstrip()
+                if line:
+                    _append(line)
+            build_proc.wait(timeout=600)
 
-        # Restart service
-        log.append(f"[4/4] Restart service {svc_name}...")
-        if sudo_ok:
-            try:
+            if build_proc.returncode != 0:
+                _append("❌ Frontend build GAGAL")
+                _update_state.update({"running": False, "done": True, "success": False, "error": "Frontend build failed"})
+                return
+            _append("✅ Frontend build berhasil")
+
+            _append(f"[4/4] Restart service {svc_name}...")
+            if sudo_ok:
                 restart = subprocess.run(
                     ["sudo", "systemctl", "restart", svc_name],
                     capture_output=True, text=True, timeout=30
                 )
                 if restart.returncode == 0:
-                    log.append(f"✅ Service {svc_name} berhasil di-restart!")
+                    _append(f"✅ Service {svc_name} berhasil di-restart!")
                 else:
-                    log.append(f"❌ Restart gagal: {restart.stderr.strip()}")
-                    log.append(f"   Jalankan manual: sudo systemctl restart {svc_name}")
-            except Exception as e:
-                log.append(f"❌ Restart exception: {e}")
-        else:
-            log.append(f"⚠️ Restart dilewati (sudo tidak diizinkan)")
-            log.append(f"   Jalankan manual di server: sudo systemctl restart {svc_name}")
+                    _append(f"⚠️ Restart gagal: {restart.stderr.strip()}")
+                    _append(f"   Jalankan manual: sudo systemctl restart {svc_name}")
+            else:
+                _append(f"⚠️ Jalankan manual: sudo systemctl restart {svc_name}")
 
-        log.append("✅ Update selesai!")
-        return {"success": True, "log": log}
+            _append("\n=== ✅ Update selesai! ===")
+            _update_state.update({"running": False, "done": True, "success": True})
 
-    try:
-        result = await asyncio.to_thread(_do_update)
-        return result
-    except Exception as e:
-        logger.error(f"Update error: {e}")
-        log.append(f"❌ Error: {str(e)}")
-        return {"success": False, "log": log, "error": str(e)}
+        except Exception as e:
+            _append(f"❌ Exception: {e}")
+            _update_state.update({"running": False, "done": True, "success": False, "error": str(e)})
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"started": True, "message": "Update dimulai di background. Poll /system/update-status untuk progress."}
+
+
+@router.get("/update-status")
+async def update_status(user=Depends(require_admin)):
+    """Polling endpoint untuk status update yang berjalan di background."""
+    return {
+        "running": _update_state["running"],
+        "done": _update_state["done"],
+        "success": _update_state["success"],
+        "log": _update_state["log"],
+        "error": _update_state["error"],
+        "elapsed": round(time.time() - _update_state["started_at"], 1) if _update_state["started_at"] else 0,
+    }
 
 
 @router.get("/app-info")

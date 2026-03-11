@@ -324,22 +324,42 @@ export default function SettingsPage() {
 
   const performUpdate = async () => {
     if (!updateInfo?.has_update) { toast.error("Tidak ada update"); return; }
-    setUpdating(true); setUpdateDone(false); setUpdateLog(["Memulai proses update..."]);
+    setUpdating(true); setUpdateDone(false); setUpdateLog(["🚀 Memulai update di background..."]);
+
     try {
-      const r = await api.post("/system/perform-update");
-      setUpdateLog(r.data.log || []);
-      if (r.data.success) {
-        toast.success("Update berhasil! Silakan reload halaman.");
-        setUpdateInfo(null);
-        setUpdateDone(true);
-      } else {
-        toast.error("Update gagal: " + (r.data.error || "?"));
-      }
+      // Mulai background job — langsung return tanpa tunggu selesai
+      await api.post("/system/perform-update");
+
+      // Polling setiap 2 detik
+      const poll = setInterval(async () => {
+        try {
+          const s = await api.get("/system/update-status");
+          setUpdateLog([...s.data.log]);
+
+          if (s.data.done) {
+            clearInterval(poll);
+            setUpdating(false);
+            if (s.data.success) {
+              toast.success("✅ Update berhasil! Silakan reload halaman.");
+              setUpdateInfo(null);
+              setUpdateDone(true);
+            } else {
+              toast.error("Update gagal: " + (s.data.error || "lihat log"));
+            }
+          }
+        } catch {
+          // network hiccup — lanjut poll
+        }
+      }, 2000);
+
+      // Safety: berhenti polling setelah 15 menit
+      setTimeout(() => clearInterval(poll), 15 * 60 * 1000);
+
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Update gagal");
-      setUpdateLog(prev => [...prev, `Error: ${e.response?.data?.detail || e.message}`]);
+      toast.error(e.response?.data?.detail || "Gagal memulai update");
+      setUpdateLog(prev => [...prev, `❌ Error: ${e.response?.data?.detail || e.message}`]);
+      setUpdating(false);
     }
-    setUpdating(false);
   };
 
   return (
