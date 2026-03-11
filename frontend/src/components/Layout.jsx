@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/App";
 import {
@@ -42,6 +42,15 @@ export default function Layout() {
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const dateStr = now.toLocaleDateString('id-ID', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
 
   const handleLogout = () => {
     logout();
@@ -178,6 +187,12 @@ export default function Layout() {
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Live Clock */}
+            <div className="hidden md:flex flex-col items-end">
+              <span className="text-sm font-mono font-semibold text-foreground tabular-nums">{timeStr}</span>
+              <span className="text-[10px] text-muted-foreground">{dateStr}</span>
+            </div>
+
             <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-sm bg-secondary/50 text-xs">
               <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
               <span className="text-muted-foreground font-mono">System Online</span>
