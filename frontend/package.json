@@ -61,7 +61,7 @@
     "start": "craco start",
     "build": "DISABLE_ESLINT_PLUGIN=true craco build",
     "test": "craco test",
-    "postinstall": "node -e \"const fs=require('fs'),path=require('path');const targets=[['babel-loader','ajv-keywords'],['file-loader','ajv-keywords'],['fork-ts-checker-webpack-plugin','node_modules']];targets.forEach(([p,sub])=>{const d=path.join('node_modules',p,'node_modules',sub);if(fs.existsSync(d)){fs.rmSync(d,{recursive:true,force:true});console.log('Removed '+sub+' from '+p)}})\""
+    "postinstall": "node -e \"const fs=require('fs'),p=require('path');const d=p.join('node_modules','fork-ts-checker-webpack-plugin','dist');fs.mkdirSync(d,{recursive:true});fs.writeFileSync(p.join(d,'index.js'),\\\"'use strict';class F{apply(){}static getCompilerHooks(){return{}}}module.exports=F;module.exports.default=F;\\\");['babel-loader','file-loader'].forEach(x=>{const a=p.join('node_modules',x,'node_modules','ajv-keywords');if(fs.existsSync(a))fs.rmSync(a,{recursive:true,force:true})})\""
   },
   "browserslist": {
     "production": [
