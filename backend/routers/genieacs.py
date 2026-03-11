@@ -229,17 +229,37 @@ def _normalize_devices(devices: list) -> list:
 
         # Redaman ONT — try VirtualParameters first, then vendor-specific IGD paths
         rx_power = ""
+
+        # 1. VirtualParameters (custom GenieACS virtualParameters)
         vp = d.get("VirtualParameters", {})
         for vp_key in ["OpticalRxPower", "RxPower", "RxSignal", "PonRxPower", "GponRxPower",
-                       "rx_power", "rxPower", "optical_rx_power"]:
-            rx_power = _val(vp, vp_key)
-            if rx_power and rx_power not in ("0", "0.0"):
+                       "rx_power", "rxPower", "optical_rx_power", "RxOpticalPower"]:
+            v = _val(vp, vp_key)
+            if v and v not in ("0", "0.0", "N/A", "n/a"):
+                rx_power = v
                 break
 
-        # Fallback: vendor OUI paths inside IGD
-        if not rx_power or rx_power in ("0", "0.0"):
-            rx_power = ""
-            # ZTE paths
+        if not rx_power:
+            # 2. Nested ZTE paths: IGD.X_ZTE-COM_ONU_PonPower.RxPower
+            zte_nested = [
+                ("X_ZTE-COM_ONU_PonPower",     "RxPower"),
+                ("X_ZTE-COM_ONU_PonPower",     "Rx_Power"),
+                ("X_ZTE-COM_GponOnu",          "RxPower"),
+                ("X_ZTE-COM_GponOnu",          "RxOpticalPower"),
+                ("X_ZTE-COM_OntOptics",        "RxPower"),
+                ("X_ZTE-COM_EponOnu",          "RxPower"),
+                ("X_ZTE-COM_GPON",             "RxPower"),
+            ]
+            for parent_key, child_key in zte_nested:
+                parent = igd.get(parent_key, {})
+                if isinstance(parent, dict):
+                    v = _val(parent, child_key)
+                    if v and v not in ("0", "0.0", "N/A"):
+                        rx_power = v
+                        break
+
+        if not rx_power:
+            # 3. Flat ZTE keys directly in IGD (older firmware style)
             for xkey in [
                 "X_ZTE-COM_ONU_PonPower_RxPower",
                 "X_ZTE-COM_GponOnu_RxPower",
@@ -252,14 +272,25 @@ def _normalize_devices(devices: list) -> list:
                     if v and v not in ("0", "0.0"):
                         rx_power = v
                         break
-            # FiberHome / Huawei paths
+
+        if not rx_power:
+            # 4. FiberHome / Huawei / CT-COM nested paths
+            other_nested = [
+                ("X_FIBERHOME-COM_GponStatus",  "RxPower"),
+                ("X_FIBERHOME-COM_GponStatus",  "Rx_Power"),
+                ("X_HW_WanDev",                 "ReceivedOpticalPower"),
+                ("X_CT-COM_GponOntPower",        "RxPower"),
+            ]
+            for parent_key, child_key in other_nested:
+                parent = igd.get(parent_key, {})
+                if isinstance(parent, dict):
+                    v = _val(parent, child_key)
+                    if v and v not in ("0", "0.0", "N/A"):
+                        rx_power = v
+                        break
+            # flat fallback
             if not rx_power:
-                for xkey in [
-                    "X_FIBERHOME-COM_GponStatus_RxPower",
-                    "X_HW_ReceivedOpticalPower",
-                    "X_GponRxPower",
-                    "X_CT-COM_GponOntPower_RxPower",
-                ]:
+                for xkey in ["X_HW_ReceivedOpticalPower", "X_GponRxPower"]:
                     val = igd.get(xkey, {})
                     if isinstance(val, dict):
                         v = str(val.get("_value", ""))
@@ -296,3 +327,46 @@ def _val(obj: dict, key: str) -> str:
     if isinstance(item, dict):
         return str(item.get("_value", ""))
     return str(item)
+
+
+# ── Debug Endpoint ──────────────────────────────────────────────────────────────
+
+@router.get("/devices/{device_id:path}/debug")
+async def debug_device(device_id: str, user=Depends(require_admin)):
+    """
+    Return raw InternetGatewayDevice keys and VirtualParameters for a device.
+    Useful for finding the correct rx_power path for a specific ONT model.
+    """
+    import asyncio
+    try:
+        raw = await asyncio.to_thread(svc.get_device, device_id)
+        if isinstance(raw, list):
+            raw = raw[0] if raw else {}
+        igd = raw.get("InternetGatewayDevice", {})
+        vp  = raw.get("VirtualParameters", {})
+
+        # List all top-level IGD keys (to find vendor-specific keys)
+        igd_keys = list(igd.keys())
+        vendor_keys = [k for k in igd_keys if k.startswith("X_") or "PON" in k.upper() or "GPON" in k.upper() or "EPON" in k.upper() or "ONU" in k.upper()]
+
+        # Sample values from known vendor keys
+        vendor_data = {}
+        for k in vendor_keys:
+            v = igd.get(k, {})
+            if isinstance(v, dict):
+                # Show sub-keys with their values
+                vendor_data[k] = {sk: sv.get("_value") if isinstance(sv, dict) else sv
+                                   for sk, sv in list(v.items())[:20]}
+            else:
+                vendor_data[k] = v
+
+        return {
+            "device_id": device_id,
+            "igd_all_keys": igd_keys,
+            "vendor_zte_keys": vendor_keys,
+            "vendor_data": vendor_data,
+            "virtual_parameters": {k: v.get("_value") if isinstance(v, dict) else v
+                                    for k, v in vp.items()},
+        }
+    except Exception as e:
+        _err(e, "Debug failed")
