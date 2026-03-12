@@ -262,23 +262,11 @@ export default function DashboardPage() {
         <>
           {/* Traffic Chart */}
           <div className="bg-card border border-border rounded-sm p-3 sm:p-5" data-testid="traffic-chart">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 sm:mb-4 gap-2">
+            <div className="flex items-center justify-between mb-3 sm:mb-4">
               <h3 className="text-base sm:text-lg font-semibold font-['Rajdhani']">Traffic History</h3>
-              {/* Time range filter */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {[{v:"1h",l:"1J"},{v:"12h",l:"12J"},{v:"24h",l:"24J"},{v:"week",l:"Minggu"},{v:"month",l:"Bulan"}].map(r => (
-                  <button key={r.v} onClick={() => { setTrafficRange(r.v); setDateFilter(""); }}
-                    className={`text-[10px] px-2 py-1 rounded-sm border transition-colors ${
-                      trafficRange === r.v && !dateFilter ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:border-primary/50"
-                    }`}>{r.l}</button>
-                ))}
-                <input
-                  type="date"
-                  value={dateFilter}
-                  onChange={e => { setDateFilter(e.target.value); if (e.target.value) setTrafficRange("24h"); }}
-                  className="text-[10px] h-7 px-2 rounded-sm border border-border bg-card text-muted-foreground focus:outline-none focus:border-primary"
-                />
-                {loadingTraffic && <RefreshCw className="w-3 h-3 animate-spin text-muted-foreground" />}
+              <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                {loadingTraffic && <RefreshCw className="w-3 h-3 animate-spin" />}
+                <span className="font-mono">{td.length} samples</span>
               </div>
             </div>
             <div className="h-48 sm:h-64">

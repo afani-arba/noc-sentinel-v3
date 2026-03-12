@@ -331,8 +331,27 @@ async def dashboard_interfaces(device_id: str = "", user=Depends(get_current_use
     device = await db.devices.find_one({"id": device_id}, {"_id": 0})
     if not device or not device.get("last_poll_data"):
         return ["all"]
-    interfaces = [i["name"] for i in device["last_poll_data"].get("interfaces", []) if i.get("name")]
-    return ["all"] + interfaces
+    # Physical interface prefixes – exclude virtual/tunnel/software
+    PHYSICAL_PREFIXES = ("ether", "sfp", "combo", "wlan", "lte", "fiber", "qsfp", "xsfp")
+    VIRTUAL_PREFIXES  = ("bridge", "vlan", "pppoe", "ppp", "l2tp", "pptp", "sstp", "eoip", "gre", "ovpn", "vrrp", "lo", "wg", "tun", "ipip")
+    all_ifaces = [i["name"] for i in device["last_poll_data"].get("interfaces", []) if i.get("name")]
+    physical = []
+    for name in all_ifaces:
+        n = name.lower()
+        if any(n.startswith(p) for p in PHYSICAL_PREFIXES):
+            physical.append(name)
+        elif not any(n.startswith(v) for v in VIRTUAL_PREFIXES):
+            # Include unknown prefixes only if they don't look virtual
+            # (e.g. custom names like "WAN" or "ISP")
+            physical.append(name)
+    # Deduplicate while preserving order
+    seen = set()
+    unique_physical = []
+    for n in physical:
+        if n not in seen:
+            seen.add(n)
+            unique_physical.append(n)
+    return ["all"] + unique_physical
 
 
 @router.get("/dashboard/wan-interface")
@@ -669,26 +688,112 @@ async def bandwidth_heatmap(
     return {"metric": metric, "days": days, "data": result, "unit": "Mbps" if metric == "bandwidth" else "%"}
 
 
-# ── Traffic History ───────────────────────────────────────────────────────────
+# ── Traffic History (per-device with interface + range + date filter) ─────────
 
 @router.get("/devices/{device_id}/traffic-history")
-async def get_traffic_history(device_id: str, limit: int = 144, user=Depends(get_current_user)):
+async def get_traffic_history(
+    device_id: str,
+    limit: int = 144,
+    interface: str = "",
+    range: str = "12h",   # 1h | 12h | 24h
+    date: str = "",        # YYYY-MM-DD → return 24h of that date
+    user=Depends(get_current_user)
+):
     """
-    Return last N poll snapshots for a device: timestamp, download_mbps, upload_mbps, cpu, memory, ping_ms.
-    Default limit=144 = last 12h at 5min poll interval.
+    Return poll snapshots for a device.
+    Supports interface filter (physical only), time-range (1h/12h/24h),
+    and date-based queries (returns 24h of that specific date).
     """
     db = get_db()
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0, "id": 1, "name": 1})
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0, "id": 1, "name": 1, "last_poll_data": 1})
     if not device:
         raise HTTPException(404, "Device not found")
 
-    snapshots = await db.traffic_history.find(
-        {"device_id": device_id}, {"_id": 0, "device_id": 0}
-    ).sort("timestamp", -1).limit(limit).to_list(limit)
+    # Determine time window
+    now_utc = datetime.now(timezone.utc)
+    if date:
+        try:
+            # Parse date in local time (WIB = UTC+7), return full 24h in that day
+            from datetime import date as dt_date
+            d = dt_date.fromisoformat(date)
+            start_utc = datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=timezone.utc) - timedelta(hours=7)
+            end_utc   = start_utc + timedelta(hours=24)
+            time_match = {"timestamp": {"$gte": start_utc.isoformat(), "$lt": end_utc.isoformat()}}
+        except Exception:
+            time_match = {}
+    else:
+        hours_map = {"1h": 1, "12h": 12, "24h": 24, "week": 168}
+        hours = hours_map.get(range, 12)
+        start_utc = now_utc - timedelta(hours=hours)
+        time_match = {"timestamp": {"$gt": start_utc.isoformat()}}
+        limit = min(limit, hours * 120)  # max 2 samples/min
 
-    # Return in chronological order (oldest first for charts)
-    snapshots.reverse()
-    return {"device_id": device_id, "name": device.get("name", ""), "history": snapshots}
+    query = {"device_id": device_id, **time_match}
+
+    # Available physical interfaces on this device
+    PHYSICAL_PREFIXES = ("ether", "sfp", "combo", "wlan", "lte", "fiber", "qsfp")
+    VIRTUAL_PREFIXES  = ("bridge", "vlan", "pppoe", "ppp", "l2tp", "pptp", "sstp", "eoip", "gre", "ovpn", "vrrp", "lo", "wg", "tun")
+
+    # If interface not specified, return available physical interfaces list too
+    available_ifaces = []
+    if device.get("last_poll_data"):
+        for iface in device["last_poll_data"].get("interfaces", []):
+            n = (iface.get("name") or "").lower()
+            name = iface.get("name", "")
+            if not name:
+                continue
+            if any(n.startswith(p) for p in PHYSICAL_PREFIXES):
+                available_ifaces.append(name)
+            elif not any(n.startswith(v) for v in VIRTUAL_PREFIXES):
+                available_ifaces.append(name)
+
+    snapshots_raw = await db.traffic_history.find(
+        query, {"_id": 0, "device_id": 0}
+    ).sort("timestamp", 1).limit(max(limit, 2000)).to_list(max(limit, 2000))
+
+    result = []
+    for h in snapshots_raw:
+        bw = h.get("bandwidth") or {}
+        sel_iface = interface if interface and interface != "all" else None
+        if sel_iface:
+            ib = bw.get(sel_iface, {})
+            dl_bps = ib.get("download_bps", 0)
+            ul_bps = ib.get("upload_bps", 0)
+        else:
+            dl_bps = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
+            ul_bps = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
+
+        try:
+            ts = datetime.fromisoformat(h["timestamp"].replace("Z", "+00:00"))
+            local = ts + timedelta(hours=7)
+            time_label = local.strftime("%H:%M")
+            date_label = local.strftime("%d/%m %H:%M")
+        except Exception:
+            time_label = ""
+            date_label = ""
+
+        result.append({
+            "timestamp": h.get("timestamp"),
+            "time": time_label,
+            "date_label": date_label,
+            "download_mbps": round(dl_bps / 1_000_000, 3),
+            "upload_mbps":   round(ul_bps / 1_000_000, 3),
+            "download_bps":  dl_bps,
+            "upload_bps":    ul_bps,
+            "cpu":    h.get("cpu", 0),
+            "memory": h.get("memory_percent", 0),
+            "ping":   h.get("ping_ms", 0),
+            "jitter": h.get("jitter_ms", 0),
+        })
+
+    return {
+        "device_id": device_id,
+        "name": device.get("name", ""),
+        "interface": interface or "all",
+        "range": range,
+        "available_interfaces": available_ifaces,
+        "history": result,
+    }
 
 
 # ── System Resource Info ──────────────────────────────────────────────────────
