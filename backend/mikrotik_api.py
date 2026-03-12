@@ -153,6 +153,8 @@ class MikroTikRestAPI(MikroTikBase):
             if resp.status_code == 400:
                 detail = resp.json() if resp.content else {}
                 raise Exception(f"Bad request: {detail.get('detail', detail.get('message', resp.text))}")
+            if resp.status_code == 404:
+                raise Exception(f"Endpoint tidak ditemukan (404): {path} - pastikan RouterOS mendukung endpoint ini")
             resp.raise_for_status()
             return resp.json() if resp.content else {}
         except requests.exceptions.SSLError as e:
@@ -751,18 +753,25 @@ class MikroTikRouterAPI(MikroTikBase):
 
     # ── Interface Traffic (RouterOS 6 API) ──
     async def get_interface_traffic(self, interface_name: str = "ether1", duration: int = 1):
-        """ROS 6: monitor traffic via API command."""
+        """
+        ROS 6: monitor traffic via RouterOS API Protocol.
+        Menggunakan /interface/monitor-traffic dengan once=\"{interface_name}\".
+        Mengembalikan dict dengan rx-bits-per-second dan tx-bits-per-second.
+        """
         try:
             def cb(api):
-                resource = api.get_resource("/interface")
-                cmd = api.get_binary_resource("/")
-                return cmd.call(
-                    "interface/monitor-traffic",
-                    {"interface": interface_name, "once": ""}
-                )
+                # routeros_api: panggil command /interface/monitor-traffic
+                # Gunakan get_resource langsung untuk memanggil command dengan argument
+                resource = api.get_resource("/interface/monitor-traffic")
+                result = resource.call(interface=interface_name, once="")
+                return result
             items = await asyncio.to_thread(self._execute, cb)
-            return items[0] if items else {}
-        except Exception:
+            # Hasil bisa berupa list of dict atau dict
+            if isinstance(items, list):
+                return items[0] if items else {}
+            return items if isinstance(items, dict) else {}
+        except Exception as e:
+            logger.debug(f"get_interface_traffic ROS6 gagal untuk {interface_name}: {e}")
             return {}
 
     # ── IP Address List ──

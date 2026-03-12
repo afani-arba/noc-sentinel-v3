@@ -160,37 +160,68 @@ async def poll_via_api(device: dict) -> dict:
             if running and not disabled and name:
                 running_ifaces.append(name)
 
-        # ── Bandwidth via monitor-traffic (REST API) ──────────────────────────
+        # ── Bandwidth via monitor-traffic ──────────────────────────────────────
         # Ambil bandwidth real-time untuk setiap interface yang running.
-        # Hanya tersedia di api_mode='rest' (ROS 7+).
+        # ROS 7+ (mode=rest): POST /rest/interface/monitor-traffic
+        # ROS 6+ (mode=api):  get_interface_traffic() via API Protocol (port 8728)
         bw_precomputed = {}
-        if api_mode == "rest" and running_ifaces and hasattr(mt, "_async_req"):
-            async def get_iface_bw(iface_name):
-                try:
-                    r = await mt._async_req(
-                        "POST", "interface/monitor-traffic",
-                        {"interface": iface_name, "once": ""}
-                    )
-                    if isinstance(r, list) and r:
-                        r = r[0]
-                    if isinstance(r, dict):
-                        rx_bps = int(r.get("rx-bits-per-second", 0) or 0)
-                        tx_bps = int(r.get("tx-bits-per-second", 0) or 0)
-                        return (iface_name, {
-                            "download_bps": rx_bps,
-                            "upload_bps":   tx_bps,
-                            "status":       "up",
-                        })
-                except Exception:
-                    pass
-                return None
+        if running_ifaces:
+            if api_mode == "rest" and hasattr(mt, "_async_req"):
+                # ── ROS 7.x: REST API monitor-traffic ────────────────────────
+                async def get_iface_bw_rest(iface_name):
+                    try:
+                        r = await mt._async_req(
+                            "POST", "interface/monitor-traffic",
+                            {"interface": iface_name, "once": ""}
+                        )
+                        if isinstance(r, list) and r:
+                            r = r[0]
+                        if isinstance(r, dict):
+                            rx_bps = int(r.get("rx-bits-per-second", 0) or 0)
+                            tx_bps = int(r.get("tx-bits-per-second", 0) or 0)
+                            return (iface_name, {
+                                "download_bps": rx_bps,
+                                "upload_bps":   tx_bps,
+                                "status":       "up",
+                            })
+                    except Exception as e:
+                        logger.debug(f"REST monitor-traffic gagal untuk {iface_name}: {e}")
+                    return None
 
-            # Limit 16 interface agar tidak timeout — cukup untuk monitoring
-            tasks = [get_iface_bw(n) for n in running_ifaces[:16]]
-            bw_results = await asyncio.gather(*tasks, return_exceptions=True)
-            for r in bw_results:
-                if r and not isinstance(r, Exception):
-                    bw_precomputed[r[0]] = r[1]
+                tasks = [get_iface_bw_rest(n) for n in running_ifaces[:16]]
+                bw_results = await asyncio.gather(*tasks, return_exceptions=True)
+                for r in bw_results:
+                    if r and not isinstance(r, Exception):
+                        bw_precomputed[r[0]] = r[1]
+
+            elif api_mode == "api":
+                # ── ROS 6.x: API Protocol get_interface_traffic ───────────────
+                # Ambil satu per satu karena routeros_api tidak mendukung parallel
+                # connections (setiap call membuat koneksi baru, bisa lambat jika terlalu banyak)
+                async def get_iface_bw_api(iface_name):
+                    try:
+                        r = await mt.get_interface_traffic(iface_name)
+                        if isinstance(r, dict) and r:
+                            # ROS 6 API Protocol returns: rx-bits-per-second, tx-bits-per-second
+                            # Kadang key pakai bytes: rx-byte (per poll), perlu konversi
+                            rx_bps = int(r.get("rx-bits-per-second", 0) or 0)
+                            tx_bps = int(r.get("tx-bits-per-second", 0) or 0)
+                            if rx_bps > 0 or tx_bps > 0:
+                                return (iface_name, {
+                                    "download_bps": rx_bps,
+                                    "upload_bps":   tx_bps,
+                                    "status":       "up",
+                                })
+                    except Exception as e:
+                        logger.debug(f"API Protocol monitor-traffic gagal untuk {iface_name}: {e}")
+                    return None
+
+                # Batasi 8 interface untuk menghindari terlalu banyak koneksi serial ke ROS6
+                tasks = [get_iface_bw_api(n) for n in running_ifaces[:8]]
+                bw_results = await asyncio.gather(*tasks, return_exceptions=True)
+                for r in bw_results:
+                    if r and not isinstance(r, Exception):
+                        bw_precomputed[r[0]] = r[1]
 
         mode_label = "rest_api" if api_mode == "rest" else "api_protocol"
         logger.info(
