@@ -89,7 +89,18 @@ def _make_session() -> requests.Session:
 
 # ── Base interface ──
 class MikroTikBase:
+    # ── Connection ──
     async def test_connection(self): raise NotImplementedError
+
+    # ── Polling/Monitoring — default aman (return kosong) ──
+    # Subclass yang tidak implement tidak akan menyebabkan AttributeError
+    async def get_system_resource(self): return {}
+    async def get_system_health(self):   return {}  # ROS6: tidak expose health via API Protocol
+    async def list_interfaces(self):     return []
+    async def get_isp_interfaces(self):  return []
+    async def get_interface_traffic(self, interface_name="ether1", duration=1): return {}
+
+    # ── PPPoE ──
     async def list_pppoe_secrets(self): raise NotImplementedError
     async def create_pppoe_secret(self, data): raise NotImplementedError
     async def update_pppoe_secret(self, mt_id, data): raise NotImplementedError
@@ -97,6 +108,8 @@ class MikroTikBase:
     async def list_pppoe_active(self): raise NotImplementedError
     async def disable_pppoe_user(self, username): raise NotImplementedError
     async def enable_pppoe_user(self, username): raise NotImplementedError
+
+    # ── Hotspot ──
     async def list_hotspot_users(self): raise NotImplementedError
     async def create_hotspot_user(self, data): raise NotImplementedError
     async def update_hotspot_user(self, mt_id, data): raise NotImplementedError
