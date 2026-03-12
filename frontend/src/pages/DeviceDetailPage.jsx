@@ -114,32 +114,37 @@ export default function DeviceDetailPage() {
   /* ── Fetch data ─────────────────────────────────────────────────── */
   const fetchData = useCallback(async () => {
     try {
-      const params = { interface: selectedIface, range };
+      const params = { device_id: id, interface: selectedIface, range };
       if (dateFilter) params.date = dateFilter;
 
-      const [devRes, histRes] = await Promise.all([
+      const [devRes, histRes, ifaceRes] = await Promise.all([
         api.get(`/devices`),
-        api.get(`/devices/${id}/traffic-history`, { params }),
+        api.get(`/dashboard/traffic-history`, { params }),
+        api.get(`/dashboard/interfaces`, { params: { device_id: id } }),
       ]);
       const dev = (devRes.data || []).find(d => d.id === id);
       setDevice(dev || null);
 
-      const data = histRes.data || {};
-      if (data.available_interfaces?.length > 0) {
-        setAvailableIfaces(["all", ...data.available_interfaces]);
+      // Interface list dari /dashboard/interfaces
+      const ifData = ifaceRes.data || {};
+      const ifaces = ifData.interfaces || [];
+      if (ifaces.length > 0) {
+        setAvailableIfaces(ifaces);
       }
-      const hist = data.history || [];
 
-      // Normalise: ensure both download_mbps & upload_mbps always exist
+      // Traffic history dari /dashboard/traffic-history
+      const hist = Array.isArray(histRes.data) ? histRes.data : [];
+
+      // Normalise field names
       setHistory(hist.map(h => ({
         ...h,
         time: dateFilter ? (h.date_label || h.time) : h.time,
         download_mbps: h.download_mbps ?? h.download ?? 0,
-        upload_mbps: h.upload_mbps ?? h.upload ?? 0,
-        cpu: h.cpu ?? h.cpu_load ?? 0,
+        upload_mbps:   h.upload_mbps  ?? h.upload  ?? 0,
+        cpu:    h.cpu    ?? h.cpu_load      ?? 0,
         memory: h.memory ?? h.memory_percent ?? 0,
-        ping: h.ping ?? h.ping_ms ?? 0,
-        jitter: h.jitter ?? h.jitter_ms ?? 0,
+        ping:   h.ping   ?? h.ping_ms        ?? 0,
+        jitter: h.jitter ?? h.jitter_ms      ?? 0,
       })));
     } catch (e) {
       console.error("Device detail fetch error:", e);
