@@ -51,7 +51,16 @@ export default function DashboardPage() {
   useEffect(() => {
     if (selectedDevice === "all") { setInterfaces(["all"]); setSelectedInterface("all"); setSysResource(null); return; }
     api.get("/dashboard/interfaces", { params: { device_id: selectedDevice } })
-      .then(r => { setInterfaces(r.data); setSelectedInterface("all"); }).catch(() => { });
+      .then(r => {
+        // New format: {interfaces: [...], isp_interfaces: [...]}
+        // Old format (fallback): plain array
+        const raw = r.data;
+        const ifaceList = Array.isArray(raw) ? raw : (raw?.interfaces || ["all"]);
+        const ispList   = Array.isArray(raw) ? [] : (raw?.isp_interfaces || []);
+        setInterfaces(ifaceList);
+        // Auto-select first ISP interface as default if detected; else keep "all"
+        setSelectedInterface(ispList.length > 0 ? ispList[0] : "all");
+      }).catch(() => { setInterfaces(["all"]); setSelectedInterface("all"); });
     // Fetch system resource info (board name, architecture, ROS version, etc.)
     api.get(`/devices/${selectedDevice}/system-resource`)
       .then(r => { if (!r.data.error) setSysResource(r.data); else setSysResource(null); })
