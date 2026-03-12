@@ -2,17 +2,16 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import api from "@/lib/api";
 import {
-  ArrowLeft, Server, Wifi, WifiOff, RefreshCw, Cpu, HardDrive,
-  Activity, TrendingDown, TrendingUp, Thermometer, Clock,
-  Network, Radio, Zap, BarChart2, Heart
+  ArrowLeft, Server, Wifi, WifiOff, RefreshCw, Cpu,
+  Activity, Clock, Network, BarChart2, Heart
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, Legend, ComposedChart, Bar
+  Tooltip, ResponsiveContainer, Legend, ComposedChart, Brush
 } from "recharts";
 
+/* ── Tooltip shared style ─────────────────────────────────────────── */
 const ttStyle = {
   contentStyle: {
     backgroundColor: "#0c1526", borderColor: "#1e3a5f", borderRadius: "6px",
@@ -21,6 +20,13 @@ const ttStyle = {
   },
   labelStyle: { color: "#94a3b8", marginBottom: "4px" },
   itemStyle: { padding: "1px 0" },
+};
+
+/* ── Brush shared style ───────────────────────────────────────────── */
+const brushStyle = {
+  stroke: "#334155",
+  fill: "#0f172a",
+  travellerWidth: 6,
 };
 
 const RANGE_OPTIONS = [
@@ -50,27 +56,31 @@ function formatBwTooltip(v) {
   return `${(n * 1000).toFixed(0)} Kbps`;
 }
 
-function ChartCard({ title, icon: Icon, iconColor, children, height = 220 }) {
+/* ── Chart card wrapper ───────────────────────────────────────────── */
+function ChartCard({ title, icon: Icon, iconColor, children, height = 260 }) {
   return (
     <div className="bg-card border border-border rounded-sm overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border/60 bg-black/20">
         <Icon className={`w-3.5 h-3.5 ${iconColor}`} />
         <span className="text-xs font-semibold uppercase tracking-wider font-['Rajdhani']">{title}</span>
+        <span className="ml-auto text-[10px] text-muted-foreground opacity-60">scroll / drag to zoom</span>
       </div>
       <div style={{ height }} className="p-2 sm:p-3">{children}</div>
     </div>
   );
 }
 
+/* ── Compact metric chip ──────────────────────────────────────────── */
 function MetricChip({ label, value, color }) {
   return (
-    <div className={`px-2.5 py-1.5 rounded-sm bg-card border border-border flex flex-col gap-0.5 min-w-[70px]`}>
+    <div className="px-2.5 py-1.5 rounded-sm bg-card border border-border flex flex-col gap-0.5 min-w-[70px]">
       <span className="text-[9px] text-muted-foreground uppercase tracking-wider">{label}</span>
       <span className={`text-sm font-bold font-mono ${color}`}>{value}</span>
     </div>
   );
 }
 
+/* ── Empty state ──────────────────────────────────────────────────── */
 function NoData() {
   return (
     <div className="h-full flex flex-col items-center justify-center gap-2 text-muted-foreground">
@@ -81,6 +91,14 @@ function NoData() {
   );
 }
 
+/* ── Custom Brush tick (lightweight label) ───────────────────────── */
+const BrushTick = ({ x, y, payload }) => (
+  <text x={x} y={y} dy={10} fill="#475569" fontSize={8} textAnchor="middle">
+    {payload?.value}
+  </text>
+);
+
+/* ═══════════════════════════════════════════════════════════════════ */
 export default function DeviceDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -88,11 +106,12 @@ export default function DeviceDetailPage() {
   const [history, setHistory] = useState([]);
   const [availableIfaces, setAvailableIfaces] = useState([]);
   const [selectedIface, setSelectedIface] = useState("all");
-  const [range, setRange] = useState("12h");
+  const [range, setRange] = useState("24h");
   const [dateFilter, setDateFilter] = useState(""); // YYYY-MM-DD
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  /* ── Fetch data ─────────────────────────────────────────────────── */
   const fetchData = useCallback(async () => {
     try {
       const params = { interface: selectedIface, range };
@@ -110,9 +129,17 @@ export default function DeviceDetailPage() {
         setAvailableIfaces(["all", ...data.available_interfaces]);
       }
       const hist = data.history || [];
+
+      // Normalise: ensure both download_mbps & upload_mbps always exist
       setHistory(hist.map(h => ({
         ...h,
-        time: dateFilter ? h.date_label : h.time,
+        time: dateFilter ? (h.date_label || h.time) : h.time,
+        download_mbps: h.download_mbps ?? h.download ?? 0,
+        upload_mbps: h.upload_mbps ?? h.upload ?? 0,
+        cpu: h.cpu ?? h.cpu_load ?? 0,
+        memory: h.memory ?? h.memory_percent ?? 0,
+        ping: h.ping ?? h.ping_ms ?? 0,
+        jitter: h.jitter ?? h.jitter_ms ?? 0,
       })));
     } catch (e) {
       console.error("Device detail fetch error:", e);
@@ -125,12 +152,12 @@ export default function DeviceDetailPage() {
 
   const handleRefresh = () => { setRefreshing(true); fetchData(); };
 
-  /* ── Computed ── */
+  /* ── Computed ─────────────────────────────────────────────────── */
   const latestH = history.length > 0 ? history[history.length - 1] : null;
   const isOnline = device?.status === "online";
 
-  // X-axis tick sampling: show max 12 labels
-  const xTickInterval = Math.max(1, Math.floor(history.length / 12)) - 1;
+  // Brush default start index: show last 60 points (30 min equiv) on initial load
+  const brushStartIdx = Math.max(0, history.length - 60);
 
   if (loading) {
     return (
@@ -254,75 +281,89 @@ export default function DeviceDetailPage() {
           />
           {dateFilter && (
             <button
-              onClick={() => { setDateFilter(""); setRange("12h"); }}
+              onClick={() => { setDateFilter(""); setRange("24h"); }}
               className="text-[10px] text-muted-foreground hover:text-red-400 transition-colors"
             >✕</button>
           )}
         </div>
 
         <div className="ml-auto text-[10px] text-muted-foreground font-mono">
-          {history.length} sampel
+          {history.length} sampel · drag grafik untuk zoom
         </div>
       </div>
 
       {/* ── Bandwidth Chart ── */}
-      <ChartCard title="Bandwidth History" icon={Activity} iconColor="text-blue-400" height={240}>
+      <ChartCard title="Bandwidth History" icon={Activity} iconColor="text-blue-400" height={280}>
         {history.length === 0 ? <NoData /> : (
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={history} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
+            <AreaChart data={history} margin={{ top: 8, right: 8, left: -10, bottom: 28 }}>
               <defs>
                 <linearGradient id="gDl2" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.25} />
+                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
                   <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                 </linearGradient>
                 <linearGradient id="gUl2" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.25} />
+                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
                   <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="2 4" stroke="rgba(255,255,255,0.04)" />
-              <XAxis dataKey="time" tick={{ fontSize: 9, fill: "#475569" }} interval={xTickInterval} />
-              <YAxis tick={{ fontSize: 9, fill: "#475569" }} tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}G` : v >= 1 ? `${v.toFixed(0)}M` : `${(v*1000).toFixed(0)}K`} width={40} />
+              <XAxis dataKey="time" tick={{ fontSize: 9, fill: "#475569" }} interval="preserveStartEnd" minTickGap={40} />
+              <YAxis tick={{ fontSize: 9, fill: "#475569" }} tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}G` : v >= 1 ? `${v.toFixed(0)}M` : `${(v*1000).toFixed(0)}K`} width={42} />
               <Tooltip {...ttStyle} formatter={(v, n) => [formatBwTooltip(v), n === "download_mbps" ? "⬇ Download" : "⬆ Upload"]} />
-              <Legend wrapperStyle={{ fontSize: "10px", paddingTop: "4px" }} formatter={v => v === "download_mbps" ? "Download" : "Upload"} />
+              <Legend wrapperStyle={{ fontSize: "10px", paddingTop: "2px" }} formatter={v => v === "download_mbps" ? "Download" : "Upload"} />
               <Area type="monotone" dataKey="download_mbps" stroke="#3b82f6" strokeWidth={1.5} fill="url(#gDl2)" dot={false} activeDot={{ r: 3 }} />
               <Area type="monotone" dataKey="upload_mbps" stroke="#10b981" strokeWidth={1.5} fill="url(#gUl2)" dot={false} activeDot={{ r: 3 }} />
+              <Brush
+                dataKey="time"
+                height={18}
+                startIndex={brushStartIdx}
+                {...brushStyle}
+                tick={<BrushTick />}
+              />
             </AreaChart>
           </ResponsiveContainer>
         )}
       </ChartCard>
 
       {/* ── CPU & Memory Chart ── */}
-      <ChartCard title="CPU & Memory" icon={Cpu} iconColor="text-yellow-400" height={200}>
+      <ChartCard title="CPU & Memory" icon={Cpu} iconColor="text-yellow-400" height={240}>
         {history.length === 0 ? <NoData /> : (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={history} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
+            <LineChart data={history} margin={{ top: 8, right: 8, left: -10, bottom: 28 }}>
               <CartesianGrid strokeDasharray="2 4" stroke="rgba(255,255,255,0.04)" />
-              <XAxis dataKey="time" tick={{ fontSize: 9, fill: "#475569" }} interval={xTickInterval} />
-              <YAxis tick={{ fontSize: 9, fill: "#475569" }} tickFormatter={v => `${v}%`} domain={[0, 100]} width={32} />
+              <XAxis dataKey="time" tick={{ fontSize: 9, fill: "#475569" }} interval="preserveStartEnd" minTickGap={40} />
+              <YAxis tick={{ fontSize: 9, fill: "#475569" }} tickFormatter={v => `${v}%`} domain={[0, 100]} width={34} />
               <Tooltip {...ttStyle} formatter={(v, n) => [`${v?.toFixed?.(1) ?? v}%`, n === "cpu" ? "🔧 CPU" : "💾 Memory"]} />
-              <Legend wrapperStyle={{ fontSize: "10px", paddingTop: "4px" }} formatter={v => v === "cpu" ? "CPU" : "Memory"} />
+              <Legend wrapperStyle={{ fontSize: "10px", paddingTop: "2px" }} formatter={v => v === "cpu" ? "CPU" : "Memory"} />
               <Line type="monotone" dataKey="cpu" stroke="#f59e0b" strokeWidth={1.5} dot={false} activeDot={{ r: 3 }} />
               <Line type="monotone" dataKey="memory" stroke="#a855f7" strokeWidth={1.5} dot={false} activeDot={{ r: 3 }} />
+              <Brush
+                dataKey="time"
+                height={18}
+                startIndex={brushStartIdx}
+                {...brushStyle}
+                tick={<BrushTick />}
+              />
             </LineChart>
           </ResponsiveContainer>
         )}
       </ChartCard>
 
       {/* ── Ping & Jitter Chart ── */}
-      <ChartCard title="Ping & Jitter" icon={Heart} iconColor="text-rose-400" height={200}>
+      <ChartCard title="Ping & Jitter" icon={Heart} iconColor="text-rose-400" height={240}>
         {history.length === 0 ? <NoData /> : (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={history} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
+            <ComposedChart data={history} margin={{ top: 8, right: 8, left: -10, bottom: 28 }}>
               <defs>
                 <linearGradient id="gJitter" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.2} />
+                  <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.25} />
                   <stop offset="95%" stopColor="#f43f5e" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="2 4" stroke="rgba(255,255,255,0.04)" />
-              <XAxis dataKey="time" tick={{ fontSize: 9, fill: "#475569" }} interval={xTickInterval} />
-              <YAxis tick={{ fontSize: 9, fill: "#475569" }} tickFormatter={v => `${v}ms`} width={38} />
+              <XAxis dataKey="time" tick={{ fontSize: 9, fill: "#475569" }} interval="preserveStartEnd" minTickGap={40} />
+              <YAxis tick={{ fontSize: 9, fill: "#475569" }} tickFormatter={v => `${v}ms`} width={40} />
               <Tooltip
                 {...ttStyle}
                 formatter={(v, n) => [
@@ -330,10 +371,16 @@ export default function DeviceDetailPage() {
                   n === "ping" ? "📡 Ping" : "〰 Jitter"
                 ]}
               />
-              <Legend wrapperStyle={{ fontSize: "10px", paddingTop: "4px" }} formatter={v => v === "ping" ? "Ping (ms)" : "Jitter (ms)"} />
-              {/* Jitter as filled area under ping line */}
+              <Legend wrapperStyle={{ fontSize: "10px", paddingTop: "2px" }} formatter={v => v === "ping" ? "Ping (ms)" : "Jitter (ms)"} />
               <Area type="monotone" dataKey="jitter" stroke="#f43f5e" strokeWidth={1} fill="url(#gJitter)" dot={false} activeDot={{ r: 3 }} />
               <Line type="monotone" dataKey="ping" stroke="#06b6d4" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#06b6d4" }} />
+              <Brush
+                dataKey="time"
+                height={18}
+                startIndex={brushStartIdx}
+                {...brushStyle}
+                tick={<BrushTick />}
+              />
             </ComposedChart>
           </ResponsiveContainer>
         )}

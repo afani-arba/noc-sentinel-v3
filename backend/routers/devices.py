@@ -170,17 +170,67 @@ async def test_api(device_id: str, user=Depends(get_current_user)):
 
 @router.get("/devices/{device_id}/system-resource")
 async def get_system_resource(device_id: str, user=Depends(get_current_user)):
-    """Ambil info CPU, memory, uptime langsung dari MikroTik REST API (ROS 7.x)."""
+    """
+    Ambil info sistem dari MikroTik: architecture, board-name, version, build-time, cpu-count.
+    Mendukung ROS6 (API protocol, port 8728), ROS7+ (REST API, port 443/80), dan mesin x86.
+    Menormalkan semua key dari dash-format (architecture-name) ke underscore (architecture_name).
+    """
     db = get_db()
     device = await db.devices.find_one({"id": device_id}, {"_id": 0})
     if not device:
         raise HTTPException(404, "Device not found")
-    mt = get_api_client(device)
+
     try:
-        r = await mt.get_system_resource()
-        return r
+        client = get_api_client(device)
+        raw = await client.get_system_resource()
+
+        logger.info(f"system-resource raw for {device_id}: {list(raw.keys()) if isinstance(raw, dict) else type(raw)}")
+
+        if not isinstance(raw, dict) or not raw:
+            return {"error": "No data returned from device"}
+
+        def _s(v): return str(v).strip() if v is not None else ""
+        def _i(v):
+            try: return int(str(v).strip())
+            except Exception: return 0
+
+        # Both ROS6 and ROS7 use dash-separated key names in system/resource
+        # e.g. architecture-name, board-name, build-time, cpu-count, cpu-frequency
+        # x86 machines: architecture-name may be 'x86_64' or 'x86', board-name may be 'x86'
+        arch = _s(raw.get("architecture-name") or raw.get("architectureName") or raw.get("architecture") or "")
+        board = _s(raw.get("board-name") or raw.get("boardName") or raw.get("board") or "")
+        version = _s(raw.get("version") or "")
+        build_time = _s(raw.get("build-time") or raw.get("buildTime") or "")
+        factory_sw = _s(raw.get("factory-software") or raw.get("factorySoftware") or "")
+        platform = _s(raw.get("platform") or "")
+        cpu = _s(raw.get("cpu") or raw.get("cpu-model") or "")
+        cpu_count = _i(raw.get("cpu-count") or raw.get("cpuCount") or 0)
+        cpu_freq = _i(raw.get("cpu-frequency") or raw.get("cpuFrequency") or 0)
+        uptime = _s(raw.get("uptime") or "")
+        total_mem = _i(raw.get("total-memory") or raw.get("totalMemory") or 0)
+        free_mem = _i(raw.get("free-memory") or raw.get("freeMemory") or 0)
+        total_hdd = _i(raw.get("total-hdd-space") or raw.get("totalHddSpace") or 0)
+        free_hdd = _i(raw.get("free-hdd-space") or raw.get("freeHddSpace") or 0)
+
+        return {
+            "architecture_name": arch or "x86" if "x86" in (platform + board + cpu).lower() else arch,
+            "board_name": board or platform or "",
+            "version": version,
+            "build_time": build_time,
+            "factory_software": factory_sw,
+            "platform": platform,
+            "cpu": cpu,
+            "cpu_count": cpu_count,
+            "cpu_frequency": cpu_freq,
+            "uptime": uptime,
+            "total_memory": total_mem,
+            "free_memory": free_mem,
+            "total_hdd_space": total_hdd,
+            "free_hdd_space": free_hdd,
+        }
     except Exception as e:
-        raise HTTPException(502, f"MikroTik API error: {e}")
+        logger.warning(f"system-resource fetch failed for {device_id}: {e}")
+        return {"error": str(e)}
 
 
 @router.get("/devices/{device_id}/interfaces")
@@ -273,12 +323,18 @@ async def dashboard_stats(device_id: str = "", interface: str = "", user=Depends
         except Exception:
             time_label = ""
         bw = h.get("bandwidth") or {}
-        if interface and interface != "all":
-            ib = bw.get(interface, {})
-            dl, ul = ib.get("download_bps", 0), ib.get("upload_bps", 0)
+        if bw:
+            # New format: bandwidth = {iface: {download_bps, upload_bps}}
+            if interface and interface != "all":
+                ib = bw.get(interface, {})
+                dl, ul = ib.get("download_bps", 0), ib.get("upload_bps", 0)
+            else:
+                dl = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
+                ul = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
         else:
-            dl = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
-            ul = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
+            # Old format: top-level download_mbps / upload_mbps (in Mbps, not bps)
+            dl = (h.get("download_mbps") or 0) * 1_000_000
+            ul = (h.get("upload_mbps")   or 0) * 1_000_000
         traffic_data.append({
             "time": time_label, "download": round(dl / 1_000_000, 2), "upload": round(ul / 1_000_000, 2),
             "ping": h.get("ping_ms", 0), "jitter": h.get("jitter_ms", 0)
@@ -808,53 +864,4 @@ async def get_traffic_history(
         "history": result,
     }
 
-
-# ── System Resource Info ──────────────────────────────────────────────────────
-
-@router.get("/devices/{device_id}/system-resource")
-async def get_system_resource_info(device_id: str, user=Depends(get_current_user)):
-    """
-    Fetch system resource info from device: board-name, architecture-name, version,
-    build-time, factory-software, uptime, cpu-count, total-memory.
-    Works for both ROS 6 (API protocol) and ROS 7+ (REST API).
-    """
-    db = get_db()
-    device = await db.devices.find_one({"id": device_id})
-    if not device:
-        raise HTTPException(404, "Device not found")
-
-    try:
-        client = get_api_client(device)
-        raw = await client.get_system_resource()
-
-        # Log raw keys for debugging
-        logger.info(f"system-resource raw keys for {device_id}: {list(raw.keys()) if isinstance(raw, dict) else type(raw)}")
-
-        def _clean(v):
-            return str(v).strip() if v is not None else ""
-
-        def _int(v, default=0):
-            try:
-                return int(str(v).strip())
-            except Exception:
-                return default
-
-        # ROS6 API: returns dict with dash-separated keys
-        # ROS7 REST: same format
-        result = {
-            "architecture_name": _clean(raw.get("architecture-name")),
-            "board_name": _clean(raw.get("board-name")),
-            "version": _clean(raw.get("version")),
-            "build_time": _clean(raw.get("build-time")),
-            "factory_software": _clean(raw.get("factory-software")),
-            "platform": _clean(raw.get("platform")),
-            "cpu": _clean(raw.get("cpu")),
-            "cpu_count": _int(raw.get("cpu-count", 0)),
-            "cpu_frequency": _int(raw.get("cpu-frequency", 0)),  # MHz
-            "uptime": _clean(raw.get("uptime")),
-        }
-
-        return result
-    except Exception as e:
-        logger.warning(f"system-resource fetch failed for {device_id}: {e}")
-        return {"error": str(e)}
+# (system-resource endpoint is defined at line 171 — only one instance needed)
