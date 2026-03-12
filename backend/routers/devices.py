@@ -689,3 +689,52 @@ async def get_traffic_history(device_id: str, limit: int = 144, user=Depends(get
     # Return in chronological order (oldest first for charts)
     snapshots.reverse()
     return {"device_id": device_id, "name": device.get("name", ""), "history": snapshots}
+
+
+# ── System Resource Info ──────────────────────────────────────────────────────
+
+@router.get("/devices/{device_id}/system-resource")
+async def get_system_resource_info(device_id: str, user=Depends(get_current_user)):
+    """
+    Fetch system resource info from device: board-name, architecture-name, version,
+    build-time, factory-software, uptime, cpu-count, total-memory.
+    Works for both ROS 6 (API protocol) and ROS 7+ (REST API).
+    """
+    db = get_db()
+    device = await db.devices.find_one({"id": device_id})
+    if not device:
+        raise HTTPException(404, "Device not found")
+
+    try:
+        client = get_api_client(device)
+        raw = await client.get_system_resource()
+
+        def _clean(v):
+            return str(v).strip() if v is not None else ""
+
+        # Normalize field names (ROS6 uses dashes, ROS7 REST also uses dashes)
+        result = {
+            "architecture_name": _clean(raw.get("architecture-name")),
+            "board_name": _clean(raw.get("board-name")),
+            "version": _clean(raw.get("version")),
+            "build_time": _clean(raw.get("build-time")),
+            "factory_software": _clean(raw.get("factory-software")),
+            "platform": _clean(raw.get("platform")),
+            "cpu": _clean(raw.get("cpu")),
+            "cpu_count": _clean(raw.get("cpu-count")),
+            "total_memory": raw.get("total-memory", 0),
+            "free_memory": raw.get("free-memory", 0),
+            "uptime": _clean(raw.get("uptime")),
+        }
+        # Convert memory to MB
+        try:
+            result["total_memory_mb"] = round(int(result["total_memory"]) / 1048576, 1)
+            result["free_memory_mb"] = round(int(result["free_memory"]) / 1048576, 1)
+        except Exception:
+            result["total_memory_mb"] = 0
+            result["free_memory_mb"] = 0
+
+        return result
+    except Exception as e:
+        logger.warning(f"system-resource fetch failed for {device_id}: {e}")
+        return {"error": str(e)}

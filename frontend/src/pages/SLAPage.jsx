@@ -80,6 +80,74 @@ export default function SLAPage() {
     window.open(`${api.defaults.baseURL}/sla/export?period=${period}`, "_blank");
   };
 
+  const handleExportPdf = () => {
+    if (!summary || devices.length === 0) { return; }
+    const periodLabel = { "7d": "7 Hari Terakhir", "30d": "30 Hari Terakhir", "90d": "90 Hari Terakhir" }[period] || period;
+    const devRows = sortedDevices.map((d, i) => {
+      const gc = GRADE_CONFIG[d.grade] || GRADE_CONFIG.D;
+      const gradeBg = { A: "#dcfce7", B: "#dbeafe", C: "#fef9c3", D: "#fee2e2" }[d.grade] || "#f4f4f5";
+      const gradeColor = { A: "#15803d", B: "#1d4ed8", C: "#854d0e", D: "#dc2626" }[d.grade] || "#374151";
+      return `<tr style="background:${i % 2 === 0 ? "#fff" : "#f8fafc"}">
+        <td>${i + 1}</td><td style="font-weight:600">${d.name}</td>
+        <td style="font-family:monospace;font-size:10px">${d.ip_address}</td>
+        <td style="color:${d.status === "online" ? "#15803d" : "#dc2626"};font-weight:600">${d.status.toUpperCase()}</td>
+        <td style="font-family:monospace;font-weight:700;color:${d.uptime_pct >= 99.9 ? "#15803d" : d.uptime_pct >= 99 ? "#1d4ed8" : d.uptime_pct >= 95 ? "#854d0e" : "#dc2626"}">${d.uptime_pct.toFixed(2)}%</td>
+        <td style="text-align:center">${d.downtime_hours}h</td>
+        <td style="text-align:center">${d.incident_count}</td>
+        <td style="text-align:center">${d.mttr_minutes}m</td>
+        <td><span style="padding:2px 8px;border-radius:4px;font-weight:700;font-size:11px;background:${gradeBg};color:${gradeColor}">${d.grade}</span></td>
+      </tr>`;
+    }).join("");
+    const html = `<!DOCTYPE html><html lang="id"><head><meta charset="utf-8">
+<title>SLA Report — ${periodLabel}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',Arial,sans-serif;font-size:11px;color:#1e293b;background:#fff}
+  .hdr{background:#0f172a;color:#fff;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+  .hdr h1{font-size:20px;font-weight:800}.hdr .sub{font-size:10px;color:#94a3b8}
+  .kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:14px 24px;background:#f8fafc;border-bottom:1px solid #e2e8f0}
+  .kpi-card{border:1px solid #e2e8f0;border-radius:4px;padding:10px;background:#fff;border-left:3px solid}
+  .kpi-card .label{font-size:9px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px}
+  .kpi-card .val{font-size:18px;font-weight:900;margin-top:3px}
+  .section-hdr{background:#1e3a8a;color:#fff;padding:5px 16px;font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase}
+  .tbl-wrap{padding:0 24px 12px}
+  table{width:100%;border-collapse:collapse;font-size:10px;margin-top:8px}
+  th{background:#1e3a8a;color:#fff;padding:5px 6px;text-align:left;font-size:9.5px;white-space:nowrap}
+  td{padding:4px 6px;border-bottom:1px solid #f1f5f9}
+  .footer{text-align:center;padding:8px;font-size:9px;color:#94a3b8;border-top:1px solid #f1f5f9;margin-top:8px}
+  @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}@page{size:A4 landscape;margin:10mm}}
+</style></head><body>
+<div class="no-print" style="background:#1e3a8a;padding:8px 24px;display:flex;justify-content:space-between;align-items:center">
+  <span style="color:#fff;font-size:12px;font-weight:600">📄 SLA Report Preview</span>
+  <button onclick="window.print()" style="background:#2563eb;color:#fff;padding:5px 14px;border-radius:4px;border:none;cursor:pointer;font-weight:700">🖨️ Print / Save PDF</button>
+</div>
+<div class="hdr">
+  <div><h1>SLA & Uptime Report</h1><p class="sub">Periode: ${periodLabel} • NOC Sentinel v3</p></div>
+  <div style="font-size:10px;color:#94a3b8;text-align:right">
+    Dicetak: ${new Date().toLocaleString("id-ID")}<br>Total Device: ${devices.length}
+  </div>
+</div>
+<div class="kpi">
+  <div class="kpi-card" style="border-left-color:#22c55e"><div class="label">Avg Uptime</div><div class="val" style="color:#15803d">${summary?.avg_uptime_pct ?? 100}%</div></div>
+  <div class="kpi-card" style="border-left-color:#ef4444"><div class="label">Total Incidents</div><div class="val" style="color:#dc2626">${summary?.total_incidents ?? 0}</div></div>
+  <div class="kpi-card" style="border-left-color:#eab308"><div class="label">Avg MTTR</div><div class="val" style="color:#b45309">${summary?.mttr_minutes ?? 0} menit</div></div>
+  <div class="kpi-card" style="border-left-color:#8b5cf6"><div class="label">Top Performer</div><div class="val" style="font-size:13px;color:#6d28d9">${summary?.top_performer?.name ?? "—"}</div></div>
+</div>
+<div class="section-hdr">Device SLA Report</div>
+<div class="tbl-wrap">
+  <table><thead><tr>
+    <th>No</th><th>Device Name</th><th>IP Address</th><th>Status</th><th>Uptime %</th><th>Downtime</th><th>Incidents</th><th>MTTR</th><th>Grade</th>
+  </tr></thead><tbody>${devRows}</tbody></table>
+</div>
+<div class="footer">NOC Sentinel v3 · SLA Report · ${new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" })}</div>
+</body></html>`;
+    const w = window.open("", "_blank", "width=1000,height=700");
+    w.document.write(html);
+    w.document.close();
+    w.focus();
+    setTimeout(() => { w.print(); }, 500);
+  };
+
   const handleSort = (field) => {
     if (sortField === field) setSortDir(d => d === "asc" ? "desc" : "asc");
     else { setSortField(field); setSortDir("asc"); }
@@ -131,6 +199,9 @@ export default function SLAPage() {
           </Select>
           <Button variant="outline" size="sm" className="rounded-sm text-xs" onClick={handleExport}>
             <Download className="w-3.5 h-3.5 mr-1.5" /> Export CSV
+          </Button>
+          <Button variant="outline" size="sm" className="rounded-sm text-xs border-blue-500/30 text-blue-400 hover:bg-blue-500/10" onClick={handleExportPdf} disabled={!summary || devices.length === 0}>
+            <Download className="w-3.5 h-3.5 mr-1.5" /> Export PDF
           </Button>
           <Button variant="outline" size="icon" className="h-9 w-9 rounded-sm" onClick={fetchAll} disabled={loading}>
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />

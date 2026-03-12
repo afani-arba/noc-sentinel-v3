@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import api from "@/lib/api";
 import {
   Server, ArrowDown, ArrowUp, Cpu, HardDrive, Activity, Monitor, Network,
-  AlertTriangle, AlertCircle, Info, CheckCircle2, RefreshCw, Thermometer, Zap, Battery, Wifi
+  AlertTriangle, AlertCircle, Info, CheckCircle2, RefreshCw, Thermometer, Zap, Battery, Wifi,
+  Layers, CircuitBoard
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +25,7 @@ export default function DashboardPage() {
   const [interfaces, setInterfaces] = useState(["all"]);
   const [selectedInterface, setSelectedInterface] = useState("all");
   const [loading, setLoading] = useState(true);
+  const [sysResource, setSysResource] = useState(null);
   // Traffic history filter
   const [trafficRange, setTrafficRange] = useState("24h");
   const [dateFilter, setDateFilter] = useState("");
@@ -47,9 +49,13 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    if (selectedDevice === "all") { setInterfaces(["all"]); setSelectedInterface("all"); return; }
+    if (selectedDevice === "all") { setInterfaces(["all"]); setSelectedInterface("all"); setSysResource(null); return; }
     api.get("/dashboard/interfaces", { params: { device_id: selectedDevice } })
       .then(r => { setInterfaces(r.data); setSelectedInterface("all"); }).catch(() => { });
+    // Fetch system resource info (board name, architecture, ROS version, etc.)
+    api.get(`/devices/${selectedDevice}/system-resource`)
+      .then(r => { if (!r.data.error) setSysResource(r.data); else setSysResource(null); })
+      .catch(() => setSysResource(null));
   }, [selectedDevice]);
 
   const fetchStats = useCallback(async () => {
@@ -205,6 +211,28 @@ export default function DashboardPage() {
           <span className="text-muted-foreground font-mono hidden sm:inline">{sd.ip_address}</span>
           {sd.ros_version && <Badge variant="outline" className="rounded-sm text-[10px]">v{sd.ros_version}</Badge>}
           {sd.uptime && <span className="text-muted-foreground hidden sm:inline">Up: <span className="font-mono text-foreground">{sd.uptime}</span></span>}
+        </div>
+      )}
+
+      {/* System Resource Info Panel */}
+      {sysResource && selectedDevice !== "all" && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          {[
+            { label: "Architecture", value: sysResource.architecture_name || "—", icon: Layers },
+            { label: "Board Name", value: sysResource.board_name || "—", icon: CircuitBoard },
+            { label: "ROS Version", value: sysResource.version || "—", icon: Monitor },
+            { label: "Build Time", value: sysResource.build_time ? sysResource.build_time.slice(0, 10) : "—", icon: Activity },
+            { label: "RAM Total", value: sysResource.total_memory_mb ? `${sysResource.total_memory_mb} MB` : "—", icon: HardDrive },
+            { label: "CPU Core", value: sysResource.cpu_count ? `${sysResource.cpu_count} core` : sysResource.cpu || "—", icon: Cpu },
+          ].map((item) => (
+            <div key={item.label} className="bg-card border border-border rounded-sm p-2.5 flex items-center gap-2">
+              <item.icon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+              <div className="min-w-0">
+                <p className="text-[9px] text-muted-foreground uppercase tracking-wider">{item.label}</p>
+                <p className="text-xs font-mono font-semibold truncate" title={item.value}>{item.value}</p>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
