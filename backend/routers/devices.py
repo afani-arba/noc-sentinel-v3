@@ -667,3 +667,25 @@ async def bandwidth_heatmap(
             result.append({"day": day_names[day_idx], "day_idx": day_idx, "hour": hour, "value": avg, "count": len(vals)})
 
     return {"metric": metric, "days": days, "data": result, "unit": "Mbps" if metric == "bandwidth" else "%"}
+
+
+# ── Traffic History ───────────────────────────────────────────────────────────
+
+@router.get("/devices/{device_id}/traffic-history")
+async def get_traffic_history(device_id: str, limit: int = 144, user=Depends(get_current_user)):
+    """
+    Return last N poll snapshots for a device: timestamp, download_mbps, upload_mbps, cpu, memory, ping_ms.
+    Default limit=144 = last 12h at 5min poll interval.
+    """
+    db = get_db()
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0, "id": 1, "name": 1})
+    if not device:
+        raise HTTPException(404, "Device not found")
+
+    snapshots = await db.traffic_history.find(
+        {"device_id": device_id}, {"_id": 0, "device_id": 0}
+    ).sort("timestamp", -1).limit(limit).to_list(limit)
+
+    # Return in chronological order (oldest first for charts)
+    snapshots.reverse()
+    return {"device_id": device_id, "name": device.get("name", ""), "history": snapshots}

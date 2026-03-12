@@ -460,3 +460,13 @@ async def debug_device(device_id: str, user=Depends(require_admin)):
         _err(e, "Debug failed")
 
 
+# ── Health Check ──────────────────────────────────────────────────────────────
+
+@router.get("/health")
+async def health_check(user=Depends(get_current_user)):
+    """Test connectivity to GenieACS server. Returns {connected, url, latency_ms, error}."""
+    try:
+        result = await asyncio.to_thread(svc.check_health)
+        return result
+    except Exception as e:
+        return {"connected": False, "url": "", "latency_ms": 0, "error": str(e)}

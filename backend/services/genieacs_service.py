@@ -276,3 +276,38 @@ def get_stats() -> dict:
     except Exception as e:
         logger.warning(f"GenieACS stats error: {e}")
         return {"total": 0, "online": 0, "offline": 0, "faults": 0}
+
+
+def check_health() -> dict:
+    """
+    Test connectivity to GenieACS server.
+    Returns: {connected, url, latency_ms, error}
+    """
+    import time
+    url = GENIEACS_URL
+    if not url or url == "http://localhost:7557":
+        # If not configured, return not configured
+        configured = bool(os.environ.get("GENIEACS_URL", ""))
+        if not configured:
+            return {"connected": False, "url": url, "latency_ms": 0, "error": "GENIEACS_URL not configured in .env"}
+
+    try:
+        t0 = time.time()
+        resp = requests.get(f"{url}/devices", params={"limit": 1, "projection": "_id"},
+                            auth=_auth(), timeout=5)
+        latency = round((time.time() - t0) * 1000)
+        if resp.status_code in (200, 401):
+            if resp.status_code == 401:
+                return {"connected": False, "url": url, "latency_ms": latency,
+                        "error": "Authentication failed - check GENIEACS_USERNAME/PASSWORD"}
+            return {"connected": True, "url": url, "latency_ms": latency, "error": None}
+        return {"connected": False, "url": url, "latency_ms": latency,
+                "error": f"HTTP {resp.status_code}"}
+    except requests.exceptions.ConnectionError:
+        return {"connected": False, "url": url, "latency_ms": 0,
+                "error": "Connection refused - GenieACS server tidak aktif atau URL salah"}
+    except requests.exceptions.Timeout:
+        return {"connected": False, "url": url, "latency_ms": 5000,
+                "error": "Connection timeout (>5s)"}
+    except Exception as e:
+        return {"connected": False, "url": url, "latency_ms": 0, "error": str(e)}

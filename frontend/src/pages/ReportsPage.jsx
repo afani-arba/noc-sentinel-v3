@@ -77,6 +77,38 @@ function printReport(report, companyName, clientName, engineerName) {
     </tr>
   `).join("");
 
+  // SVG Bandwidth Chart
+  const buildBwSvgChart = (devices) => {
+    if (!devices || devices.length === 0) return "";
+    const maxBw = Math.max(...devices.flatMap(d => [d.bw_in || 0, d.bw_out || 0]), 1);
+    const rowH = 28;
+    const labelW = 120;
+    const barMaxW = 300;
+    const chartH = devices.length * rowH + 40;
+    const rows = devices.map((d, i) => {
+      const dlW = Math.round(((d.bw_in || 0) / maxBw) * barMaxW);
+      const ulW = Math.round(((d.bw_out || 0) / maxBw) * barMaxW);
+      const y = i * rowH + 30;
+      return `
+        <text x="${labelW - 4}" y="${y + 10}" text-anchor="end" font-size="9" fill="#475569" font-family="monospace">${d.name.substring(0, 16)}</text>
+        <rect x="${labelW}" y="${y}" width="${dlW}" height="10" rx="2" fill="#3b82f6" opacity="0.8"/>
+        <text x="${labelW + dlW + 3}" y="${y + 9}" font-size="8" fill="#1d4ed8">${d.bw_in || 0}M</text>
+        <rect x="${labelW}" y="${y + 13}" width="${ulW}" height="10" rx="2" fill="#22c55e" opacity="0.8"/>
+        <text x="${labelW + ulW + 3}" y="${y + 21}" font-size="8" fill="#15803d">${d.bw_out || 0}M</text>
+      `;
+    }).join("");
+    return `
+      <div style="page-break-inside:avoid;margin-top:24px;">
+        <h3 style="font-size:12px;font-weight:700;color:#1e3a5f;margin-bottom:8px;">📊 Grafik Bandwidth per Device (Snapshot)</h3>
+        <svg width="${labelW + barMaxW + 60}" height="${chartH}" xmlns="http://www.w3.org/2000/svg" style="font-family:sans-serif">
+          <text x="${labelW}" y="16" font-size="9" fill="#64748b">◼ Download (biru)</text>
+          <text x="${labelW + 120}" y="16" font-size="9" fill="#64748b">◼ Upload (hijau)</text>
+          ${rows}
+        </svg>
+      </div>`;
+  };
+  const bwChart = buildBwSvgChart(devices);
+
   const incRows = incidents.length === 0
     ? `<tr><td colspan="7" style="text-align:center;color:#6b7280;padding:16px">✅ Tidak ada incident pada periode ini</td></tr>`
     : incidents.map((inc, i) => `
@@ -246,6 +278,7 @@ function printReport(report, companyName, clientName, engineerName) {
     <tbody>${devRows || '<tr><td colspan="10" style="text-align:center;color:#6b7280;padding:12px">Tidak ada data perangkat</td></tr>'}</tbody>
   </table>
 </div>
+<div class="tbl-wrap">${bwChart}</div>
 
 <!-- PAGE 2 -->
 <div class="page2">

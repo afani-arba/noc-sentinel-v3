@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
-import { Plus, Trash2, RefreshCw, Server, Wifi, WifiOff, Pencil, TestTube, Zap, Shield } from "lucide-react";
+import { Plus, Trash2, RefreshCw, Server, Wifi, WifiOff, Pencil, TestTube, Zap, Shield, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 
 export default function DevicesPage() {
+  const navigate = useNavigate();
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -162,6 +164,9 @@ export default function DevicesPage() {
                 </Button>
                 <Button variant="outline" size="sm" className="text-[10px] sm:text-xs gap-1 h-6 sm:h-7 rounded-sm px-2" onClick={() => handleTestApi(d.id)} disabled={testing===d.id+"_api"} data-testid={`test-api-${d.name}`}>
                   <Zap className="w-3 h-3" />{testing===d.id+"_api"?"...":"API"}
+                </Button>
+                <Button variant="outline" size="sm" className="text-[10px] sm:text-xs gap-1 h-6 sm:h-7 rounded-sm px-2 text-primary border-primary/30 hover:bg-primary/10" onClick={() => navigate(`/devices/${d.id}`)} data-testid={`detail-device-${d.name}`}>
+                  <ExternalLink className="w-3 h-3" />Detail
                 </Button>
                 <Button variant="ghost" size="sm" className="text-[10px] sm:text-xs gap-1 h-6 sm:h-7 rounded-sm px-2" onClick={() => openEdit(d)} data-testid={`edit-device-${d.name}`}><Pencil className="w-3 h-3" /></Button>
                 <Button variant="ghost" size="sm" className="text-[10px] sm:text-xs gap-1 h-6 sm:h-7 rounded-sm px-2 text-destructive" onClick={() => handleDelete(d.id, d.name)} data-testid={`delete-device-${d.name}`}><Trash2 className="w-3 h-3" /></Button>

@@ -72,6 +72,32 @@ async def poll_single_device(device: dict) -> dict:
 
     await db.devices.update_one({"id": did}, {"$set": update})
 
+    # Save traffic history snapshot (max 288 per device = 24h at 5min interval)
+    try:
+        traffic = result.get("traffic", {})
+        bw_data = list(traffic.values())[0] if traffic else {}
+        snapshot = {
+            "device_id": did,
+            "timestamp": now,
+            "download_mbps": round(bw_data.get("rx_mbps", 0) or 0, 2),
+            "upload_mbps": round(bw_data.get("tx_mbps", 0) or 0, 2),
+            "cpu": update.get("cpu_load", 0),
+            "memory": update.get("memory_usage", 0),
+            "ping_ms": result.get("ping", {}).get("avg", 0) or 0,
+        }
+        await db.traffic_history.insert_one(snapshot)
+        # Keep max 288 records per device (24h × 12 polls/hour)
+        count = await db.traffic_history.count_documents({"device_id": did})
+        if count > 288:
+            oldest = await db.traffic_history.find(
+                {"device_id": did}, {"_id": 1}
+            ).sort("timestamp", 1).limit(count - 288).to_list(count - 288)
+            ids = [d["_id"] for d in oldest]
+            if ids:
+                await db.traffic_history.delete_many({"_id": {"$in": ids}})
+    except Exception as hist_err:
+        logger.debug(f"Traffic history write failed: {hist_err}")
+
     # Fire WhatsApp notifications if enabled
     try:
         from services.notification_service import check_and_notify

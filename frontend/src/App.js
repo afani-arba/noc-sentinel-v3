@@ -8,6 +8,7 @@ import PPPoEUsersPage from "@/pages/PPPoEUsersPage";
 import HotspotUsersPage from "@/pages/HotspotUsersPage";
 import ReportsPage from "@/pages/ReportsPage";
 import DevicesPage from "@/pages/DevicesPage";
+import DeviceDetailPage from "@/pages/DeviceDetailPage";
 import AdminPage from "@/pages/AdminPage";
 import SettingsPage from "@/pages/SettingsPage";
 import NotificationsPage from "@/pages/NotificationsPage";
@@ -111,6 +112,7 @@ function App() {
             <Route path="hotspot" element={<HotspotUsersPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="devices" element={<DevicesPage />} />
+            <Route path="devices/:id" element={<DeviceDetailPage />} />
             <Route path="settings" element={<ProtectedRoute allowedRoles={["administrator"]}><SettingsPage /></ProtectedRoute>} />
             <Route path="notifications" element={<ProtectedRoute allowedRoles={["administrator"]}><NotificationsPage /></ProtectedRoute>} />
             <Route path="backups" element={<ProtectedRoute allowedRoles={["administrator"]}><BackupsPage /></ProtectedRoute>} />

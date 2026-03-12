@@ -228,42 +228,52 @@ export default function WallDisplayPage() {
     >
       {/* ── TOP HEADER ─────────────────────────────────────────────── */}
       <div
-        className="flex items-center justify-between px-6 py-3 border-b"
+        className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 sm:px-6 py-2 sm:py-3 border-b"
         style={{
           borderColor: "rgba(99,179,237,0.2)",
           background: "linear-gradient(90deg, rgba(14,165,233,0.08) 0%, rgba(0,0,0,0) 50%, rgba(14,165,233,0.08) 100%)",
         }}
       >
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-blue-500/20 border border-blue-500/40 rounded-lg flex items-center justify-center">
-            <Monitor className="w-5 h-5 text-blue-400" />
+        <div className="flex items-center justify-between sm:justify-start gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-7 h-7 sm:w-8 sm:h-8 bg-blue-500/20 border border-blue-500/40 rounded-lg flex items-center justify-center">
+              <Monitor className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" />
+            </div>
+            <div>
+              <h1 className="text-base sm:text-lg font-['Rajdhani'] font-bold text-white tracking-wider">
+                NOC SENTINEL <span className="text-blue-400">v3</span>
+              </h1>
+              <p className="text-[9px] sm:text-[10px] text-slate-400 tracking-widest uppercase hidden sm:block">ARBA MONITORING · WALL DISPLAY</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-lg font-['Rajdhani'] font-bold text-white tracking-wider">
-              NOC SENTINEL <span className="text-blue-400">v3</span>
-            </h1>
-            <p className="text-[10px] text-slate-400 tracking-widest uppercase">ARBA MONITORING · WALL DISPLAY</p>
+          {/* Clock on mobile beside logo */}
+          <div className="text-right sm:hidden">
+            <p className="text-lg font-mono font-bold text-white">
+              {time.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+            </p>
+            <p className="text-[9px] text-slate-400">{time.toLocaleDateString("id-ID", { weekday: "short", day: "2-digit", month: "short" })}</p>
           </div>
         </div>
 
         {/* Stats Counter */}
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-green-500/10 border border-green-500/30">
-            <CheckCircle2 className="w-4 h-4 text-green-400" />
-            <span className="text-green-400 font-bold font-['Rajdhani'] text-xl">{summary.online}</span>
-            <span className="text-green-400/70 text-xs">online</span>
+        <div className="flex items-center gap-2 sm:gap-6 flex-wrap">
+          <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg bg-green-500/10 border border-green-500/30">
+            <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-green-400" />
+            <span className="text-green-400 font-bold font-['Rajdhani'] text-lg sm:text-xl">{summary.online}</span>
+            <span className="text-green-400/70 text-[10px] sm:text-xs">online</span>
           </div>
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30">
-            <ZapOff className="w-4 h-4 text-red-400" />
-            <span className="text-red-400 font-bold font-['Rajdhani'] text-xl">{summary.offline}</span>
-            <span className="text-red-400/70 text-xs">offline</span>
+          <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg bg-red-500/10 border border-red-500/30">
+            <ZapOff className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-red-400" />
+            <span className="text-red-400 font-bold font-['Rajdhani'] text-lg sm:text-xl">{summary.offline}</span>
+            <span className="text-red-400/70 text-[10px] sm:text-xs">offline</span>
           </div>
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
-            <AlertTriangle className="w-4 h-4 text-yellow-400" />
-            <span className="text-yellow-400 font-bold font-['Rajdhani'] text-xl">{summary.warning}</span>
-            <span className="text-yellow-400/70 text-xs">warning</span>
+          <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
+            <AlertTriangle className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-yellow-400" />
+            <span className="text-yellow-400 font-bold font-['Rajdhani'] text-lg sm:text-xl">{summary.warning}</span>
+            <span className="text-yellow-400/70 text-[10px] sm:text-xs">warning</span>
           </div>
-          <div className="text-right">
+          {/* Clock on desktop */}
+          <div className="text-right hidden sm:block">
             <p className="text-2xl font-mono font-bold text-white">
               {time.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
             </p>
@@ -273,25 +283,25 @@ export default function WallDisplayPage() {
       </div>
 
       {/* ── MAIN CONTENT ────────────────────────────────────────────── */}
-      <div className="flex flex-1 gap-4 p-4 min-h-0">
+      <div className="flex flex-col lg:flex-row flex-1 gap-3 p-3 sm:p-4 min-h-0 overflow-auto">
         {/* Device Grid */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 min-h-0 lg:overflow-y-auto">
           {devices.length === 0 ? (
-            <div className="flex items-center justify-center h-full">
+            <div className="flex items-center justify-center h-full min-h-[200px]">
               <div className="text-center text-slate-500">
-                <Server className="w-16 h-16 mx-auto mb-3 opacity-30" />
+                <Server className="w-14 h-14 mx-auto mb-3 opacity-30" />
                 <p>No devices configured</p>
               </div>
             </div>
           ) : (
-            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
+            <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))" }}>
               {devices.map(d => <DeviceCard key={d.id} device={d} />)}
             </div>
           )}
         </div>
 
         {/* Right Panel */}
-        <div className="w-72 flex flex-col gap-4">
+        <div className="w-full lg:w-72 flex flex-col sm:flex-row lg:flex-col gap-3">
           {/* BW Chart */}
           <div
             className="rounded-xl border p-4 flex-1"

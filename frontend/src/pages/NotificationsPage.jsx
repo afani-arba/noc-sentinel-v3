@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import api from "@/lib/api";
-import { Bell, Plus, Trash2, Send, Save, Phone, Settings2, AlertTriangle, Info, Activity, Network, ChevronDown } from "lucide-react";
+import { Bell, Plus, Trash2, Send, Save, Phone, Settings2, AlertTriangle, Info, Activity, Network, MessageSquare, Bot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -49,6 +49,9 @@ const DEFAULT_SETTINGS = {
   notify_interface_down: false,
   watched_interfaces: [],
   thresholds: { cpu: 80, ping_ms: 100 },
+  telegram_enabled: false,
+  telegram_bot_token: "",
+  telegram_chat_ids: [],
 };
 
 export default function NotificationsPage() {
@@ -405,6 +408,132 @@ export default function NotificationsPage() {
         <p className="text-[10px] text-muted-foreground/70 pt-1 border-t border-border/50">
           ℹ️ Alert tidak akan dikirim ulang selama kondisi masih berlanjut. Sistem baru kirim ulang setelah kondisi kembali normal lalu muncul lagi.
         </p>
+      </div>
+
+      {/* Telegram Bot Configuration */}
+      <TelegramSection settings={settings} setSettings={setSettings} />
+    </div>
+  );
+}
+
+function TelegramSection({ settings, setSettings }) {
+  const [testChatId, setTestChatId] = useState("");
+  const [sendingTest, setSendingTest] = useState(false);
+
+  const addChatId = () => {
+    setSettings(s => ({ ...s, telegram_chat_ids: [...(s.telegram_chat_ids || []), ""] }));
+  };
+  const removeChatId = (i) => {
+    setSettings(s => ({ ...s, telegram_chat_ids: s.telegram_chat_ids.filter((_, idx) => idx !== i) }));
+  };
+  const updateChatId = (i, val) => {
+    const ids = [...(settings.telegram_chat_ids || [])];
+    ids[i] = val;
+    setSettings(s => ({ ...s, telegram_chat_ids: ids }));
+  };
+
+  const handleTestTelegram = async () => {
+    if (!testChatId) { toast.error("Masukkan Chat ID tujuan test"); return; }
+    setSendingTest(true);
+    try {
+      const r = await import("@/lib/api").then(m => m.default.post("/notifications/test-telegram", {
+        chat_id: testChatId,
+        bot_token: settings.telegram_bot_token,
+      }));
+      toast.success(r.data.message || "Test Telegram berhasil dikirim!");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Test gagal. Periksa bot token dan chat ID.");
+    }
+    setSendingTest(false);
+  };
+
+  return (
+    <div className="bg-card border border-border rounded-sm p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-base font-semibold font-['Rajdhani'] flex items-center gap-2">
+          <Bot className="w-4 h-4 text-blue-400" /> Telegram Bot
+        </h2>
+        <button
+          onClick={() => setSettings(s => ({ ...s, telegram_enabled: !s.telegram_enabled }))}
+          className={`relative w-12 h-6 rounded-full transition-colors ${settings.telegram_enabled ? "bg-blue-500" : "bg-secondary"}`}
+        >
+          <div className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-all ${settings.telegram_enabled ? "left-7" : "left-1"}`} />
+        </button>
+      </div>
+
+      <div className="flex items-start gap-3 p-3 rounded-sm bg-blue-500/10 border border-blue-500/20 text-sm">
+        <MessageSquare className="w-4 h-4 mt-0.5 text-blue-400 flex-shrink-0" />
+        <div className="text-xs text-blue-300">
+          <p className="font-semibold mb-1">Cara setup Telegram Bot:</p>
+          <ol className="list-decimal ml-4 space-y-0.5 text-blue-300/80">
+            <li>Buat bot baru via <span className="font-mono">@BotFather</span> di Telegram</li>
+            <li>Salin token yang diberikan BotFather</li>
+            <li>Chat bot Anda, lalu ambil Chat ID dari <span className="font-mono">api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</span></li>
+            <li>Untuk grup: tambahkan bot ke grup, ambil Chat ID dari getUpdates (negatif)</li>
+          </ol>
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label className="text-xs text-muted-foreground">Telegram Bot Token</Label>
+        <Input
+          type="password"
+          value={settings.telegram_bot_token || ""}
+          onChange={e => setSettings(s => ({ ...s, telegram_bot_token: e.target.value }))}
+          className="rounded-sm bg-background font-mono text-xs"
+          placeholder="1234567890:ABCdefGHIjklMNOpqrSTUvwxYZ"
+        />
+        <p className="text-[10px] text-muted-foreground/70">Token dari @BotFather. Bersifat rahasia.</p>
+      </div>
+
+      {/* Chat IDs */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <Label className="text-xs text-muted-foreground">Chat ID Penerima</Label>
+          <Button onClick={addChatId} size="sm" variant="outline" className="rounded-sm gap-1 text-xs h-7">
+            <Plus className="w-3 h-3" /> Tambah
+          </Button>
+        </div>
+        {(settings.telegram_chat_ids || []).length === 0 ? (
+          <p className="text-xs text-muted-foreground text-center py-3">Belum ada Chat ID. Klik &quot;Tambah&quot; untuk menambahkan.</p>
+        ) : (
+          <div className="space-y-2">
+            {(settings.telegram_chat_ids || []).map((id, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <Input
+                  value={id}
+                  onChange={e => updateChatId(i, e.target.value)}
+                  placeholder="-1001234567890 (grup) atau 123456789 (personal)"
+                  className="rounded-sm bg-background font-mono text-xs flex-1"
+                />
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removeChatId(i)}>
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Test Telegram */}
+      <div className="pt-2 border-t border-border/50 space-y-2">
+        <Label className="text-xs text-muted-foreground">Test Kirim Telegram</Label>
+        <div className="flex gap-2">
+          <Input
+            value={testChatId}
+            onChange={e => setTestChatId(e.target.value)}
+            placeholder="Chat ID tujuan test"
+            className="rounded-sm bg-background font-mono text-xs flex-1"
+          />
+          <Button
+            onClick={handleTestTelegram}
+            disabled={sendingTest || !settings.telegram_bot_token}
+            size="sm" variant="outline" className="rounded-sm gap-2 flex-shrink-0"
+          >
+            <Send className="w-3.5 h-3.5" /> {sendingTest ? "..." : "Test"}
+          </Button>
+        </div>
+        <p className="text-[10px] text-muted-foreground/70">Masukkan Chat ID (bisa beda dari daftar di atas untuk verifikasi)</p>
       </div>
     </div>
   );
