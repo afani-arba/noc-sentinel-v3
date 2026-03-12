@@ -303,7 +303,36 @@ export default function WallDisplayPage() {
             <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-widest mb-3 flex items-center gap-2">
               <Activity className="w-3.5 h-3.5 text-blue-400" /> Bandwidth Real-time
             </h3>
-            <div className="h-40">
+
+            {/* ── Total Bandwidth Numbers ── */}
+            {bwHistory.length > 0 && (() => {
+              const latest = bwHistory[bwHistory.length - 1];
+              const formatBw = (mbps) => {
+                if (mbps >= 1000) return `${(mbps / 1000).toFixed(2)} Gbps`;
+                if (mbps >= 1) return `${mbps.toFixed(1)} Mbps`;
+                return `${(mbps * 1000).toFixed(0)} Kbps`;
+              };
+              return (
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 p-2 text-center">
+                    <p className="text-[9px] text-blue-400/70 uppercase tracking-widest flex items-center justify-center gap-1 mb-0.5">
+                      <TrendingDown className="w-2.5 h-2.5" /> Download
+                    </p>
+                    <p className="text-lg font-bold font-mono text-blue-300 leading-tight">{formatBw(latest.download)}</p>
+                    <p className="text-[9px] text-blue-500/60">total all devices</p>
+                  </div>
+                  <div className="rounded-lg bg-green-500/10 border border-green-500/20 p-2 text-center">
+                    <p className="text-[9px] text-green-400/70 uppercase tracking-widest flex items-center justify-center gap-1 mb-0.5">
+                      <TrendingUp className="w-2.5 h-2.5" /> Upload
+                    </p>
+                    <p className="text-lg font-bold font-mono text-green-300 leading-tight">{formatBw(latest.upload)}</p>
+                    <p className="text-[9px] text-green-500/60">total all devices</p>
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div className="h-28">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={bwHistory}>
                   <defs>
@@ -319,17 +348,20 @@ export default function WallDisplayPage() {
                   <Tooltip
                     contentStyle={{ background: "#0f172a", border: "1px solid #1e3a5f", borderRadius: "8px", fontSize: "11px" }}
                     labelStyle={{ color: "#94a3b8" }}
+                    formatter={(v) => [`${v} Mbps`]}
                   />
-                  <Area type="monotone" dataKey="download" stroke="#3b82f6" fill="url(#wdl)" strokeWidth={2} name="DL (Mbps)" dot={false} />
-                  <Area type="monotone" dataKey="upload" stroke="#22c55e" fill="url(#wul)" strokeWidth={2} name="UL (Mbps)" dot={false} />
+                  <Area type="monotone" dataKey="download" stroke="#3b82f6" fill="url(#wdl)" strokeWidth={2} name="DL" dot={false} />
+                  <Area type="monotone" dataKey="upload" stroke="#22c55e" fill="url(#wul)" strokeWidth={2} name="UL" dot={false} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
             <div className="flex gap-4 mt-2 text-[10px] text-slate-500">
               <span className="flex items-center gap-1"><span className="w-2 h-[2px] bg-blue-500 inline-block" /> DL</span>
               <span className="flex items-center gap-1"><span className="w-2 h-[2px] bg-green-500 inline-block" /> UL</span>
+              <span className="ml-auto text-slate-600">{bwHistory.length} samples</span>
             </div>
           </div>
+
 
           {/* Active Alerts */}
           <div
