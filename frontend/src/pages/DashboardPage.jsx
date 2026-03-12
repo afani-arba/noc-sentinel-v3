@@ -222,8 +222,8 @@ export default function DashboardPage() {
             { label: "Board Name", value: sysResource.board_name || "—", icon: CircuitBoard },
             { label: "ROS Version", value: sysResource.version || "—", icon: Monitor },
             { label: "Build Time", value: sysResource.build_time ? sysResource.build_time.slice(0, 10) : "—", icon: Activity },
-            { label: "RAM Total", value: sysResource.total_memory_mb ? `${sysResource.total_memory_mb} MB` : "—", icon: HardDrive },
-            { label: "CPU Core", value: sysResource.cpu_count ? `${sysResource.cpu_count} core` : sysResource.cpu || "—", icon: Cpu },
+            { label: "CPU Count", value: sysResource.cpu_count > 0 ? `${sysResource.cpu_count}` : "—", icon: Cpu },
+            { label: "CPU Frequency", value: sysResource.cpu_frequency > 0 ? `${sysResource.cpu_frequency} MHz` : "—", icon: Zap },
           ].map((item) => (
             <div key={item.label} className="bg-card border border-border rounded-sm p-2.5 flex items-center gap-2">
               <item.icon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />

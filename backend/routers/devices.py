@@ -709,10 +709,20 @@ async def get_system_resource_info(device_id: str, user=Depends(get_current_user
         client = get_api_client(device)
         raw = await client.get_system_resource()
 
+        # Log raw keys for debugging
+        logger.info(f"system-resource raw keys for {device_id}: {list(raw.keys()) if isinstance(raw, dict) else type(raw)}")
+
         def _clean(v):
             return str(v).strip() if v is not None else ""
 
-        # Normalize field names (ROS6 uses dashes, ROS7 REST also uses dashes)
+        def _int(v, default=0):
+            try:
+                return int(str(v).strip())
+            except Exception:
+                return default
+
+        # ROS6 API: returns dict with dash-separated keys
+        # ROS7 REST: same format
         result = {
             "architecture_name": _clean(raw.get("architecture-name")),
             "board_name": _clean(raw.get("board-name")),
@@ -721,18 +731,10 @@ async def get_system_resource_info(device_id: str, user=Depends(get_current_user
             "factory_software": _clean(raw.get("factory-software")),
             "platform": _clean(raw.get("platform")),
             "cpu": _clean(raw.get("cpu")),
-            "cpu_count": _clean(raw.get("cpu-count")),
-            "total_memory": raw.get("total-memory", 0),
-            "free_memory": raw.get("free-memory", 0),
+            "cpu_count": _int(raw.get("cpu-count", 0)),
+            "cpu_frequency": _int(raw.get("cpu-frequency", 0)),  # MHz
             "uptime": _clean(raw.get("uptime")),
         }
-        # Convert memory to MB
-        try:
-            result["total_memory_mb"] = round(int(result["total_memory"]) / 1048576, 1)
-            result["free_memory_mb"] = round(int(result["free_memory"]) / 1048576, 1)
-        except Exception:
-            result["total_memory_mb"] = 0
-            result["free_memory_mb"] = 0
 
         return result
     except Exception as e:
