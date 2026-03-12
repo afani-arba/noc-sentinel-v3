@@ -755,13 +755,26 @@ async def get_traffic_history(
     for h in snapshots_raw:
         bw = h.get("bandwidth") or {}
         sel_iface = interface if interface and interface != "all" else None
-        if sel_iface:
-            ib = bw.get(sel_iface, {})
-            dl_bps = ib.get("download_bps", 0)
-            ul_bps = ib.get("upload_bps", 0)
+
+        if bw:
+            # New format: bandwidth = {iface: {download_bps, upload_bps, ...}}
+            if sel_iface:
+                ib = bw.get(sel_iface, {})
+                dl_bps = ib.get("download_bps", 0)
+                ul_bps = ib.get("upload_bps", 0)
+            else:
+                dl_bps = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
+                ul_bps = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
         else:
-            dl_bps = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
-            ul_bps = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
+            # Old/simple format: download_mbps / upload_mbps stored at top level (in Mbps)
+            dl_mbps = h.get("download_mbps", 0) or 0
+            ul_mbps = h.get("upload_mbps",   0) or 0
+            dl_bps = dl_mbps * 1_000_000
+            ul_bps = ul_mbps * 1_000_000
+
+        # Convert to Mbps for display
+        dl_mbps_out = round(dl_bps / 1_000_000, 3) if dl_bps else round(h.get("download_mbps", 0) or 0, 3)
+        ul_mbps_out = round(ul_bps / 1_000_000, 3) if ul_bps else round(h.get("upload_mbps",   0) or 0, 3)
 
         try:
             ts = datetime.fromisoformat(h["timestamp"].replace("Z", "+00:00"))
@@ -776,12 +789,12 @@ async def get_traffic_history(
             "timestamp": h.get("timestamp"),
             "time": time_label,
             "date_label": date_label,
-            "download_mbps": round(dl_bps / 1_000_000, 3),
-            "upload_mbps":   round(ul_bps / 1_000_000, 3),
+            "download_mbps": dl_mbps_out,
+            "upload_mbps":   ul_mbps_out,
             "download_bps":  dl_bps,
             "upload_bps":    ul_bps,
             "cpu":    h.get("cpu", 0),
-            "memory": h.get("memory_percent", 0),
+            "memory": h.get("memory_percent", h.get("memory", 0)),
             "ping":   h.get("ping_ms", 0),
             "jitter": h.get("jitter_ms", 0),
         })
