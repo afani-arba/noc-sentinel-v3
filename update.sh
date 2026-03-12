@@ -25,7 +25,7 @@ echo "╚═══════════════════════�
 echo -e "${NC}"
 
 # ── 1. Pull dari GitHub ───────────────────────────────────────────────────────
-print_step "1/5 Pull update terbaru dari GitHub"
+print_step "1/6 Pull update terbaru dari GitHub"
 cd "$APP_DIR"
 git fetch origin
 LOCAL=$(git rev-parse HEAD)
@@ -38,14 +38,22 @@ else
 fi
 
 # ── 2. Update Python dependencies ────────────────────────────────────────────
-print_step "2/5 Update Python dependencies"
+print_step "2/6 Update Python dependencies"
 source "$APP_DIR/backend/venv/bin/activate"
+
+# Hapus paket SNMP lama jika masih terinstall (one-time cleanup)
+if pip show pysnmp-lextudio &>/dev/null 2>&1; then
+    print_warn "Menghapus paket SNMP lama..."
+    pip uninstall -y pysnmp-lextudio pyasn1 pyasn1-modules pysmi-lextudio 2>/dev/null || true
+    print_ok "Paket SNMP lama dihapus"
+fi
+
 pip install -r "$APP_DIR/backend/requirements.txt" -q
 deactivate
 print_ok "Python packages updated"
 
 # ── 3. Build frontend ─────────────────────────────────────────────────────────
-print_step "3/5 Build frontend (npm)"
+print_step "3/6 Build frontend (npm)"
 cd "$APP_DIR/frontend"
 npm install --silent
 npm run build
@@ -53,10 +61,9 @@ npm run build
 print_ok "Frontend berhasil di-build"
 
 # ── 4. Setup/verifikasi systemd service ──────────────────────────────────────
-print_step "4/5 Setup systemd service (auto-start)"
+print_step "4/6 Setup systemd service (auto-start)"
 
-# Buat/timpa service file agar selalu up-to-date
-cat > "/etc/systemd/system/${SERVICE}.service" << SVCEOF
+cat > "/etc/systemd/system/${SERVICE}.service" <<SVCEOF
 [Unit]
 Description=NOC Sentinel v3 Backend (FastAPI)
 After=network.target mongod.service
@@ -85,13 +92,13 @@ systemctl daemon-reload
 systemctl enable "${SERVICE}" --quiet
 print_ok "Service '${SERVICE}' aktif dan akan auto-start saat reboot"
 
-# Pastikan MongoDB juga auto-start
+# Pastikan MongoDB + Nginx juga auto-start
 systemctl enable mongod --quiet 2>/dev/null || true
 systemctl enable nginx  --quiet 2>/dev/null || true
 print_ok "MongoDB + Nginx dikonfigurasi untuk auto-start"
 
 # ── 5. Restart service ────────────────────────────────────────────────────────
-print_step "5/5 Restart layanan"
+print_step "5/6 Restart layanan"
 systemctl restart "$SERVICE"
 sleep 3
 
@@ -105,6 +112,15 @@ fi
 
 # Reload nginx agar static build terbaru terbaca
 systemctl reload nginx 2>/dev/null && print_ok "Nginx di-reload" || true
+
+# ── 6. Verifikasi kesehatan API ───────────────────────────────────────────────
+print_step "6/6 Verifikasi health endpoint"
+sleep 2
+if curl -sf http://localhost:8000/api/health | grep -q "ok"; then
+    print_ok "API health check: OK"
+else
+    print_warn "API health check tidak merespon — cek log: journalctl -u $SERVICE -n 50"
+fi
 
 echo ""
 echo -e "${BOLD}${GREEN}╔══════════════════════════════════════════════════════╗"
