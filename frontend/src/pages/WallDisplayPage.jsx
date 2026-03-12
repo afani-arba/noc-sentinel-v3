@@ -394,8 +394,14 @@ export default function WallDisplayPage() {
 
             {/* ── Per-device ISP interface bandwidth ── */}
             <div className="border-t border-white/10 pt-3 mt-1">
-              <p className="text-[9px] text-slate-500 uppercase tracking-widest mb-2">Per-Device ISP Bandwidth</p>
-              <div className="space-y-2">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[9px] text-slate-500 uppercase tracking-widest">Per-Device ISP Bandwidth</p>
+                <span className="text-[9px] text-slate-600 font-mono">
+                  {devices.filter(d => d.status === "online").length} online
+                </span>
+              </div>
+              {/* max-height for ~6 items (~72px each) */}
+              <div className="overflow-y-auto space-y-2 pr-0.5" style={{ maxHeight: "432px" }}>
               {devices.filter(d => d.status === "online").map(d => {
                 const hist = deviceBwHistory[d.id] || [];
                 const latest = hist[hist.length - 1] || { dl: d.download_mbps || 0, ul: d.upload_mbps || 0 };

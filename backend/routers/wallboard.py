@@ -41,24 +41,20 @@ async def wallboard_status(user=Depends(get_current_user)):
         if last_bw:
             bw = last_bw.get("bandwidth") or {}
             if bw and isp_interfaces:
-                # Use only ISP/INPUT interface bandwidth (comment-detected)
+                # Hanya gunakan ISP interface yang terdeteksi (comment-based detection)
                 for iface in isp_interfaces:
                     iface_bw = bw.get(iface, {})
                     if isinstance(iface_bw, dict):
                         download_bps += iface_bw.get("download_bps", 0)
                         upload_bps   += iface_bw.get("upload_bps",   0)
-                # Fallback: if none of the isp_interfaces found in bandwidth dict, use total
-                if download_bps == 0 and upload_bps == 0:
-                    download_bps = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
-                    upload_bps   = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
-            elif bw:
-                # New format: sum all interfaces (no ISP detection yet)
-                download_bps = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
-                upload_bps   = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
-            else:
-                # Old format: top-level download_mbps/upload_mbps
-                download_bps = (last_bw.get("download_mbps") or 0) * 1_000_000
-                upload_bps   = (last_bw.get("upload_mbps")   or 0) * 1_000_000
+                # Jika tidak ada ISP interface yang match di bandwidth dict,
+                # JANGAN sum semua interface — biarkan 0 agar tidak terhitung ganda
+                # User harus set isp_interfaces di device config
+            elif bw and not isp_interfaces:
+                # Tidak ada ISP interface terdeteksi → tidak bisa hitung bandwidth akurat
+                # Biarkan 0 daripada sum semua interface (yang akan double-count)
+                download_bps = 0
+                upload_bps   = 0
 
 
         # Determine alert level

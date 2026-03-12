@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import api from "@/lib/api";
+import { toast } from "sonner";
 import {
   RefreshCw, Download, CheckCircle2, AlertTriangle,
   GitBranch, Clock, Terminal, Zap, CloudOff, Package,
@@ -40,13 +41,18 @@ export default function UpdatePage() {
   const [log, setLog]               = useState([]);
   const [elapsed, setElapsed]       = useState(0);
   const [checking, setChecking]     = useState(false);
-  const logRef = useRef(null);
+  const [reloadCountdown, setReloadCountdown] = useState(0); // countdown detik sebelum reload
+  const logRef  = useRef(null);
   const pollRef = useRef(null);
+  const cdRef   = useRef(null); // countdown interval
 
   // Ambil info versi aplikasi saat mount
   useEffect(() => {
     fetchAppInfo();
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (cdRef.current)   clearInterval(cdRef.current);
+    };
   }, []);
 
   // Auto-scroll log ke bawah
@@ -104,11 +110,34 @@ export default function UpdatePage() {
         setElapsed(d.elapsed || 0);
         if (d.done) {
           clearInterval(pollRef.current);
-          setStatus(d.success ? "success" : "failed");
-          // Refresh app-info setelah update berhasil
-          if (d.success) {
+          const isSuccess = d.success;
+          setStatus(isSuccess ? "success" : "failed");
+
+          if (isSuccess) {
+            // Toast sukses
+            toast.success("Update berhasil! Halaman akan di-reload dalam 5 detik.", {
+              duration: 8000,
+              icon: "✅",
+            });
+            // Refresh app-info
             setTimeout(fetchAppInfo, 2000);
-            setTimeout(checkUpdate, 3000);
+            setTimeout(checkUpdate,  3000);
+            // Countdown auto-reload
+            let cd = 5;
+            setReloadCountdown(cd);
+            cdRef.current = setInterval(() => {
+              cd -= 1;
+              setReloadCountdown(cd);
+              if (cd <= 0) {
+                clearInterval(cdRef.current);
+                window.location.reload();
+              }
+            }, 1000);
+          } else {
+            toast.error("Update gagal! Periksa log untuk detail.", {
+              duration: 10000,
+              icon: "❌",
+            });
           }
         }
       } catch {
@@ -307,8 +336,17 @@ export default function UpdatePage() {
               : "bg-red-500/10 border-red-500/30 text-red-300"
           }`}>
             {status === "success"
-              ? <><CheckCircle2 className="w-4 h-4" /> Update berhasil! Aplikasi sudah diperbarui.</>
-              : <><AlertTriangle className="w-4 h-4" /> Update gagal. Cek log di atas untuk detail.</>
+              ? <><CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                  <span>
+                    Update berhasil! Aplikasi sudah diperbarui.
+                    {reloadCountdown > 0 && (
+                      <span className="ml-2 text-yellow-300 font-semibold">
+                        Reload otomatis dalam {reloadCountdown}s...
+                      </span>
+                    )}
+                  </span>
+                </>
+              : <><AlertTriangle className="w-4 h-4 flex-shrink-0" /> Update gagal. Cek log di atas untuk detail.</>
             }
           </div>
         )}
