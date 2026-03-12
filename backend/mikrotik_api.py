@@ -184,25 +184,52 @@ class MikroTikRestAPI(MikroTikBase):
 
     async def test_connection(self):
         """
-        Test koneksi REST API MikroTik.
-        Coba system/identity dulu, fallback ke system/resource jika error 404
-        (beberapa versi ROS atau konfigurasi port non-standar tidak mendukung endpoint ini).
+        Test koneksi REST API MikroTik ROS 7+.
+        Coba 3 endpoint bertingkat: system/identity → system/resource → ip/address
+        Jika semua 404: REST API tidak aktif di device (www service belum diaktifkan).
         """
-        identity = ""
-        try:
-            r = await self._async_req("GET", "system/identity")
-            identity = r.get("name", "") if isinstance(r, dict) else ""
-            return {"success": True, "identity": identity, "mode": "REST API (RouterOS 7+)"}
-        except Exception as e1:
-            # Fallback ke system/resource jika system/identity tidak tersedia
+        endpoints = [
+            ("system/identity",  lambda r: r.get("name", "MikroTik")),
+            ("system/resource",  lambda r: r.get("board-name", r.get("platform", "MikroTik"))),
+            ("ip/address",       lambda r: "MikroTik" if isinstance(r, list) else r.get("name", "MikroTik")),
+        ]
+        last_error = ""
+        all_404    = True
+
+        for path, extract_name in endpoints:
             try:
-                res = await self._async_req("GET", "system/resource")
-                if isinstance(res, dict) and res:
-                    identity = res.get("board-name", res.get("platform", "MikroTik"))
-                    return {"success": True, "identity": identity, "mode": "REST API (RouterOS 7+)"}
-            except Exception:
-                pass
-            return {"success": False, "error": str(e1), "mode": "REST API (RouterOS 7+)"}
+                r = await self._async_req("GET", path)
+                identity = extract_name(r) if isinstance(r, (dict, list)) else "MikroTik"
+                return {
+                    "success":  True,
+                    "identity": identity,
+                    "mode":     "REST API (RouterOS 7+)",
+                    "endpoint": path,
+                }
+            except Exception as e:
+                err_str = str(e)
+                last_error = err_str
+                # Jika bukan 404, hentikan loop — ini error koneksi bukan REST API disabled
+                if "404" not in err_str:
+                    all_404 = False
+                    break
+
+        if all_404:
+            # Semua endpoint 404 = REST API (www service) tidak aktif di device
+            return {
+                "success": False,
+                "error":   (
+                    f"REST API tidak aktif di {self.host}:{self.port}. "
+                    "Aktifkan www service di MikroTik: "
+                    "IP → Services → www → Enable, "
+                    "atau jalankan: /ip service enable www"
+                ),
+                "mode": "REST API (RouterOS 7+)",
+            }
+
+        # Error koneksi lain (timeout, auth fail, SSL, refused)
+        return {"success": False, "error": last_error, "mode": "REST API (RouterOS 7+)"}
+
 
     async def list_pppoe_secrets(self):
         return await self._async_req("GET", "ppp/secret")
