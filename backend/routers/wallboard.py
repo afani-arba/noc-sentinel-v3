@@ -36,10 +36,17 @@ async def wallboard_status(user=Depends(get_current_user)):
 
         download_bps = 0
         upload_bps = 0
-        if last_bw and last_bw.get("bandwidth"):
-            bw = last_bw["bandwidth"]
-            download_bps = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
-            upload_bps = sum(v.get("upload_bps", 0) for v in bw.values() if isinstance(v, dict))
+        if last_bw:
+            bw = last_bw.get("bandwidth") or {}
+            if bw:
+                # New format: {iface: {download_bps, upload_bps}}
+                download_bps = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
+                upload_bps   = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
+            else:
+                # Old format: top-level download_mbps/upload_mbps
+                download_bps = (last_bw.get("download_mbps") or 0) * 1_000_000
+                upload_bps   = (last_bw.get("upload_mbps")   or 0) * 1_000_000
+
 
         # Determine alert level
         alert_level = "normal"

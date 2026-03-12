@@ -72,32 +72,6 @@ async def poll_single_device(device: dict) -> dict:
 
     await db.devices.update_one({"id": did}, {"$set": update})
 
-    # Save traffic history snapshot (max 288 per device = 24h at 5min interval)
-    try:
-        traffic = result.get("traffic", {})
-        bw_data = list(traffic.values())[0] if traffic else {}
-        snapshot = {
-            "device_id": did,
-            "timestamp": now,
-            "download_mbps": round(bw_data.get("rx_mbps", 0) or 0, 2),
-            "upload_mbps": round(bw_data.get("tx_mbps", 0) or 0, 2),
-            "cpu": update.get("cpu_load", 0),
-            "memory": update.get("memory_usage", 0),
-            "ping_ms": result.get("ping", {}).get("avg", 0) or 0,
-        }
-        await db.traffic_history.insert_one(snapshot)
-        # Keep max 288 records per device (24h × 12 polls/hour)
-        count = await db.traffic_history.count_documents({"device_id": did})
-        if count > 288:
-            oldest = await db.traffic_history.find(
-                {"device_id": did}, {"_id": 1}
-            ).sort("timestamp", 1).limit(count - 288).to_list(count - 288)
-            ids = [d["_id"] for d in oldest]
-            if ids:
-                await db.traffic_history.delete_many({"_id": {"$in": ids}})
-    except Exception as hist_err:
-        logger.debug(f"Traffic history write failed: {hist_err}")
-
     # Fire WhatsApp notifications if enabled
     try:
         from services.notification_service import check_and_notify
@@ -105,10 +79,12 @@ async def poll_single_device(device: dict) -> dict:
     except Exception as e:
         logger.debug(f"Notification check skipped: {e}")
 
-    # Bandwidth calculation from octets diff
+    # ── Bandwidth from octets delta (accurate, per-interface) ────────────────
+
     prev = await db.traffic_snapshots.find_one({"device_id": did})
     curr_traffic = result.get("traffic", {})
     ping_data = result.get("ping", {})
+    bw = {}
 
     if prev and curr_traffic:
         prev_t = prev.get("traffic", {})
@@ -116,53 +92,79 @@ async def poll_single_device(device: dict) -> dict:
             delta = max((datetime.fromisoformat(now) - datetime.fromisoformat(prev["timestamp"])).total_seconds(), 1)
         except Exception:
             delta = POLL_INTERVAL
-        bw = {}
         for iface, cv in curr_traffic.items():
             pv = prev_t.get(iface, {})
             if pv:
-                ind = max(0, cv["in_octets"] - pv.get("in_octets", 0))
+                ind  = max(0, cv["in_octets"]  - pv.get("in_octets",  0))
                 outd = max(0, cv["out_octets"] - pv.get("out_octets", 0))
-                if ind > 2**62: ind = 0
+                if ind  > 2**62: ind  = 0
                 if outd > 2**62: outd = 0
                 bw[iface] = {
-                    "download_bps": round((ind * 8) / delta),
-                    "upload_bps": round((outd * 8) / delta),
-                    "status": cv.get("status", "down")
+                    "download_bps": round((ind  * 8) / delta),
+                    "upload_bps":   round((outd * 8) / delta),
+                    "status": cv.get("status", "down"),
                 }
-        if bw:
-            await db.traffic_history.insert_one({
-                "device_id": did, "timestamp": now, "bandwidth": bw,
-                "ping_ms": ping_data.get("avg", 0),
-                "jitter_ms": ping_data.get("jitter", 0),
-                "cpu": result.get("cpu", 0),
-                "memory_percent": result.get("memory", {}).get("percent", 0),
-            })
-            # Write to InfluxDB if configured
-            try:
-                from services.metrics_service import write_device_metrics, is_enabled
-                if is_enabled():
-                    metrics_payload = {
-                        "cpu": result.get("cpu", 0),
-                        "memory": result.get("memory", {}),
-                        "ping": ping_data,
-                        "health": result.get("health", {}),
-                        "bandwidth": bw,
-                    }
-                    await asyncio.to_thread(
-                        write_device_metrics,
-                        did,
-                        device.get("name", did),
-                        metrics_payload,
-                    )
-            except Exception as e:
-                logger.debug(f"InfluxDB write skipped: {e}")
 
+    # ── Save ONE unified traffic_history record per cycle ────────────────────
+    # Merge: bandwidth dict (accurate octets-diff per interface) + system metrics
+    # Also store top-level download/upload Mbps so older-format query paths work
+    total_dl_bps = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
+    total_ul_bps = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
+
+    snapshot = {
+        "device_id": did,
+        "timestamp": now,
+        # Accurate per-interface bandwidth (requires prev snapshot for diff)
+        "bandwidth": bw,
+        # Top-level totals for backward-compat with older query paths
+        "download_mbps": round(total_dl_bps / 1_000_000, 3),
+        "upload_mbps":   round(total_ul_bps / 1_000_000, 3),
+        # System metrics
+        "cpu":            result.get("cpu", 0),
+        "memory_percent": result.get("memory", {}).get("percent", 0),
+        "ping_ms":        ping_data.get("avg", 0) or 0,
+        "jitter_ms":      ping_data.get("jitter", 0) or 0,
+    }
+    try:
+        await db.traffic_history.insert_one(snapshot)
+        # Keep max 2880 records per device (24h at 30s interval)
+        count = await db.traffic_history.count_documents({"device_id": did})
+        if count > 2880:
+            oldest = await db.traffic_history.find(
+                {"device_id": did}, {"_id": 1}
+            ).sort("timestamp", 1).limit(count - 2880).to_list(count - 2880)
+            ids = [d["_id"] for d in oldest]
+            if ids:
+                await db.traffic_history.delete_many({"_id": {"$in": ids}})
+    except Exception as hist_err:
+        logger.debug(f"Traffic history write failed: {hist_err}")
+
+    # ── Write to InfluxDB if configured ──────────────────────────────────────
+    if bw:
+        try:
+            from services.metrics_service import write_device_metrics, is_enabled
+            if is_enabled():
+                metrics_payload = {
+                    "cpu": result.get("cpu", 0),
+                    "memory": result.get("memory", {}),
+                    "ping": ping_data,
+                    "health": result.get("health", {}),
+                    "bandwidth": bw,
+                }
+                await asyncio.to_thread(
+                    write_device_metrics, did, device.get("name", did), metrics_payload,
+                )
+        except Exception as e:
+            logger.debug(f"InfluxDB write skipped: {e}")
+
+    # ── Update current traffic snapshot (for next-cycle delta calculation) ───
     await db.traffic_snapshots.update_one(
         {"device_id": did},
         {"$set": {"device_id": did, "timestamp": now, "traffic": curr_traffic}},
         upsert=True
     )
     return result
+
 
 
 
