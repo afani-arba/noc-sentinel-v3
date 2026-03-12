@@ -880,7 +880,7 @@ async def get_traffic_history(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# BANDWIDTH LIVE — per-interface real-time bandwidth dari last_poll_data
+# BANDWIDTH LIVE — per-interface real-time bandwidth dari traffic_history
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/bandwidth/live/{device_id}")
@@ -889,65 +889,117 @@ async def bandwidth_live(
     user=Depends(get_current_user),
 ):
     """
-    Return current bandwidth per-interface dari last_poll_data terbaru.
-    Data diambil dari MongoDB, tidak perlu koneksi langsung ke device.
+    Return current bandwidth per-interface dari traffic_history terbaru.
+    Bandwidth dihitung sebagai delta octets antar poll (akurat).
+    Data historis 5 menit terakhir juga dikembalikan untuk grafik.
     """
     db = get_db()
     device = await db.devices.find_one({"id": device_id})
     if not device:
         raise HTTPException(404, "Device tidak ditemukan")
 
+    # ── Ambil data traffic_history terbaru (1 record = 1 poll cycle) ─────────
+    latest = await db.traffic_history.find_one(
+        {"device_id": device_id},
+        sort=[("timestamp", -1)]
+    )
+
+    # ── Ambil 10 record terakhir untuk grafik trend (5 menit @ 30s interval) ─
+    history_records = await db.traffic_history.find(
+        {"device_id": device_id},
+        {"_id": 0, "timestamp": 1, "bandwidth": 1, "download_mbps": 1, "upload_mbps": 1,
+         "cpu": 1, "memory_percent": 1}
+    ).sort("timestamp", -1).limit(10).to_list(10)
+    history_records.reverse()  # kronologis
+
+    bandwidth_map = {}
+    if latest:
+        bandwidth_map = latest.get("bandwidth") or {}
+
+    # ── Ambil daftar interface dari last_poll_data untuk metadata ─────────────
     last_poll = device.get("last_poll_data") or {}
     interfaces_raw = last_poll.get("interfaces", [])
-    bandwidth_map = last_poll.get("bandwidth") or {}
 
     PHYSICAL_PREFIXES = ("ether", "sfp", "combo", "wlan", "lte", "fiber", "qsfp")
     VIRTUAL_PREFIXES  = ("bridge", "vlan", "pppoe", "ppp", "l2tp", "pptp", "sstp",
                          "eoip", "gre", "ovpn", "vrrp", "lo", "wg", "tun")
 
+    # Build interface list dengan data bandwidth dari traffic_history
+    iface_names_from_db = set(bandwidth_map.keys()) if bandwidth_map else set()
+    iface_names_from_poll = {i.get("name", "") for i in interfaces_raw if i.get("name")}
+    all_iface_names = iface_names_from_db | iface_names_from_poll
+
+    # Build metadata lookup dari poll data
+    iface_meta = {i.get("name", ""): i for i in interfaces_raw if i.get("name")}
+
     interfaces = []
-    for iface in interfaces_raw:
-        name = iface.get("name", "")
+    for name in sorted(all_iface_names):
         if not name:
             continue
         n = name.lower()
         is_physical = any(n.startswith(p) for p in PHYSICAL_PREFIXES)
-        is_virtual   = any(n.startswith(v) for v in VIRTUAL_PREFIXES)
+        is_virtual  = any(n.startswith(v) for v in VIRTUAL_PREFIXES)
 
-        # bw data — cari di bandwidth_map terlebih dahulu
-        bw = bandwidth_map.get(name, {}) if isinstance(bandwidth_map, dict) else {}
-        dl_bps = bw.get("download_bps", 0) if bw else 0
-        ul_bps = bw.get("upload_bps", 0) if bw else 0
+        bw = bandwidth_map.get(name, {}) if bandwidth_map else {}
+        dl_bps = bw.get("download_bps", 0) if isinstance(bw, dict) else 0
+        ul_bps = bw.get("upload_bps",   0) if isinstance(bw, dict) else 0
 
-        # Fallback: kalkulasi dari rx_bytes/tx_bytes jika ada di iface data (perlu delta, skip di sini)
+        meta = iface_meta.get(name, {})
         interfaces.append({
-            "name": name,
-            "type": iface.get("type", ""),
-            "is_physical": is_physical and not is_virtual,
-            "running": iface.get("running", False),
-            "disabled": iface.get("disabled", False),
-            "mac": iface.get("mac", ""),
-            "download_bps": dl_bps,
-            "upload_bps": ul_bps,
+            "name":          name,
+            "type":          meta.get("type", "ether") if meta else "ether",
+            "is_physical":   is_physical and not is_virtual,
+            "running":       meta.get("running", bw.get("status", "down") == "up") if meta else (bw.get("status", "down") == "up"),
+            "disabled":      meta.get("disabled", False),
+            "mac":           meta.get("mac", ""),
+            "status":        bw.get("status", "up" if bw else "unknown"),
+            "download_bps":  dl_bps,
+            "upload_bps":    ul_bps,
             "download_mbps": round(dl_bps / 1_000_000, 3),
-            "upload_mbps": round(ul_bps / 1_000_000, 3),
-            "rx_bytes": iface.get("rx_bytes", 0),
-            "tx_bytes": iface.get("tx_bytes", 0),
+            "upload_mbps":   round(ul_bps / 1_000_000, 3),
+            "rx_bytes":      meta.get("rx_bytes", 0),
+            "tx_bytes":      meta.get("tx_bytes", 0),
         })
 
-    # Sort: physical first, then by name
-    interfaces.sort(key=lambda x: (not x["is_physical"], x["name"]))
+    # Sort: physical first, then running first, then by name
+    interfaces.sort(key=lambda x: (not x["is_physical"], not x.get("running", False), x["name"]))
+
+    # ── Total bandwidth ───────────────────────────────────────────────────────
+    total_dl = sum(i["download_bps"] for i in interfaces)
+    total_ul = sum(i["upload_bps"]   for i in interfaces)
+
+    # ── Format history untuk grafik (timestamp + total dalam Mbps) ───────────
+    trend = []
+    for rec in history_records:
+        ts = rec.get("timestamp", "")
+        bw_rec = rec.get("bandwidth", {})
+        if bw_rec and isinstance(bw_rec, dict):
+            r_dl = sum(v.get("download_bps", 0) for v in bw_rec.values() if isinstance(v, dict))
+            r_ul = sum(v.get("upload_bps",   0) for v in bw_rec.values() if isinstance(v, dict))
+            trend.append({
+                "timestamp":     ts,
+                "download_mbps": round(r_dl / 1_000_000, 3),
+                "upload_mbps":   round(r_ul / 1_000_000, 3),
+            })
+        else:
+            trend.append({
+                "timestamp":     ts,
+                "download_mbps": rec.get("download_mbps", 0),
+                "upload_mbps":   rec.get("upload_mbps",   0),
+            })
 
     return {
-        "device_id": device_id,
-        "name": device.get("name", ""),
-        "status": device.get("status", "unknown"),
-        "last_poll": device.get("last_poll", ""),
-        "cpu_load": last_poll.get("cpu_load", device.get("cpu_load", 0)),
-        "memory_usage": last_poll.get("memory_usage", device.get("memory_usage", 0)),
-        "interfaces": interfaces,
-        "total_download_mbps": round(sum(i["download_bps"] for i in interfaces) / 1_000_000, 3),
-        "total_upload_mbps": round(sum(i["upload_bps"] for i in interfaces) / 1_000_000, 3),
+        "device_id":          device_id,
+        "name":               device.get("name", ""),
+        "status":             device.get("status", "unknown"),
+        "last_poll":          device.get("last_poll", "") or (latest.get("timestamp", "") if latest else ""),
+        "cpu_load":           latest.get("cpu", device.get("cpu_load", 0)) if latest else device.get("cpu_load", 0),
+        "memory_usage":       latest.get("memory_percent", device.get("memory_usage", 0)) if latest else device.get("memory_usage", 0),
+        "interfaces":         interfaces,
+        "total_download_mbps": round(total_dl / 1_000_000, 3),
+        "total_upload_mbps":   round(total_ul / 1_000_000, 3),
+        "trend":               trend,
+        "has_data":            bool(bandwidth_map),
     }
 
 

@@ -114,6 +114,7 @@ export default function BandwidthPage() {
   const [history, setHistory] = useState([]); // time-series untuk chart
   const [loading, setLoading] = useState(false);
   const [loadingDevices, setLoadingDevices] = useState(true);
+  const [hasData, setHasData] = useState(true); // false = belum ada data bandwidth
   const intervalRef = useRef(null);
   const [showDeviceDropdown, setShowDeviceDropdown] = useState(false);
 
@@ -129,14 +130,26 @@ export default function BandwidthPage() {
       .finally(() => setLoadingDevices(false));
   }, []);
 
-  const fetchLive = useCallback(async () => {
+  const fetchLive = useCallback(async (isFirstLoad = false) => {
     if (!selectedDevice?.id) return;
     try {
       const r = await api.get(`/bandwidth/live/${selectedDevice.id}`);
       const data = r.data;
       setLiveData(data);
+      setHasData(data.has_data !== false);
 
-      // Append ke history time-series
+      // Seed history dari trend API saat pertama load
+      if (isFirstLoad && data.trend && data.trend.length > 0) {
+        const seedPoints = data.trend.map(t => {
+          const ts = new Date(t.timestamp);
+          const timeLabel = ts.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+          return { time: timeLabel, download: t.download_mbps, upload: t.upload_mbps };
+        });
+        setHistory(seedPoints);
+        return; // point sudah di-seed, tidak perlu append lagi
+      }
+
+      // Append ke history time-series (live polling)
       const now = new Date();
       const timeLabel = now.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
@@ -169,11 +182,12 @@ export default function BandwidthPage() {
   useEffect(() => {
     if (!selectedDevice) return;
     setHistory([]);
+    setHasData(true);
     setLoading(true);
-    fetchLive().finally(() => setLoading(false));
+    fetchLive(true).finally(() => setLoading(false));
 
     clearInterval(intervalRef.current);
-    intervalRef.current = setInterval(fetchLive, POLL_INTERVAL);
+    intervalRef.current = setInterval(() => fetchLive(false), POLL_INTERVAL);
 
     return () => clearInterval(intervalRef.current);
   }, [selectedDevice, selectedIface, fetchLive]);
@@ -252,6 +266,20 @@ export default function BandwidthPage() {
               <p className={`text-xl font-bold font-mono ${s.color}`}>{s.value}</p>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* No-data warning — muncul jika device belum pernah dihitung bandwidth-nya */}
+      {liveData && !hasData && (
+        <div className="flex items-start gap-3 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-sm">
+          <Activity className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-xs font-semibold text-yellow-300">Data bandwidth belum tersedia</p>
+            <p className="text-[11px] text-yellow-300/70 mt-0.5">
+              Sistem memerlukan minimal 2 siklus polling (±60 detik) untuk menghitung bandwidth (delta octets).
+              Grafik akan muncul otomatis setelah data tersedia.
+            </p>
+          </div>
         </div>
       )}
 
