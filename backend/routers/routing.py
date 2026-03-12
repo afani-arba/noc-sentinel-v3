@@ -87,12 +87,25 @@ def _normalize_bgp_peer(p: dict, sessions: list) -> dict:
 
     if matched_session:
         raw_state = matched_session.get("state") or matched_session.get("status") or ""
-        # ROS 7 sessions use flag "E" for established (no state field)
+        # ROS 7.x sessions: cek berbagai field untuk state
         if not raw_state:
-            flags = str(matched_session.get("flags", "") or matched_session.get(".flags", ""))
-            if "E" in flags or "established" in flags.lower():
+            # ROS 7.21+: field 'established' berisi "true"/True jika session aktif
+            established_field = matched_session.get("established", "")
+            if established_field in ("true", True):
                 raw_state = "established"
-        uptime = matched_session.get("uptime", "")
+            else:
+                # Fallback ke flags field
+                flags = str(matched_session.get("flags", "") or matched_session.get(".flags", ""))
+                if "E" in flags or "established" in flags.lower():
+                    raw_state = "established"
+
+        # Uptime: coba semua field yang mungkin (ROS 7.21 kadang pakai 'uptime' di session)
+        uptime = (
+            matched_session.get("uptime") or
+            matched_session.get("up-time") or
+            matched_session.get("established-for") or
+            ""
+        )
         prefix_count = matched_session.get("prefix-count", matched_session.get("prefix_count", ""))
         if not remote_as:
             remote_as = (matched_session.get("remote.as") or
@@ -103,7 +116,13 @@ def _normalize_bgp_peer(p: dict, sessions: list) -> dict:
                               matched_session.get("remote-address") or "")
     else:
         raw_state = p.get("state") or p.get("established") or p.get("status") or ""
-        uptime = p.get("uptime", "")
+        # ROS 7.21 connection object juga kadang punya uptime jika BGP session melekat
+        uptime = (
+            p.get("uptime") or
+            p.get("up-time") or
+            p.get("established-for") or
+            ""
+        )
         prefix_count = p.get("prefix-count", p.get("prefix_count", ""))
 
     status = _state_to_status(raw_state)

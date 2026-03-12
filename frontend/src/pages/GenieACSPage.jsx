@@ -596,10 +596,13 @@ export default function GenieACSPage() {
   const [bulkRebooting, setBulkRebooting] = useState(false);
   const [bulkResult, setBulkResult] = useState(null);
   const [confirmBulk, setConfirmBulk] = useState(null); // { mode: 'selected'|'offline' }
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
   // ─────────────────────────────────────────────────────────────────────────────
 
   const fetchDevices = useCallback(async () => {
     setLoading(true);
+    setPage(1); // reset halaman saat fetch ulang
     try {
       const [devRes, statsRes] = await Promise.all([
         api.get("/genieacs/devices", { params: { limit: 300, search } }),
@@ -877,8 +880,9 @@ export default function GenieACSPage() {
               </div>
             ) : (
               <div className="overflow-x-auto">
+                <div className="overflow-y-auto" style={{ maxHeight: "60vh" }}>
                 <table className="w-full text-left" style={{ minWidth: isAdmin ? 960 : 900 }}>
-                  <thead>
+                  <thead className="sticky top-0 z-10 bg-card">
                     <tr className="border-b border-border">
                       {isAdmin && (
                         <th className="px-3 py-2 w-8">
@@ -902,7 +906,7 @@ export default function GenieACSPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {devices.map(d => (
+                    {devices.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map(d => (
                       <tr key={d.id} className={`border-b border-border/30 hover:bg-secondary/20 transition-colors group ${
                         selectedIds.has(d.id) ? "bg-primary/5" : ""
                       }`}>
@@ -926,9 +930,30 @@ export default function GenieACSPage() {
                     ))}
                   </tbody>
                 </table>
-                <p className="text-[10px] text-muted-foreground mt-3 text-right font-mono">
-                  Menampilkan {devices.length} perangkat
-                </p>
+                </div>
+                {/* Pagination */}
+                <div className="flex items-center justify-between mt-3 px-1">
+                  <p className="text-[10px] text-muted-foreground font-mono">
+                    Menampilkan {Math.min((page - 1) * PAGE_SIZE + 1, devices.length)}–{Math.min(page * PAGE_SIZE, devices.length)} dari {devices.length} perangkat
+                  </p>
+                  {devices.length > PAGE_SIZE && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        disabled={page === 1}
+                        onClick={() => setPage(p => p - 1)}
+                        className="px-2.5 py-1 rounded text-[11px] border border-border disabled:opacity-30 hover:bg-secondary/50 transition-colors"
+                      >← Prev</button>
+                      <span className="text-[11px] text-muted-foreground px-2">
+                        {page} / {Math.ceil(devices.length / PAGE_SIZE)}
+                      </span>
+                      <button
+                        disabled={page >= Math.ceil(devices.length / PAGE_SIZE)}
+                        onClick={() => setPage(p => p + 1)}
+                        className="px-2.5 py-1 rounded text-[11px] border border-border disabled:opacity-30 hover:bg-secondary/50 transition-colors"
+                      >Next →</button>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </>

@@ -304,9 +304,9 @@ export default function WallDisplayPage() {
       </div>
 
       {/* ── MAIN CONTENT ────────────────────────────────────────────── */}
-      <div className="flex flex-col lg:flex-row flex-1 gap-3 p-3 sm:p-4 min-h-0 overflow-auto">
-        {/* Device Grid */}
-        <div className="flex-1 min-h-0 lg:overflow-y-auto">
+      <div className="flex flex-col lg:flex-row flex-1 gap-3 p-3 sm:p-4 min-h-0 overflow-hidden">
+        {/* Device Grid — scrolls independently */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
           {devices.length === 0 ? (
             <div className="flex items-center justify-center h-full min-h-[200px]">
               <div className="text-center text-slate-500">
@@ -321,10 +321,10 @@ export default function WallDisplayPage() {
           )}
         </div>
 
-        {/* Right Panel */}
-        <div className="w-full lg:w-72 flex flex-col sm:flex-row lg:flex-col gap-3 lg:overflow-hidden">
+        {/* Right Panel — full height, scrollable */}
+        <div className="w-full lg:w-72 flex-shrink-0 flex flex-col sm:flex-row lg:flex-col gap-3 lg:overflow-y-auto lg:h-full">
           <div
-            className="rounded-xl border p-4 flex flex-col flex-1 lg:overflow-hidden"
+            className="rounded-xl border p-4 flex flex-col flex-1"
             style={{
               background: "rgba(255,255,255,0.03)",
               borderColor: "rgba(99,179,237,0.2)",
@@ -393,9 +393,9 @@ export default function WallDisplayPage() {
             </div>
 
             {/* ── Per-device ISP interface bandwidth ── */}
-            <div className="border-t border-white/10 pt-3 flex flex-col flex-1 min-h-0 overflow-hidden">
-              <p className="text-[9px] text-slate-500 uppercase tracking-widest mb-2 flex-shrink-0">Per-Device ISP Bandwidth</p>
-              <div className="flex-1 overflow-y-auto pr-1 space-y-2">
+            <div className="border-t border-white/10 pt-3 mt-1">
+              <p className="text-[9px] text-slate-500 uppercase tracking-widest mb-2">Per-Device ISP Bandwidth</p>
+              <div className="space-y-2">
               {devices.filter(d => d.status === "online").map(d => {
                 const hist = deviceBwHistory[d.id] || [];
                 const latest = hist[hist.length - 1] || { dl: d.download_mbps || 0, ul: d.upload_mbps || 0 };
@@ -448,7 +448,6 @@ export default function WallDisplayPage() {
               </div>
             </div>
           </div>
-
 
           {/* Active Alerts */}
           <div
