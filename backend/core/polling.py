@@ -10,6 +10,7 @@ import snmp_service
 
 logger = logging.getLogger(__name__)
 POLL_INTERVAL = 30
+OFFLINE_GRACE_POLLS = 2   # Number of consecutive failed polls before marking offline
 
 
 async def poll_single_device(device: dict) -> dict:
@@ -20,8 +21,19 @@ async def poll_single_device(device: dict) -> dict:
     comm = device.get("snmp_community", "public")
 
     try:
-        result = await asyncio.wait_for(snmp_service.poll_device(host, port, comm), timeout=25)
-    except (asyncio.TimeoutError, Exception):
+        result = await asyncio.wait_for(snmp_service.poll_device(host, port, comm), timeout=55)
+    except asyncio.TimeoutError:
+        logger.warning(f"Poll timeout for {host} after 55s")
+        result = {
+            "reachable": False,
+            "ping": {"reachable": False, "avg": 0, "jitter": 0, "loss": 100},
+            "system": {}, "cpu": 0,
+            "memory": {"total": 0, "used": 0, "percent": 0},
+            "interfaces": [], "traffic": {},
+            "health": {"cpu_temp": 0, "board_temp": 0, "voltage": 0, "power": 0}
+        }
+    except Exception as poll_err:
+        logger.warning(f"Poll error for {host}: {poll_err}")
         result = {
             "reachable": False,
             "ping": {"reachable": False, "avg": 0, "jitter": 0, "loss": 100},
@@ -32,7 +44,31 @@ async def poll_single_device(device: dict) -> dict:
         }
 
     now = datetime.now(timezone.utc).isoformat()
-    update = {"status": "online" if result["reachable"] else "offline", "last_poll": now, "last_poll_data": result}
+
+    # ── Offline grace period: don't mark offline on the FIRST failed poll ─────
+    # Only mark offline after OFFLINE_GRACE_POLLS consecutive failures.
+    # This prevents transient SNMP timeouts from causing false-offline alerts.
+    consecutive_failures = device.get("consecutive_poll_failures", 0)
+    old_status = device.get("status", "unknown")
+
+    if result["reachable"]:
+        new_status = "online"
+        consecutive_failures = 0
+    else:
+        consecutive_failures += 1
+        if consecutive_failures >= OFFLINE_GRACE_POLLS:
+            new_status = "offline"
+        else:
+            # Grace period: keep current status (don't flip to offline yet)
+            new_status = old_status if old_status in ("online", "offline") else "offline"
+            logger.info(f"Poll failed for {device.get('name', host)} ({consecutive_failures}/{OFFLINE_GRACE_POLLS}), grace period active")
+
+    update = {
+        "status": new_status,
+        "last_poll": now,
+        "last_poll_data": result,
+        "consecutive_poll_failures": consecutive_failures,
+    }
 
     if result["reachable"] and result.get("system"):
         s = result["system"]
@@ -55,8 +91,6 @@ async def poll_single_device(device: dict) -> dict:
 
     # ── SLA Event Recording: detect status transitions ────────────────────────
     # Compare new status vs stored status to record online/offline events
-    old_status = device.get("status", "unknown")
-    new_status = update["status"]
     if old_status != new_status and new_status in ("online", "offline"):
         try:
             await db.sla_events.insert_one({
