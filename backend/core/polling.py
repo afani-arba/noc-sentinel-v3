@@ -242,21 +242,20 @@ async def poll_single_device(device: dict) -> dict:
         # SNMP berhasil — reset fail counter
         snmp_fail_count = 0
     else:
-        # SNMP gagal/skip — naikkan counter, lalu fallback ke REST API
+        # SNMP gagal/skip — naikkan counter
         snmp_fail_count = snmp_fail_count + 1 if use_snmp else snmp_fail_count
-        if api_mode in ("rest", "api"):
-            if use_snmp:
-                logger.debug(
-                    f"SNMP gagal [{snmp_fail_count}/{SNMP_SKIP_THRESHOLD}] untuk "
-                    f"{device.get('name', host)}, fallback ke REST API"
-                )
-            else:
-                logger.debug(
-                    f"SNMP skip (fail={snmp_fail_count}) untuk "
-                    f"{device.get('name', host)}, langsung REST API"
-                )
+
+        # PENTING: hanya api_mode='rest' yang bisa REST API fallback.
+        # api_mode='api' = ROS6 RouterOS API Protocol — MikroTikRouterAPI
+        # TIDAK memiliki get_system_resource(), sehingga poll_via_rest_api() akan crash.
+        if api_mode == "rest":
+            logger.debug(
+                f"SNMP {'gagal' if use_snmp else 'skip'} untuk "
+                f"{device.get('name', host)}, REST API fallback"
+            )
             result = await poll_via_rest_api(device)
         else:
+            # ROS6 api mode atau tidak ada REST: tandai offline
             result = {
                 "reachable": False,
                 "ping": {"reachable": False, "avg": 0, "jitter": 0, "loss": 100},
@@ -265,6 +264,7 @@ async def poll_single_device(device: dict) -> dict:
                 "interfaces": [], "traffic": {},
                 "health": {"cpu_temp": 0, "board_temp": 0, "voltage": 0, "power": 0},
             }
+
 
     # Simpan snmp_consecutive_fail ke DB untuk smart routing siklus berikutnya
     # (update ringan, non-blocking terhadap alur utama)
