@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # NOC Sentinel v3 — Automated Install Script
-# Target: Ubuntu 20.04 LTS (Focal Fossa) / Ubuntu 22.04 LTS
+# Target: Ubuntu 20.04 LTS (Focal) / Ubuntu 22.04 LTS (Jammy)
 # Usage : sudo bash install.sh
 # Repo  : https://github.com/afani-arba/noc-sentinel-v3
 # =============================================================================
@@ -83,11 +83,9 @@ print_ok "Source code siap di $APP_DIR"
 print_step "3/10 Install MongoDB 6.x"
 # =============================================================================
 if ! command -v mongod &>/dev/null; then
-    # Import MongoDB GPG key
     curl -fsSL https://www.mongodb.org/static/pgp/server-6.0.asc | \
         gpg -o /usr/share/keyrings/mongodb-server-6.0.gpg --dearmor 2>/dev/null
 
-    # Add repo (focal = Ubuntu 20.04, jammy = Ubuntu 22.04)
     UBUNTU_CODENAME=$(lsb_release -cs)
     if [[ "$UBUNTU_CODENAME" == "focal" ]]; then
         MONGO_CODENAME="focal"
@@ -129,7 +127,7 @@ else
     print_warn "MongoDB user '$MONGO_USER' sudah ada, skip"
 fi
 
-# Enable auth
+# Enable authentication
 if ! grep -q "authorization: enabled" /etc/mongod.conf 2>/dev/null; then
     cat >> /etc/mongod.conf <<'MONGOEOF'
 
@@ -177,7 +175,7 @@ source venv/bin/activate
 pip install --upgrade pip -q
 pip install -r requirements.txt -q
 deactivate
-print_ok "Python packages installed"
+print_ok "Python packages installed (termasuk sse-starlette, influxdb-client)"
 
 # =============================================================================
 print_step "7/10 Setup file .env backend"
@@ -195,12 +193,12 @@ else
 fi
 
 # =============================================================================
-print_step "8/10 Build frontend (Vite)"
+print_step "8/10 Build frontend (Vite + React)"
 # =============================================================================
 cd "$APP_DIR/frontend"
 
-print_ok "Installing npm packages..."
-npm install
+print_ok "Installing npm packages (sigma.js, graphology, recharts, dll)..."
+npm install --legacy-peer-deps
 
 print_ok "Building production bundle..."
 npm run build
@@ -237,6 +235,18 @@ server {
         try_files \$uri \$uri/ /index.html;
     }
 
+    # Backend API proxy — SSE membutuhkan buffering off
+    location /api/events/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300s;
+    }
+
     # Backend API proxy
     location /api/ {
         proxy_pass http://127.0.0.1:8000;
@@ -267,33 +277,29 @@ ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/nocsentinel
 nginx -t
 systemctl restart nginx
 systemctl enable nginx --quiet
-print_ok "Nginx configured"
+print_ok "Nginx configured (SSE proxy included)"
 
 # =============================================================================
 print_step "10/10 Systemd service & admin user"
 # =============================================================================
 
-# Fix permissions
-chown -R www-data:www-data "$APP_DIR/backend"
-chmod -R 755 "$APP_DIR/frontend/build"
-chmod 600 "$APP_DIR/backend/.env"
-chown www-data:www-data "$APP_DIR/backend/.env"
-
 cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<SVCEOF
 [Unit]
 Description=NOC Sentinel v3 Backend (FastAPI)
 After=network.target mongod.service
-Requires=mongod.service
+Wants=mongod.service
 
 [Service]
 Type=simple
-User=www-data
-Group=www-data
+User=root
+Group=root
 WorkingDirectory=${APP_DIR}/backend
 EnvironmentFile=${APP_DIR}/backend/.env
 ExecStart=${APP_DIR}/backend/venv/bin/uvicorn server:app --host 127.0.0.1 --port 8000 --workers 1 --loop asyncio
 Restart=always
 RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=${SERVICE_NAME}
@@ -307,17 +313,13 @@ systemctl enable "${SERVICE_NAME}" --quiet
 systemctl start "${SERVICE_NAME}"
 sleep 4
 
-# Buat admin user langsung
+# Buat admin user
 print_ok "Membuat admin user..."
-
-# Load .env untuk mendapatkan MONGO_URI
-source "$APP_DIR/backend/.env" 2>/dev/null || true
 
 cd "$APP_DIR/backend"
 "$APP_DIR/backend/venv/bin/python3" - <<PYEOF
 import asyncio, sys, os, uuid
 
-# Load .env dengan path eksplisit
 from dotenv import load_dotenv
 load_dotenv('$APP_DIR/backend/.env')
 
@@ -333,7 +335,6 @@ async def create_admin():
     client = AsyncIOMotorClient(mongo_url)
     db = client[db_name]
 
-    # Backend auth.py query ke admin_users — pastikan insert ke sini
     existing = await db.admin_users.find_one({"username": "admin"})
     if existing:
         print("⚠  Admin user sudah ada, skip")
@@ -355,6 +356,9 @@ async def create_admin():
 asyncio.run(create_admin())
 PYEOF
 
+# Copy update.sh ke /usr/local/bin untuk akses mudah
+cp "$APP_DIR/update.sh" /usr/local/bin/noc-update 2>/dev/null || true
+chmod +x /usr/local/bin/noc-update 2>/dev/null || true
 
 # Firewall
 ufw --force enable > /dev/null 2>&1
@@ -388,4 +392,5 @@ echo -e "  ${YELLOW}Langkah berikutnya:${NC}"
 echo    "  1. Login dan SEGERA GANTI PASSWORD admin!"
 echo    "  2. Tambah device MikroTik: Settings → Devices"
 echo    "  3. Untuk HTTPS: certbot --nginx -d domain.anda.com"
+echo    "  4. Update di masa depan: sudo noc-update"
 echo ""
