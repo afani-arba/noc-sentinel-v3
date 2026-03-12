@@ -106,7 +106,23 @@ async def poll_single_device(device: dict) -> dict:
 
     await db.devices.update_one({"id": did}, {"$set": update})
 
+    # ── Detect ISP/INPUT interfaces via MikroTik API ──────────────────────────
+    # Runs async after main poll; saves isp_interfaces to device doc for use
+    # by dashboard/interfaces, traffic-history, and wallboard bandwidth queries.
+    try:
+        from routers.devices import get_api_client
+        mt = get_api_client(device)
+        isp_ifaces = await mt.get_isp_interfaces()
+        if isp_ifaces:
+            await db.devices.update_one(
+                {"id": did},
+                {"$set": {"isp_interfaces": isp_ifaces}}
+            )
+    except Exception as isp_err:
+        logger.debug(f"ISP interface detect skipped for {did}: {isp_err}")
+
     # Fire WhatsApp notifications if enabled
+
     try:
         from services.notification_service import check_and_notify
         await check_and_notify(device, result, update)

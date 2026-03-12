@@ -382,11 +382,12 @@ async def dashboard_stats(device_id: str = "", interface: str = "", user=Depends
 @router.get("/dashboard/interfaces")
 async def dashboard_interfaces(device_id: str = "", user=Depends(get_current_user)):
     if not device_id:
-        return ["all"]
+        return {"interfaces": ["all"], "isp_interfaces": []}
     db = get_db()
     device = await db.devices.find_one({"id": device_id}, {"_id": 0})
     if not device or not device.get("last_poll_data"):
-        return ["all"]
+        return {"interfaces": ["all"], "isp_interfaces": []}
+
     # Physical interface prefixes – exclude virtual/tunnel/software
     PHYSICAL_PREFIXES = ("ether", "sfp", "combo", "wlan", "lte", "fiber", "qsfp", "xsfp")
     VIRTUAL_PREFIXES  = ("bridge", "vlan", "pppoe", "ppp", "l2tp", "pptp", "sstp", "eoip", "gre", "ovpn", "vrrp", "lo", "wg", "tun", "ipip")
@@ -397,17 +398,28 @@ async def dashboard_interfaces(device_id: str = "", user=Depends(get_current_use
         if any(n.startswith(p) for p in PHYSICAL_PREFIXES):
             physical.append(name)
         elif not any(n.startswith(v) for v in VIRTUAL_PREFIXES):
-            # Include unknown prefixes only if they don't look virtual
-            # (e.g. custom names like "WAN" or "ISP")
             physical.append(name)
-    # Deduplicate while preserving order
+
+    # Deduplicate
     seen = set()
     unique_physical = []
     for n in physical:
         if n not in seen:
             seen.add(n)
             unique_physical.append(n)
-    return ["all"] + unique_physical
+
+    # ISP interfaces saved from comment detection (detect first → suggest default)
+    isp_interfaces = device.get("isp_interfaces", [])
+
+    # Sort: ISP interfaces first, then remaining physical interfaces
+    isp_set = set(isp_interfaces)
+    ordered = [i for i in isp_interfaces if i in set(unique_physical)]
+    ordered += [i for i in unique_physical if i not in isp_set]
+
+    return {
+        "interfaces": ["all"] + ordered,
+        "isp_interfaces": ordered[:len(isp_interfaces)],  # confirmed ISP interfaces
+    }
 
 
 @router.get("/dashboard/wan-interface")

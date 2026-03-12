@@ -185,7 +185,8 @@ export default function WallDisplayPage() {
   const [data, setData] = useState(null);
   const [events, setEvents] = useState([]);
   const [time, setTime] = useState(new Date());
-  const [bwHistory, setBwHistory] = useState([]);
+  const [bwHistory, setBwHistory] = useState([]);          // aggregated total history
+  const [deviceBwHistory, setDeviceBwHistory] = useState({}); // per-device history: {id: [{dl, ul}]}
 
   const fetchData = async () => {
     try {
@@ -196,12 +197,27 @@ export default function WallDisplayPage() {
       setData(statusRes.data);
       setEvents(eventsRes.data.events || []);
 
-      // Build quick BW history from summary
-      const total_dl = statusRes.data.devices.reduce((s, d) => s + d.download_mbps, 0);
-      const total_ul = statusRes.data.devices.reduce((s, d) => s + d.upload_mbps, 0);
+      const devs = statusRes.data.devices || [];
+
+      // Track aggregated BW history
+      const total_dl = devs.reduce((s, d) => s + (d.download_mbps || 0), 0);
+      const total_ul = devs.reduce((s, d) => s + (d.upload_mbps || 0), 0);
       setBwHistory(prev => {
         const next = [...prev, { download: parseFloat(total_dl.toFixed(2)), upload: parseFloat(total_ul.toFixed(2)) }];
         return next.slice(-30);
+      });
+
+      // Track per-device BW history
+      setDeviceBwHistory(prev => {
+        const next = { ...prev };
+        for (const d of devs) {
+          const hist = next[d.id] || [];
+          next[d.id] = [...hist, {
+            dl: parseFloat((d.download_mbps || 0).toFixed(2)),
+            ul: parseFloat((d.upload_mbps || 0).toFixed(2)),
+          }].slice(-20);
+        }
+        return next;
       });
     } catch (e) {
       console.error("Wallboard fetch error:", e);
@@ -302,7 +318,6 @@ export default function WallDisplayPage() {
 
         {/* Right Panel */}
         <div className="w-full lg:w-72 flex flex-col sm:flex-row lg:flex-col gap-3">
-          {/* BW Chart */}
           <div
             className="rounded-xl border p-4 flex-1"
             style={{
@@ -311,7 +326,7 @@ export default function WallDisplayPage() {
             }}
           >
             <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-widest mb-3 flex items-center gap-2">
-              <Activity className="w-3.5 h-3.5 text-blue-400" /> Bandwidth Real-time
+              <Activity className="w-3.5 h-3.5 text-blue-400" /> Bandwidth Real-time (ISP)
             </h3>
 
             {/* ── Total Bandwidth Numbers ── */}
@@ -329,20 +344,21 @@ export default function WallDisplayPage() {
                       <TrendingDown className="w-2.5 h-2.5" /> Download
                     </p>
                     <p className="text-lg font-bold font-mono text-blue-300 leading-tight">{formatBw(latest.download)}</p>
-                    <p className="text-[9px] text-blue-500/60">total all devices</p>
+                    <p className="text-[9px] text-blue-500/60">total ISP all devices</p>
                   </div>
                   <div className="rounded-lg bg-green-500/10 border border-green-500/20 p-2 text-center">
                     <p className="text-[9px] text-green-400/70 uppercase tracking-widest flex items-center justify-center gap-1 mb-0.5">
                       <TrendingUp className="w-2.5 h-2.5" /> Upload
                     </p>
                     <p className="text-lg font-bold font-mono text-green-300 leading-tight">{formatBw(latest.upload)}</p>
-                    <p className="text-[9px] text-green-500/60">total all devices</p>
+                    <p className="text-[9px] text-green-500/60">total ISP all devices</p>
                   </div>
                 </div>
               );
             })()}
 
-            <div className="h-28">
+            {/* Aggregated chart */}
+            <div className="h-24">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={bwHistory}>
                   <defs>
@@ -365,10 +381,64 @@ export default function WallDisplayPage() {
                 </AreaChart>
               </ResponsiveContainer>
             </div>
-            <div className="flex gap-4 mt-2 text-[10px] text-slate-500">
+            <div className="flex gap-4 mt-1 mb-3 text-[10px] text-slate-500">
               <span className="flex items-center gap-1"><span className="w-2 h-[2px] bg-blue-500 inline-block" /> DL</span>
               <span className="flex items-center gap-1"><span className="w-2 h-[2px] bg-green-500 inline-block" /> UL</span>
-              <span className="ml-auto text-slate-600">{bwHistory.length} samples</span>
+              <span className="ml-auto text-slate-600">{bwHistory.length} pts</span>
+            </div>
+
+            {/* ── Per-device ISP interface bandwidth ── */}
+            <div className="border-t border-white/10 pt-3 space-y-2 max-h-56 overflow-y-auto pr-1">
+              <p className="text-[9px] text-slate-500 uppercase tracking-widest mb-2">Per-Device ISP Bandwidth</p>
+              {devices.filter(d => d.status === "online").map(d => {
+                const hist = deviceBwHistory[d.id] || [];
+                const latest = hist[hist.length - 1] || { dl: d.download_mbps || 0, ul: d.upload_mbps || 0 };
+                const formatBw = (v) => {
+                  if (!v) return "0"; 
+                  if (v >= 1000) return `${(v/1000).toFixed(1)}G`;
+                  if (v >= 1) return `${v.toFixed(1)}M`;
+                  return `${(v*1000).toFixed(0)}K`;
+                };
+                const isp = d.isp_interfaces?.join(", ") || "";
+                return (
+                  <div key={d.id} className="rounded-lg bg-white/[0.03] border border-white/[0.07] p-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[10px] font-semibold text-white truncate">{d.identity || d.name}</p>
+                        {isp && <p className="text-[9px] text-blue-400/70 font-mono truncate">{isp}</p>}
+                      </div>
+                      <div className="flex gap-2 text-[10px] font-mono ml-2 flex-shrink-0">
+                        <span className="text-blue-300"><TrendingDown className="w-2.5 h-2.5 inline" /> {formatBw(latest.dl)}</span>
+                        <span className="text-green-300"><TrendingUp className="w-2.5 h-2.5 inline" /> {formatBw(latest.ul)}</span>
+                      </div>
+                    </div>
+                    {/* Tiny sparkline charts */}
+                    {hist.length > 1 && (
+                      <div className="h-8">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={hist} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+                            <defs>
+                              <linearGradient id={`dl_${d.id}`} x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.5} />
+                                <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                              </linearGradient>
+                              <linearGradient id={`ul_${d.id}`} x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#22c55e" stopOpacity={0.5} />
+                                <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                              </linearGradient>
+                            </defs>
+                            <Area type="monotone" dataKey="dl" stroke="#3b82f6" fill={`url(#dl_${d.id})`} strokeWidth={1.5} dot={false} />
+                            <Area type="monotone" dataKey="ul" stroke="#22c55e" fill={`url(#ul_${d.id})`} strokeWidth={1.5} dot={false} />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {devices.filter(d => d.status === "online").length === 0 && (
+                <p className="text-[10px] text-slate-600 text-center py-2">No online devices</p>
+              )}
             </div>
           </div>
 

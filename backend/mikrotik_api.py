@@ -370,6 +370,28 @@ class MikroTikRestAPI(MikroTikBase):
         except Exception:
             return []
 
+    async def get_isp_interfaces(self):
+        """
+        Return list of interface names that are marked as ISP/WAN/INPUT uplinks
+        via their 'comment' field in MikroTik.
+        Keywords checked (case-insensitive): ISP, INPUT, WAN, UPLINK, UPSTREAM.
+        Falls back to empty list if none found (caller should fallback to 'all').
+        """
+        ISP_KEYWORDS = ("isp", "input", "wan", "uplink", "upstream")
+        try:
+            ifaces = await self._async_req("GET", "interface")
+            if not isinstance(ifaces, list):
+                return []
+            matched = []
+            for iface in ifaces:
+                comment = str(iface.get("comment", "") or "").lower()
+                name = iface.get("name", "")
+                if name and any(kw in comment for kw in ISP_KEYWORDS):
+                    matched.append(name)
+            return matched
+        except Exception:
+            return []
+
     # ── Interface Traffic (monitor-traffic via POST, ROS 7.x) ──
     async def get_interface_traffic(self, interface_name: str = "ether1", duration: int = 1):
         """
@@ -646,6 +668,26 @@ class MikroTikRouterAPI(MikroTikBase):
         try:
             items = await asyncio.to_thread(self._list_resource, "/interface")
             return self._normalize_items(items)
+        except Exception:
+            return []
+
+    async def get_isp_interfaces(self):
+        """
+        Return list of interface names that are marked as ISP/WAN/INPUT uplinks
+        via their 'comment' field in MikroTik.
+        Keywords checked (case-insensitive): ISP, INPUT, WAN, UPLINK, UPSTREAM.
+        """
+        ISP_KEYWORDS = ("isp", "input", "wan", "uplink", "upstream")
+        try:
+            items = await asyncio.to_thread(self._list_resource, "/interface")
+            ifaces = self._normalize_items(items)
+            matched = []
+            for iface in ifaces:
+                comment = str(iface.get("comment", "") or "").lower()
+                name = iface.get("name", "")
+                if name and any(kw in comment for kw in ISP_KEYWORDS):
+                    matched.append(name)
+            return matched
         except Exception:
             return []
 

@@ -36,10 +36,23 @@ async def wallboard_status(user=Depends(get_current_user)):
 
         download_bps = 0
         upload_bps = 0
+        isp_interfaces = d.get("isp_interfaces", [])
+
         if last_bw:
             bw = last_bw.get("bandwidth") or {}
-            if bw:
-                # New format: {iface: {download_bps, upload_bps}}
+            if bw and isp_interfaces:
+                # Use only ISP/INPUT interface bandwidth (comment-detected)
+                for iface in isp_interfaces:
+                    iface_bw = bw.get(iface, {})
+                    if isinstance(iface_bw, dict):
+                        download_bps += iface_bw.get("download_bps", 0)
+                        upload_bps   += iface_bw.get("upload_bps",   0)
+                # Fallback: if none of the isp_interfaces found in bandwidth dict, use total
+                if download_bps == 0 and upload_bps == 0:
+                    download_bps = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
+                    upload_bps   = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
+            elif bw:
+                # New format: sum all interfaces (no ISP detection yet)
                 download_bps = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
                 upload_bps   = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
             else:
@@ -79,7 +92,9 @@ async def wallboard_status(user=Depends(get_current_user)):
             "upload_mbps": round(upload_bps / 1_000_000, 2),
             "last_poll": d.get("last_poll", ""),
             "alert_level": alert_level,  # normal | warning | critical
+            "isp_interfaces": d.get("isp_interfaces", []),  # comment-detected ISP interface names
         })
+
 
     # Sort: critical first, then warning, then normal; within each group: alphabetical
     order = {"critical": 0, "warning": 1, "normal": 2}
