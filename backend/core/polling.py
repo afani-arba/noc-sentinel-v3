@@ -14,66 +14,98 @@ OFFLINE_GRACE_POLLS = 2   # Number of consecutive failed polls before marking of
 async def poll_via_rest_api(device: dict) -> dict:
     """
     Ambil data monitoring via MikroTik REST API sebagai fallback dari SNMP.
-    Menghasilkan struktur data yang sama dengan snmp_service.poll_device().
-    Digunakan ketika SNMP tidak dapat dijangkau (NAT/VPN/firewall).
+    Menghasilkan struktur data yang kompatibel dengan snmp_service.poll_device().
+    Fix: identity dari /system/identity, bandwidth dari monitor-traffic.
     """
+    EMPTY_RESULT = {
+        "reachable": False, "poll_mode": "rest_api_failed",
+        "ping": {"reachable": False, "avg": 0, "jitter": 0, "loss": 100},
+        "system": {}, "cpu": 0,
+        "memory": {"total": 0, "used": 0, "percent": 0},
+        "interfaces": [], "traffic": {},
+        "health": {"cpu_temp": 0, "board_temp": 0, "voltage": 0, "power": 0},
+        "bw_precomputed": {},
+    }
     try:
         mt = get_api_client(device)
 
-        # Ambil semua data secara paralel
-        sys_res, health_raw, ifaces_raw = await asyncio.gather(
+        # ── Ambil semua data secara paralel ──────────────────────────────────
+        async def _empty_coro():
+            return {}
+
+        sys_res, identity_res, health_raw, ifaces_raw = await asyncio.gather(
             mt.get_system_resource(),
+            mt._async_req("GET", "system/identity") if hasattr(mt, "_async_req") else _empty_coro(),
             mt.get_system_health(),
             mt.list_interfaces(),
             return_exceptions=True,
         )
 
-        if isinstance(sys_res, Exception):
-            sys_res = {}
-        if isinstance(health_raw, Exception):
-            health_raw = {}
-        if isinstance(ifaces_raw, Exception):
-            ifaces_raw = []
+
+        # Bersihkan exceptions
+        if isinstance(sys_res, Exception):      sys_res      = {}
+        if isinstance(identity_res, Exception): identity_res = {}
+        if isinstance(health_raw, Exception):   health_raw   = {}
+        if isinstance(ifaces_raw, Exception):   ifaces_raw   = []
+
+        # Cek apakah REST API bisa dijangkau sama sekali
+        if not sys_res and not identity_res:
+            logger.warning(f"REST API tidak merespon untuk {device.get('name','?')}")
+            return EMPTY_RESULT
+
+        # ── Identity (nama router) ── HARUS dari /system/identity bukan platform ──
+        router_name = ""
+        if isinstance(identity_res, dict):
+            router_name = identity_res.get("name", "")
+        # Fallback: gunakan nama device dari DB
+        if not router_name:
+            router_name = device.get("name", device.get("ip_address", ""))
 
         # ── Sistem Info ──────────────────────────────────────────────────────
         sys_info = {}
+        board_name = ""
+        ros_version = ""
+        architecture = ""
+        uptime_formatted = "N/A"
+        uptime_seconds = 0
+
         if sys_res:
-            # Uptime: ROS API mengembalikan string "3d15h30m" atau seconds integer
-            uptime_raw = sys_res.get("uptime", "") or ""
-            uptime_seconds = 0
-            uptime_formatted = "N/A"
+            import re
+            board_name   = sys_res.get("board-name", "")
+            ros_version  = sys_res.get("version", "")
+            architecture = sys_res.get("architecture-name", "")
+
+            # Parse uptime ROS format: "3d15h30m10s"
+            uptime_raw = str(sys_res.get("uptime", "") or "")
             try:
-                # Format ROS: "3d15h30m10s"  atau "15h30m" dll
-                import re
                 d = int(re.search(r"(\d+)d", uptime_raw).group(1)) if "d" in uptime_raw else 0
                 h = int(re.search(r"(\d+)h", uptime_raw).group(1)) if "h" in uptime_raw else 0
                 m = int(re.search(r"(\d+)m", uptime_raw).group(1)) if "m" in uptime_raw else 0
                 s_match = re.search(r"(\d+)s", uptime_raw)
-                s_only = int(s_match.group(1)) if s_match else 0
-                uptime_seconds = d * 86400 + h * 3600 + m * 60 + s_only
+                sec = int(s_match.group(1)) if s_match else 0
+                uptime_seconds = d * 86400 + h * 3600 + m * 60 + sec
                 uptime_formatted = f"{d}d {h}h {m}m"
             except Exception:
                 uptime_formatted = uptime_raw or "N/A"
 
             sys_info = {
-                "sys_name":       sys_res.get("platform", ""),
-                "board_name":     sys_res.get("board-name", sys_res.get("platform", "")),
-                "identity":       sys_res.get("platform", ""),
-                "ros_version":    sys_res.get("version", ""),
-                "architecture":   sys_res.get("architecture-name", ""),
+                "sys_name":         router_name,
+                "board_name":       board_name,
+                "identity":         router_name,   # ← nama router dari /system/identity
+                "ros_version":      ros_version,
+                "architecture":     architecture,
                 "uptime_formatted": uptime_formatted,
-                "uptime_seconds": uptime_seconds,
-                "serial":         "",
-                "firmware":       sys_res.get("version", ""),
+                "uptime_seconds":   uptime_seconds,
+                "serial":           "",
+                "firmware":         ros_version,
             }
 
         # ── CPU ──────────────────────────────────────────────────────────────
         cpu_load = 0
         try:
-            cpu_str = str(sys_res.get("cpu-load", "0") or "0")
-            cpu_load = int(cpu_str.strip().rstrip("%"))
+            cpu_load = int(str(sys_res.get("cpu-load", "0") or "0").rstrip("%"))
         except (ValueError, TypeError):
-            cpu_load = 0
+            pass
 
         # ── Memory ───────────────────────────────────────────────────────────
         memory = {"total": 0, "used": 0, "percent": 0}
@@ -100,38 +132,69 @@ async def poll_via_rest_api(device: dict) -> dict:
 
         # ── Interfaces ───────────────────────────────────────────────────────
         interfaces = []
+        running_ifaces = []
         for iface in (ifaces_raw if isinstance(ifaces_raw, list) else []):
-            name = iface.get("name", "")
-            running = iface.get("running", False)
-            disabled = iface.get("disabled", False)
-            status = "down" if disabled else ("up" if running else "down")
-            speed_raw = iface.get("actual-mtu", 0)  # fallback, actual speed needs extra call
-            interfaces.append({
-                "index":  iface.get(".id", ""),
-                "name":   name,
-                "status": status,
-                "speed":  0,
-            })
+            name     = iface.get("name", "")
+            running  = iface.get("running", False)
+            disabled = str(iface.get("disabled", "false")).lower() == "true"
+            status   = "down" if disabled else ("up" if running else "down")
+            interfaces.append({"index": iface.get(".id", ""), "name": name, "status": status, "speed": 0})
+            if running and not disabled and name:
+                running_ifaces.append(name)
+
+        # ── Bandwidth via monitor-traffic (REST API) ──────────────────────────
+        # Ambil bandwidth real-time untuk setiap interface yang running
+        # ROS /rest/interface/monitor-traffic POST → {rx-bits-per-second, tx-bits-per-second}
+        bw_precomputed = {}
+        if running_ifaces and hasattr(mt, "_async_req"):
+            async def get_iface_traffic(iface_name):
+                try:
+                    r = await mt._async_req(
+                        "POST", "interface/monitor-traffic",
+                        {"interface": iface_name, "once": ""}
+                    )
+                    if isinstance(r, list) and r:
+                        r = r[0]
+                    if isinstance(r, dict):
+                        rx_bps = int(r.get("rx-bits-per-second", 0) or 0)
+                        tx_bps = int(r.get("tx-bits-per-second", 0) or 0)
+                        return (iface_name, {
+                            "download_bps": rx_bps,
+                            "upload_bps":   tx_bps,
+                            "status":       "up",
+                        })
+                except Exception:
+                    pass
+                return None
+
+            # Limit ke 16 interface teratas agar tidak timeout
+            tasks = [get_iface_traffic(n) for n in running_ifaces[:16]]
+            bw_results = await asyncio.gather(*tasks, return_exceptions=True)
+            for r in bw_results:
+                if r and not isinstance(r, Exception):
+                    bw_precomputed[r[0]] = r[1]
 
         logger.info(
-            f"REST API poll success: {device.get('name', device.get('ip_address', '?'))} "
-            f"cpu={cpu_load}% mem={memory['percent']}%"
+            f"REST API poll OK: {device.get('name','?')} "
+            f"cpu={cpu_load}% mem={memory['percent']}% "
+            f"ifaces={len(running_ifaces)} bw={len(bw_precomputed)}"
         )
 
         return {
-            "reachable": True,
-            "poll_mode": "rest_api",   # marker untuk UI/log
-            "ping":      {"reachable": True, "min": 0, "avg": 0, "max": 0, "jitter": 0, "loss": 0},
-            "system":    sys_info,
-            "cpu":       cpu_load,
-            "memory":    memory,
-            "interfaces": interfaces,
-            "traffic":   {},   # traffic delta requires sequential snapshots; SNMP-only for now
-            "health":    health,
+            "reachable":      True,
+            "poll_mode":      "rest_api",
+            "ping":           {"reachable": True, "min": 0, "avg": 0, "max": 0, "jitter": 0, "loss": 0},
+            "system":         sys_info,
+            "cpu":            cpu_load,
+            "memory":         memory,
+            "interfaces":     interfaces,
+            "traffic":        {},
+            "health":         health,
+            "bw_precomputed": bw_precomputed,
         }
 
     except Exception as e:
-        logger.warning(f"REST API fallback failed for {device.get('name','?')}: {e}")
+        logger.warning(f"REST API fallback gagal untuk {device.get('name','?')}: {e}")
         return {
             "reachable": False, "poll_mode": "rest_api_failed",
             "ping": {"reachable": False, "avg": 0, "jitter": 0, "loss": 100},
@@ -139,6 +202,7 @@ async def poll_via_rest_api(device: dict) -> dict:
             "memory": {"total": 0, "used": 0, "percent": 0},
             "interfaces": [], "traffic": {},
             "health": {"cpu_temp": 0, "board_temp": 0, "voltage": 0, "power": 0},
+            "bw_precomputed": {},
         }
 
 
@@ -246,7 +310,7 @@ async def poll_single_device(device: dict) -> dict:
     # Runs async after main poll; saves isp_interfaces to device doc for use
     # by dashboard/interfaces, traffic-history, and wallboard bandwidth queries.
     try:
-        from routers.devices import get_api_client
+        # Gunakan get_api_client dari module-level import (bukan routers.devices)
         mt = get_api_client(device)
         isp_ifaces = await mt.get_isp_interfaces()
         if isp_ifaces:
@@ -265,14 +329,19 @@ async def poll_single_device(device: dict) -> dict:
     except Exception as e:
         logger.debug(f"Notification check skipped: {e}")
 
-    # ── Bandwidth from octets delta (accurate, per-interface) ────────────────
-
+    # ── Bandwidth: SNMP octets delta ATAU REST API precomputed ───────────────
     prev = await db.traffic_snapshots.find_one({"device_id": did})
     curr_traffic = result.get("traffic", {})
-    ping_data = result.get("ping", {})
+    ping_data    = result.get("ping", {})
     bw = {}
 
-    if prev and curr_traffic:
+    poll_mode = result.get("poll_mode", "snmp")
+
+    if poll_mode == "rest_api":
+        # REST API mode: gunakan bandwidth langsung dari monitor-traffic
+        bw = result.get("bw_precomputed", {})
+    elif prev and curr_traffic:
+        # SNMP mode: hitung bandwidth dari delta octets
         prev_t = prev.get("traffic", {})
         try:
             delta = max((datetime.fromisoformat(now) - datetime.fromisoformat(prev["timestamp"])).total_seconds(), 1)
@@ -292,8 +361,6 @@ async def poll_single_device(device: dict) -> dict:
                 }
 
     # ── Save ONE unified traffic_history record per cycle ────────────────────
-    # Merge: bandwidth dict (accurate octets-diff per interface) + system metrics
-    # Also store top-level download/upload Mbps so older-format query paths work
     total_dl_bps = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
     total_ul_bps = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
 
