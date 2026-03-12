@@ -195,33 +195,32 @@ async def poll_via_api(device: dict) -> dict:
                         bw_precomputed[r[0]] = r[1]
 
             elif api_mode == "api":
-                # ── ROS 6.x: API Protocol get_interface_traffic ───────────────
-                # Ambil satu per satu karena routeros_api tidak mendukung parallel
-                # connections (setiap call membuat koneksi baru, bisa lambat jika terlalu banyak)
-                async def get_iface_bw_api(iface_name):
-                    try:
-                        r = await mt.get_interface_traffic(iface_name)
-                        if isinstance(r, dict) and r:
-                            # ROS 6 API Protocol returns: rx-bits-per-second, tx-bits-per-second
-                            # Kadang key pakai bytes: rx-byte (per poll), perlu konversi
-                            rx_bps = int(r.get("rx-bits-per-second", 0) or 0)
-                            tx_bps = int(r.get("tx-bits-per-second", 0) or 0)
-                            if rx_bps > 0 or tx_bps > 0:
-                                return (iface_name, {
-                                    "download_bps": rx_bps,
-                                    "upload_bps":   tx_bps,
-                                    "status":       "up",
-                                })
-                    except Exception as e:
-                        logger.debug(f"API Protocol monitor-traffic gagal untuk {iface_name}: {e}")
-                    return None
-
-                # Batasi 8 interface untuk menghindari terlalu banyak koneksi serial ke ROS6
-                tasks = [get_iface_bw_api(n) for n in running_ifaces[:8]]
-                bw_results = await asyncio.gather(*tasks, return_exceptions=True)
-                for r in bw_results:
-                    if r and not isinstance(r, Exception):
-                        bw_precomputed[r[0]] = r[1]
+                # ── ROS 6.x: Ambil raw bytes stats (1 koneksi, semua interface) ─
+                # Delta bps akan dihitung di poll_single_device yang punya akses ke db.
+                try:
+                    cur_stats = await mt.get_all_interface_stats()  # {name: {rx-bytes, tx-bytes}}
+                    # Simpan ke iface_stats_raw untuk diproses di poll_single_device
+                    # bw_precomputed akan diisi di sana setelah delta dihitung
+                    if cur_stats:
+                        logger.debug(f"ROS6 raw stats: {device.get('name','?')} {len(cur_stats)} interfaces")
+                    # Simpan cur_stats ke return value via bw_precomputed sementara
+                    # (akan diproses oleh poll_single_device)
+                    return {
+                        "reachable":       True,
+                        "poll_mode":       "api_protocol",
+                        "ping":            {"reachable": True, "min": 0, "avg": 0, "max": 0, "jitter": 0, "loss": 0},
+                        "system":          sys_info,
+                        "cpu":             cpu_load,
+                        "memory":          memory,
+                        "interfaces":      interfaces,
+                        "traffic":         {},
+                        "health":          health,
+                        "bw_precomputed":  {},           # akan diisi poll_single_device
+                        "iface_stats_raw": cur_stats,   # raw bytes untuk delta calc
+                        "running_ifaces":  running_ifaces,
+                    }
+                except Exception as e:
+                    logger.warning(f"ROS6 get_all_interface_stats gagal untuk {device.get('name','?')}: {e}")
 
         mode_label = "rest_api" if api_mode == "rest" else "api_protocol"
         logger.info(
@@ -231,16 +230,18 @@ async def poll_via_api(device: dict) -> dict:
         )
 
         return {
-            "reachable":      True,
-            "poll_mode":      mode_label,
-            "ping":           {"reachable": True, "min": 0, "avg": 0, "max": 0, "jitter": 0, "loss": 0},
-            "system":         sys_info,
-            "cpu":            cpu_load,
-            "memory":         memory,
-            "interfaces":     interfaces,
-            "traffic":        {},
-            "health":         health,
-            "bw_precomputed": bw_precomputed,
+            "reachable":       True,
+            "poll_mode":       mode_label,
+            "ping":            {"reachable": True, "min": 0, "avg": 0, "max": 0, "jitter": 0, "loss": 0},
+            "system":          sys_info,
+            "cpu":             cpu_load,
+            "memory":          memory,
+            "interfaces":      interfaces,
+            "traffic":         {},
+            "health":          health,
+            "bw_precomputed":  bw_precomputed,
+            "iface_stats_raw": {},   # kosong untuk mode REST (tidak butuh delta)
+            "running_ifaces":  running_ifaces,
         }
 
     except Exception as e:
@@ -352,10 +353,43 @@ async def poll_single_device(device: dict) -> dict:
     except Exception as e:
         logger.debug(f"Notification skip: {e}")
 
-    # -- Bandwidth dari bw_precomputed (REST API: monitor-traffic) -------------
+    # -- Bandwidth: ROS7 dari bw_precomputed, ROS6 dari delta iface_stats_raw ----
     ping_data = result.get("ping", {})
     bw = result.get("bw_precomputed", {})
 
+    # ROS6: hitung delta bps dari raw bytes (iface_stats_raw dari poll_via_api)
+    iface_stats_raw = result.get("iface_stats_raw", {})
+    if iface_stats_raw and not bw:
+        try:
+            now_ts      = datetime.now(timezone.utc).timestamp()
+            running_set = set(result.get("running_ifaces", []))
+
+            # Ambil snapshot sebelumnya dari DB
+            snap_doc  = await db.traffic_snapshots.find_one({"device_id": did}, {"_id": 0})
+            prev_stats = snap_doc.get("iface_bytes", {}) if snap_doc else {}
+            prev_ts    = snap_doc.get("ts")            if snap_doc else None
+
+            if prev_stats and prev_ts:
+                elapsed = max(now_ts - prev_ts, 1)
+                for iface_name, cur in iface_stats_raw.items():
+                    if iface_name not in running_set:
+                        continue
+                    prev = prev_stats.get(iface_name)
+                    if not prev:
+                        continue
+                    rx_delta = max(0, cur.get("rx-bytes", 0) - prev.get("rx-bytes", 0))
+                    tx_delta = max(0, cur.get("tx-bytes", 0) - prev.get("tx-bytes", 0))
+                    bw[iface_name] = {
+                        "download_bps": int((rx_delta * 8) / elapsed),
+                        "upload_bps":   int((tx_delta * 8) / elapsed),
+                        "status":       "up",
+                    }
+                logger.info(
+                    f"ROS6 delta bw OK: {device.get('name','?')} "
+                    f"elapsed={elapsed:.1f}s bw={len(bw)} ifaces"
+                )
+        except Exception as e:
+            logger.warning(f"ROS6 delta calc gagal untuk {device.get('name','?')}: {e}")
     # -- Simpan ke traffic_history (untuk grafik) ──────────────────────────────
     total_dl_bps = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
     total_ul_bps = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
@@ -403,10 +437,15 @@ async def poll_single_device(device: dict) -> dict:
         except Exception as e:
             logger.debug(f"InfluxDB write skip: {e}")
 
-    # -- Update traffic snapshot untuk perhitungan delta cyclen berikutnya ─────
+    # -- Update traffic snapshot (simpan iface_bytes untuk delta ROS6 berikutnya) -
+    snap_update = {"device_id": did, "timestamp": now, "traffic": {}}
+    if iface_stats_raw:
+        # ROS6: simpan raw bytes untuk kalkulasi delta cycle berikutnya
+        snap_update["iface_bytes"] = iface_stats_raw
+        snap_update["ts"]          = datetime.now(timezone.utc).timestamp()
     await db.traffic_snapshots.update_one(
         {"device_id": did},
-        {"$set": {"device_id": did, "timestamp": now, "traffic": {}}},
+        {"$set": snap_update},
         upsert=True
     )
 

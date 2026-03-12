@@ -754,24 +754,48 @@ class MikroTikRouterAPI(MikroTikBase):
     # ── Interface Traffic (RouterOS 6 API) ──
     async def get_interface_traffic(self, interface_name: str = "ether1", duration: int = 1):
         """
-        ROS 6: monitor traffic via RouterOS API Protocol.
-        Menggunakan /interface/monitor-traffic dengan once=\"{interface_name}\".
-        Mengembalikan dict dengan rx-bits-per-second dan tx-bits-per-second.
+        ROS 6: Ambil rx-byte dan tx-byte dari interface stats.
+        Digunakan untuk kalkulasi delta bps antara dua polling cycle.
+        Return: {"rx-bytes": int, "tx-bytes": int, "name": str}
+        (Bukan real-time bps — caller harus hitung delta sendiri)
         """
         try:
             def cb(api):
-                # routeros_api: panggil command /interface/monitor-traffic
-                # Gunakan get_resource langsung untuk memanggil command dengan argument
-                resource = api.get_resource("/interface/monitor-traffic")
-                result = resource.call(interface=interface_name, once="")
-                return result
+                resource = api.get_resource("/interface")
+                items = resource.get(name=interface_name)
+                return items
             items = await asyncio.to_thread(self._execute, cb)
-            # Hasil bisa berupa list of dict atau dict
-            if isinstance(items, list):
-                return items[0] if items else {}
-            return items if isinstance(items, dict) else {}
+            if items and isinstance(items, list):
+                item = items[0]
+                return {
+                    "name":     interface_name,
+                    "rx-bytes": int(item.get("rx-byte", 0) or 0),
+                    "tx-bytes": int(item.get("tx-byte", 0) or 0),
+                }
+            return {}
         except Exception as e:
             logger.debug(f"get_interface_traffic ROS6 gagal untuk {interface_name}: {e}")
+            return {}
+
+    async def get_all_interface_stats(self):
+        """
+        ROS 6: Ambil stats SEMUA interface (rx-byte, tx-byte) dalam 1 koneksi.
+        Lebih efisien daripada memanggil get_interface_traffic per interface.
+        Return: dict {interface_name: {rx-bytes: int, tx-bytes: int}}
+        """
+        try:
+            items = await asyncio.to_thread(self._list_resource, "/interface")
+            result = {}
+            for item in items:
+                name = item.get("name", "")
+                if name:
+                    result[name] = {
+                        "rx-bytes": int(item.get("rx-byte", 0) or 0),
+                        "tx-bytes": int(item.get("tx-byte", 0) or 0),
+                    }
+            return result
+        except Exception as e:
+            logger.debug(f"get_all_interface_stats ROS6 gagal: {e}")
             return {}
 
     # ── IP Address List ──
