@@ -6,8 +6,11 @@ import snmp_service
 from mikrotik_api import get_host_only, get_api_client
 
 logger = logging.getLogger(__name__)
-POLL_INTERVAL = 30
-OFFLINE_GRACE_POLLS = 2   # Number of consecutive failed polls before marking offline
+POLL_INTERVAL   = 30
+SNMP_TIMEOUT    = 10   # Dikurangi dari 25s → fail fast agar REST API fallback lebih cepat
+OFFLINE_GRACE_POLLS  = 2   # Berapa kali gagal berturut-turut sebelum tandai offline
+SNMP_SKIP_THRESHOLD  = 3   # Berapa kali SNMP berturut-turut gagal sebelum skip SNMP sepenuhnya
+MAX_CONCURRENT_POLLS = 8   # Maks device yang di-poll bersamaan (hindari overload server)
 
 
 # ── REST API Fallback ─────────────────────────────────────────────────────────
@@ -207,33 +210,53 @@ async def poll_via_rest_api(device: dict) -> dict:
 
 
 async def poll_single_device(device: dict) -> dict:
-    db = get_db()
+    db  = get_db()
     did = device["id"]
     # SNMP butuh plain IP (tanpa port)
     host = get_host_only(device["ip_address"])
     port = device.get("snmp_port", 161)
     comm = device.get("snmp_community", "public")
+    api_mode = device.get("api_mode", "rest")
+    snmp_fail_count = device.get("snmp_consecutive_fail", 0)
 
-    # ── Coba SNMP terlebih dahulu ─────────────────────────────────────────────
+    # ── Smart SNMP routing ────────────────────────────────────────────────────
+    # Jika SNMP sudah gagal SNMP_SKIP_THRESHOLD kali berturut-turut,
+    # langsung gunakan REST API tanpa menunggu timeout SNMP (hemat waktu 10s/device).
+    # Jika SNMP berhasil kembali, counter akan di-reset.
+    use_snmp = snmp_fail_count < SNMP_SKIP_THRESHOLD
+
     snmp_ok = False
-    result   = None
-    try:
-        result = await asyncio.wait_for(snmp_service.poll_device(host, port, comm), timeout=25)
-        snmp_ok = result.get("reachable", False)
-    except Exception:
-        snmp_ok = False
+    result  = None
 
-    # ── Fallback ke REST API jika SNMP tidak berhasil ─────────────────────────
-    if not snmp_ok:
-        api_mode = device.get("api_mode", "rest")
-        if api_mode in ("rest", "api"):
-            logger.info(
-                f"SNMP unreachable for {device.get('name', host)}, "
-                f"falling back to REST API polling"
+    if use_snmp:
+        try:
+            result  = await asyncio.wait_for(
+                snmp_service.poll_device(host, port, comm),
+                timeout=SNMP_TIMEOUT
             )
+            snmp_ok = result.get("reachable", False)
+        except Exception:
+            snmp_ok = False
+
+    if snmp_ok:
+        # SNMP berhasil — reset fail counter
+        snmp_fail_count = 0
+    else:
+        # SNMP gagal/skip — naikkan counter, lalu fallback ke REST API
+        snmp_fail_count = snmp_fail_count + 1 if use_snmp else snmp_fail_count
+        if api_mode in ("rest", "api"):
+            if use_snmp:
+                logger.debug(
+                    f"SNMP gagal [{snmp_fail_count}/{SNMP_SKIP_THRESHOLD}] untuk "
+                    f"{device.get('name', host)}, fallback ke REST API"
+                )
+            else:
+                logger.debug(
+                    f"SNMP skip (fail={snmp_fail_count}) untuk "
+                    f"{device.get('name', host)}, langsung REST API"
+                )
             result = await poll_via_rest_api(device)
         else:
-            # Tidak ada REST API configured — kembalikan offline
             result = {
                 "reachable": False,
                 "ping": {"reachable": False, "avg": 0, "jitter": 0, "loss": 100},
@@ -242,6 +265,16 @@ async def poll_single_device(device: dict) -> dict:
                 "interfaces": [], "traffic": {},
                 "health": {"cpu_temp": 0, "board_temp": 0, "voltage": 0, "power": 0},
             }
+
+    # Simpan snmp_consecutive_fail ke DB untuk smart routing siklus berikutnya
+    # (update ringan, non-blocking terhadap alur utama)
+    try:
+        await db.devices.update_one(
+            {"id": did},
+            {"$set": {"snmp_consecutive_fail": snmp_fail_count}}
+        )
+    except Exception:
+        pass
 
     now = datetime.now(timezone.utc).isoformat()
 
@@ -423,18 +456,41 @@ async def poll_single_device(device: dict) -> dict:
 
 async def polling_loop():
     """Background task: poll all devices every POLL_INTERVAL seconds."""
+    # Semaphore membatasi polling paralel agar server tidak overload
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_POLLS)
+
+    async def poll_with_semaphore(dev):
+        async with semaphore:
+            try:
+                # Total timeout per device: SNMP_TIMEOUT + REST API time + buffer
+                return await asyncio.wait_for(poll_single_device(dev), timeout=45)
+            except asyncio.TimeoutError:
+                name = dev.get('name', dev.get('ip_address', '?'))
+                logger.warning(f"Poll total timeout 45s untuk device {name}, skip siklus ini")
+                return None
+            except Exception as e:
+                logger.error(f"Poll error untuk {dev.get('name','?')}: {e}")
+                return None
+
     while True:
+        start = asyncio.get_event_loop().time()
         try:
-            db = get_db()
-            devices = await db.devices.find({}, {"_id": 0}).to_list(100)
+            db      = get_db()
+            devices = await db.devices.find({}, {"_id": 0}).to_list(None)  # Semua device, tidak dibatasi 100
             if devices:
-                await asyncio.gather(*[poll_single_device(d) for d in devices], return_exceptions=True)
+                await asyncio.gather(
+                    *[poll_with_semaphore(d) for d in devices],
+                    return_exceptions=True
+                )
             # Cleanup data lama: simpan 31 hari agar tombol "Bulan" berfungsi
-            # BUG FIX: sebelumnya 7 hari → data "Bulan" tidak pernah ada
             cutoff = (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
             await db.traffic_history.delete_many({"timestamp": {"$lt": cutoff}})
         except asyncio.CancelledError:
             break
         except Exception as e:
             logger.error(f"Poll loop error: {e}")
-        await asyncio.sleep(POLL_INTERVAL)
+
+        # Tunggu hingga interval berikutnya (dikurangi waktu yang sudah dipakai)
+        elapsed = asyncio.get_event_loop().time() - start
+        sleep_time = max(1, POLL_INTERVAL - elapsed)
+        await asyncio.sleep(sleep_time)
