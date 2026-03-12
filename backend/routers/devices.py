@@ -271,26 +271,58 @@ async def get_ip_addresses(device_id: str, user=Depends(get_current_user)):
 async def get_system_health(device_id: str, user=Depends(get_current_user)):
     """
     Ambil data sensor hardware dari MikroTik.
-    - ROS 6.x (API Protocol): /system/health — returns {name, value, type}
-    - ROS 7.x (REST API): /rest/system/health — returns [{name, value, type}]
-    Dashboard menggunakan data ini untuk menampilkan temperature, voltage, dll.
-    Return {} jika device tidak support (tidak throw error agar UI tetap jalan).
+    - ROS 6.x (API Protocol): /system/health — {name, value, type} per sensor
+    - ROS 7.x (REST API): /rest/system/health — [{name, value, type}]
+    Fallback: baca dari MongoDB jika live API call gagal/kosong.
     """
     db = get_db()
     device = await db.devices.find_one({"id": device_id}, {"_id": 0})
     if not device:
         raise HTTPException(404, "Device not found")
-    mt = get_api_client(device)
+
+    live_data = {}
     try:
-        health = await mt.get_system_health()
-        if not health:
-            return {}
-        health.pop("raw", None)  # jangan return raw data mentah
-        logger.info(f"system-health {device_id}: board_temp={health.get('board_temp',0)} voltage={health.get('voltage',0)}")
-        return health
+        mt = get_api_client(device)
+        raw = await mt.get_system_health()
+        if isinstance(raw, dict) and any(v for v in raw.values() if v and v != {} and v != ""):
+            raw.pop("raw", None)
+            live_data = raw
+            logger.info(
+                f"system-health LIVE [{device_id}]: "
+                f"board_temp={raw.get('board_temp',0)} voltage={raw.get('voltage',0)}"
+            )
     except Exception as e:
-        logger.warning(f"system-health failed for {device_id}: {e}")
-        return {}  # {} bukan 502 agar DashboardPage tidak crash
+        logger.warning(f"system-health live fetch failed for {device_id}: {e}")
+
+    # Fallback: baca dari MongoDB (dibuat oleh polling)
+    if not live_data or (live_data.get("board_temp", 0) == 0 and live_data.get("voltage", 0) == 0):
+        mongo_data = {
+            "cpu_temp":   device.get("cpu_temp",   0),
+            "board_temp": device.get("board_temp", 0),
+            "voltage":    device.get("voltage",    0),
+            "power":      device.get("power",      0),
+            "fans":       {},
+            "psu":        {},
+            "extra_temps": {},
+        }
+        # Merge: prefer live_data non-zero over mongo_data
+        if live_data:
+            for k in ("cpu_temp", "board_temp", "sfp_temp", "switch_temp", "voltage", "power"):
+                live_val = live_data.get(k, 0) or 0
+                mongo_val = mongo_data.get(k, 0) or 0
+                mongo_data[k] = live_val if live_val > 0 else mongo_val
+            mongo_data["fans"]        = live_data.get("fans", {}) or {}
+            mongo_data["psu"]         = live_data.get("psu", {}) or {}
+            mongo_data["extra_temps"] = live_data.get("extra_temps", {}) or {}
+
+        logger.info(
+            f"system-health MONGO fallback [{device_id}]: "
+            f"board_temp={mongo_data.get('board_temp',0)} voltage={mongo_data.get('voltage',0)}"
+        )
+        return mongo_data
+
+    return live_data
+
 
 
 @router.post("/devices/{device_id}/poll")

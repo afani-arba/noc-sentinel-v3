@@ -95,27 +95,37 @@ export default function DashboardPage() {
       const r = await api.get("/dashboard/stats", { params });
       const data = r.data;
 
-      if (selectedDevice !== "all" && data.system_health) {
+      // Pastikan system_health selalu ada
+      if (!data.system_health) {
+        data.system_health = { cpu: 0, memory: 0, cpu_temp: 0, board_temp: 0, voltage: 0, power: 0 };
+      }
+
+      // Fetch extended health metrics jika device spesifik dipilih
+      if (selectedDevice !== "all") {
         try {
           const hr = await api.get(`/devices/${selectedDevice}/system-health`);
           if (hr.data && Object.keys(hr.data).length > 0) {
             const rd = hr.data;
             const h = data.system_health;
+            // Gunakan nilai terbesar (non-zero) dari kedua sumber
+            // Ini mencegah nilai 0 dari satu sumber menimpa nilai valid dari sumber lain
+            const pick = (a, b) => (Number(a) > 0 ? Number(a) : Number(b) > 0 ? Number(b) : 0);
             data.system_health = {
               ...h,
-              cpu_temp: rd.cpu_temp || h.cpu_temp || 0,
-              board_temp: rd.board_temp || h.board_temp || 0,
-              sfp_temp: rd.sfp_temp || 0,
-              switch_temp: rd.switch_temp || 0,
-              voltage: rd.voltage || h.voltage || 0,
-              power: rd.power || h.power || 0,
-              fans: rd.fans || {},
-              fan_state: rd.fan_state || "",
-              psu: rd.psu || {},
-              extra_temps: rd.extra_temps || {},
+              cpu_temp:    pick(rd.cpu_temp,    h.cpu_temp),
+              board_temp:  pick(rd.board_temp,  h.board_temp),
+              sfp_temp:    pick(rd.sfp_temp,    h.sfp_temp || 0),
+              switch_temp: pick(rd.switch_temp, h.switch_temp || 0),
+              voltage:     pick(rd.voltage,     h.voltage),
+              power:       pick(rd.power,       h.power),
+              fans:        rd.fans       || h.fans       || {},
+              fan_state:   rd.fan_state  || h.fan_state  || "",
+              psu:         rd.psu        || h.psu        || {},
+              extra_temps: rd.extra_temps || h.extra_temps || {},
             };
           }
         } catch (_) {
+          // Health fetch gagal — tetap gunakan data dari stats
           const h = data.system_health;
           data.system_health = { ...h, fans: {}, fan_state: "", psu: {}, extra_temps: {} };
         }
