@@ -168,11 +168,26 @@ class MikroTikRestAPI(MikroTikBase):
         return await asyncio.to_thread(self._request, method, path, data)
 
     async def test_connection(self):
+        """
+        Test koneksi REST API MikroTik.
+        Coba system/identity dulu, fallback ke system/resource jika error 404
+        (beberapa versi ROS atau konfigurasi port non-standar tidak mendukung endpoint ini).
+        """
+        identity = ""
         try:
             r = await self._async_req("GET", "system/identity")
-            return {"success": True, "identity": r.get("name", ""), "mode": "REST API (RouterOS 7+)"}
-        except Exception as e:
-            return {"success": False, "error": str(e), "mode": "REST API (RouterOS 7+)"}
+            identity = r.get("name", "") if isinstance(r, dict) else ""
+            return {"success": True, "identity": identity, "mode": "REST API (RouterOS 7+)"}
+        except Exception as e1:
+            # Fallback ke system/resource jika system/identity tidak tersedia
+            try:
+                res = await self._async_req("GET", "system/resource")
+                if isinstance(res, dict) and res:
+                    identity = res.get("board-name", res.get("platform", "MikroTik"))
+                    return {"success": True, "identity": identity, "mode": "REST API (RouterOS 7+)"}
+            except Exception:
+                pass
+            return {"success": False, "error": str(e1), "mode": "REST API (RouterOS 7+)"}
 
     async def list_pppoe_secrets(self):
         return await self._async_req("GET", "ppp/secret")
