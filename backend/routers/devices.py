@@ -143,6 +143,26 @@ async def delete_device(device_id: str, user=Depends(require_admin)):
     return {"message": "Deleted"}
 
 
+class LocationUpdate(BaseModel):
+    lat: float
+    lng: float
+    location_name: Optional[str] = None  # nama lokasi opsional (e.g. "Kantor Pusat")
+
+
+@router.patch("/devices/{device_id}/location")
+async def update_device_location(device_id: str, data: LocationUpdate, user=Depends(get_current_user)):
+    """Simpan koordinat geografis device untuk peta topologi."""
+    db = get_db()
+    upd = {"lat": data.lat, "lng": data.lng}
+    if data.location_name is not None:
+        upd["location_name"] = data.location_name
+    r = await db.devices.update_one({"id": device_id}, {"$set": upd})
+    if r.matched_count == 0:
+        raise HTTPException(404, "Device not found")
+    return {"ok": True, "lat": data.lat, "lng": data.lng}
+
+
+
 @router.post("/devices/{device_id}/test-api")
 async def test_api(device_id: str, user=Depends(get_current_user)):
     db = get_db()
