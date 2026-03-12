@@ -163,7 +163,7 @@ async def update_device_location(device_id: str, data: LocationUpdate, user=Depe
 
 
 
-@router.post("/devices/{device_id}/test-api")
+@router.get("/devices/{device_id}/test-api")
 async def test_api(device_id: str, user=Depends(get_current_user)):
     db = get_db()
     device = await db.devices.find_one({"id": device_id}, {"_id": 0})
@@ -171,6 +171,29 @@ async def test_api(device_id: str, user=Depends(get_current_user)):
         raise HTTPException(404, "Device not found")
     mt = get_api_client(device)
     return await mt.test_connection()
+
+
+@router.get("/devices/{device_id}/system-health")
+async def get_system_health(device_id: str, user=Depends(get_current_user)):
+    """
+    Ambil data extended health dari MikroTik: temperature, voltage, fan, PSU.
+    Mendukung ROS6 (API Protocol: /system/health) dan ROS7 (REST: /system/health).
+    """
+    db = get_db()
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(404, "Device not found")
+    try:
+        client = get_api_client(device)
+        data = await client.get_system_health()
+        if not data:
+            return {}
+        # Bersihkan 'raw' field agar response tidak terlalu besar
+        data.pop("raw", None)
+        return data
+    except Exception as e:
+        logger.warning(f"system-health fetch failed for {device_id}: {e}")
+        return {}
 
 
 @router.get("/devices/{device_id}/system-resource")

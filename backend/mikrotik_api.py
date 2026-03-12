@@ -95,7 +95,7 @@ class MikroTikBase:
     # ── Polling/Monitoring — default aman (return kosong) ──
     # Subclass yang tidak implement tidak akan menyebabkan AttributeError
     async def get_system_resource(self): return {}
-    async def get_system_health(self):   return {}  # ROS6: tidak expose health via API Protocol
+    async def get_system_health(self):   return {}  # Override di subclass
     async def list_interfaces(self):     return []
     async def get_isp_interfaces(self):  return []
     async def get_interface_traffic(self, interface_name="ether1", duration=1): return {}
@@ -748,6 +748,80 @@ class MikroTikRouterAPI(MikroTikBase):
             items = await asyncio.to_thread(self._list_resource, "/system/resource")
             return items[0] if items else {}
         except Exception:
+            return {}
+
+    async def get_system_health(self):
+        """
+        ROS6: Ambil data health dari /system/health (temperature, voltage).
+        Setiap item: {name: 'temperature'|'voltage', value: '30', type: 'C'|'V'}
+        Return dict normalized: {cpu_temp, board_temp, voltage, ..., raw: [...]}
+        """
+        try:
+            items = await asyncio.to_thread(self._list_resource, "/system/health")
+            if not items:
+                return {}
+
+            result = {
+                "cpu_temp": 0.0,
+                "board_temp": 0.0,
+                "sfp_temp": 0.0,
+                "switch_temp": 0.0,
+                "voltage": 0.0,
+                "power": 0.0,
+                "fans": {},
+                "psu": {},
+                "extra_temps": {},
+                "raw": items,
+            }
+
+            def _f(v):
+                try: return float(str(v).strip())
+                except Exception: return 0.0
+
+            for entry in items:
+                name  = str(entry.get("name", "")).lower().strip()
+                value = entry.get("value", "0")
+                typ   = str(entry.get("type", "")).upper().strip()
+
+                if typ == "C":  # Temperature
+                    if "cpu" in name and "board" not in name:
+                        result["cpu_temp"] = _f(value)
+                    elif "board" in name:
+                        result["board_temp"] = _f(value)
+                    elif "sfp" in name or "optical" in name:
+                        result["sfp_temp"] = _f(value)
+                    elif "switch" in name or "chip" in name:
+                        result["switch_temp"] = _f(value)
+                    elif "temperature" == name:
+                        # Generic 'temperature' entry — biasanya board temp
+                        if result["board_temp"] == 0:
+                            result["board_temp"] = _f(value)
+                        else:
+                            result["extra_temps"][name] = _f(value)
+                    else:
+                        result["extra_temps"][name] = _f(value)
+
+                elif typ == "V":  # Voltage
+                    if result["voltage"] == 0:
+                        result["voltage"] = _f(value)
+
+                elif typ == "W":  # Power
+                    result["power"] = _f(value)
+
+                elif typ == "RPM":
+                    result["fans"][name] = int(_f(value))
+
+                elif typ == "":
+                    # Beberapa ROS6 tidak ada tipe, tebak dari nama
+                    if "fan" in name:
+                        result["fans"][name] = int(_f(value))
+                    elif "volt" in name:
+                        if result["voltage"] == 0:
+                            result["voltage"] = _f(value)
+
+            return result
+        except Exception as e:
+            logger.debug(f"get_system_health ROS6 gagal: {e}")
             return {}
 
     # ── Interface List ──
