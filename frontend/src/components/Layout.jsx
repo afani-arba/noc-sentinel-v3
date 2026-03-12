@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/App";
 import {
   LayoutDashboard, Users, Wifi, FileText, Server, Shield, LogOut, Menu, ChevronLeft, Settings, Bell, HardDrive, Terminal,
-  GitBranch, Route, Cable, ShieldAlert, Cpu, Receipt, Monitor, BarChart2, AlertTriangle, ClipboardList
+  GitBranch, Route, Cable, ShieldAlert, Cpu, Receipt, Monitor, BarChart2, AlertTriangle, ClipboardList, Activity
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,6 +25,8 @@ const navItems = [
   { to: "/genieacs", icon: Cpu, label: "GenieACS / TR-069", adminOnly: true },
   { separator: true, label: "v3 — NOC Features" },
   { to: "/wallboard", icon: Monitor, label: "Wall Display" },
+  { to: "/bandwidth", icon: Activity, label: "Bandwidth Monitor" },
+  { to: "/topology", icon: GitBranch, label: "Network Map" },
   { to: "/sla", icon: BarChart2, label: "SLA Monitor" },
   { to: "/incidents", icon: AlertTriangle, label: "Incidents" },
   { to: "/audit", icon: ClipboardList, label: "Audit Log", adminOnly: true },

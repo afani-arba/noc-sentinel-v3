@@ -10,7 +10,8 @@ import {
   Cpu, RefreshCw, Search, RotateCcw, AlertTriangle, CheckCircle2,
   Wifi, WifiOff, Zap, Settings2, Trash2, TriangleAlert, Save,
   Eye, EyeOff, LinkIcon, ServerIcon, AlertCircle, X, Radio,
-  Gauge, Users, MonitorSmartphone, Signal, Network, ChevronRight
+  Gauge, Users, MonitorSmartphone, Signal, Network, ChevronRight,
+  ListChecks, Check, Square, CheckSquare
 } from "lucide-react";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -304,7 +305,7 @@ function DeviceRow({ device, isAdmin, onOpenModal }) {
   };
 
   return (
-    <tr className="border-b border-border/30 hover:bg-secondary/20 transition-colors group">
+    <>
       {/* ID PPPoE */}
       <td className="px-3 py-2.5">
         <div className="flex items-center gap-1.5">
@@ -383,7 +384,7 @@ function DeviceRow({ device, isAdmin, onOpenModal }) {
           )}
         </div>
       </td>
-    </tr>
+    </>
   );
 }
 
@@ -590,6 +591,13 @@ export default function GenieACSPage() {
   const [connectionOk, setConnectionOk] = useState(null);
   const [selectedDevice, setSelectedDevice] = useState(null);
 
+  // ─── Bulk Reboot state ────────────────────────────────────────────────────────
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkRebooting, setBulkRebooting] = useState(false);
+  const [bulkResult, setBulkResult] = useState(null);
+  const [confirmBulk, setConfirmBulk] = useState(null); // { mode: 'selected'|'offline' }
+  // ─────────────────────────────────────────────────────────────────────────────
+
   const fetchDevices = useCallback(async () => {
     setLoading(true);
     try {
@@ -615,20 +623,96 @@ export default function GenieACSPage() {
     setSearch(searchInput.trim());
   };
 
+  // ─── Bulk selection helpers ───────────────────────────────────────────────────
+  const offlineDevices = devices.filter(d => !d.online);
+
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllVisible = () => setSelectedIds(new Set(devices.map(d => d.id)));
+  const selectAllOffline = () => setSelectedIds(new Set(offlineDevices.map(d => d.id)));
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const executeBulkReboot = async (mode) => {
+    setBulkRebooting(true);
+    setBulkResult(null);
+    setConfirmBulk(null);
+    try {
+      const body = mode === "selected"
+        ? { device_ids: [...selectedIds] }
+        : { filter: "offline" };
+      const r = await api.post("/genieacs/bulk-reboot", body);
+      setBulkResult(r.data);
+      toast.success(`Bulk reboot: ${r.data.success} berhasil, ${r.data.failed} gagal`);
+      clearSelection();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Bulk reboot gagal");
+    }
+    setBulkRebooting(false);
+  };
+  // ─────────────────────────────────────────────────────────────────────────────
+
   const tabs = [
     { id: "devices", label: "CPE Devices", icon: Cpu },
     { id: "faults", label: "Faults", icon: AlertTriangle },
     ...(isAdmin ? [{ id: "config", label: "Konfigurasi Server", icon: Settings2 }] : []),
   ];
 
-  // Column headers
-  const headers = [
-    "ID PPPoE", "Status", "Redaman ONT",
-    "Product Class", "SSID", "Active Device", "IP PPPoE", "Aksi"
-  ];
+  // Column headers — tambah checkbox di kiri jika admin
+  const headers = isAdmin
+    ? ["", "ID PPPoE", "Status", "Redaman ONT", "Product Class", "SSID", "Active Device", "IP PPPoE", "Aksi"]
+    : ["ID PPPoE", "Status", "Redaman ONT", "Product Class", "SSID", "Active Device", "IP PPPoE", "Aksi"];
 
   return (
     <div className="space-y-4 pb-16">
+      {/* Confirm Bulk Reboot Dialog */}
+      {confirmBulk && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-card border border-border rounded-sm w-full max-w-sm p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-sm bg-orange-500/20 flex items-center justify-center flex-shrink-0">
+                <RotateCcw className="w-5 h-5 text-orange-400" />
+              </div>
+              <div>
+                <p className="font-semibold text-sm">Konfirmasi Bulk Reboot</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {confirmBulk.mode === "selected"
+                    ? `Reboot ${selectedIds.size} ONT yang dipilih?`
+                    : `Reboot semua ${offlineDevices.length} ONT offline?`
+                  }
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" size="sm" className="rounded-sm" onClick={() => setConfirmBulk(null)}>Batal</Button>
+              <Button size="sm" className="rounded-sm gap-1.5 bg-orange-500 hover:bg-orange-600"
+                onClick={() => executeBulkReboot(confirmBulk.mode)}>
+                <RotateCcw className="w-3.5 h-3.5" /> Ya, Reboot
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Result Banner */}
+      {bulkResult && (
+        <div className="flex items-start gap-3 p-3 bg-card border border-border rounded-sm">
+          <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-xs font-semibold">{bulkResult.message}</p>
+            <div className="flex gap-3 mt-1">
+              <span className="text-[11px] text-green-400 font-mono">{bulkResult.success} berhasil</span>
+              {bulkResult.failed > 0 && <span className="text-[11px] text-red-400 font-mono">{bulkResult.failed} gagal</span>}
+            </div>
+          </div>
+          <button onClick={() => setBulkResult(null)} className="text-muted-foreground hover:text-foreground"><X className="w-3.5 h-3.5" /></button>
+        </div>
+      )}
       {/* Modal */}
       {selectedDevice && (
         <DeviceModal
@@ -732,6 +816,51 @@ export default function GenieACSPage() {
               )}
             </form>
 
+            {/* Bulk Action Toolbar */}
+            {isAdmin && (
+              <div className={`flex flex-wrap items-center gap-2 mb-3 p-2.5 rounded-sm border transition-all ${
+                selectedIds.size > 0
+                  ? "bg-orange-500/5 border-orange-500/30"
+                  : "bg-secondary/10 border-border"
+              }`}>
+                {selectedIds.size > 0 && (
+                  <>
+                    <ListChecks className="w-3.5 h-3.5 text-orange-400 flex-shrink-0" />
+                    <span className="text-xs font-semibold text-orange-300">{selectedIds.size} dipilih</span>
+                    <div className="flex gap-1.5 ml-auto flex-wrap">
+                      <Button size="sm" variant="outline" className="rounded-sm h-7 text-[11px] gap-1 border-orange-500/30 text-orange-300 hover:bg-orange-500/10"
+                        disabled={bulkRebooting}
+                        onClick={() => setConfirmBulk({ mode: "selected" })}>
+                        <RotateCcw className={`w-3 h-3 ${bulkRebooting ? "animate-spin" : ""}`} />
+                        Reboot Selected ({selectedIds.size})
+                      </Button>
+                      <Button size="sm" variant="ghost" className="rounded-sm h-7 text-[11px] gap-1 text-muted-foreground"
+                        onClick={clearSelection}>
+                        <X className="w-3 h-3" /> Clear
+                      </Button>
+                    </div>
+                  </>
+                )}
+                {selectedIds.size === 0 && (
+                  <>
+                    <span className="text-[11px] text-muted-foreground">Bulk Actions:</span>
+                    <Button size="sm" variant="outline" className="rounded-sm h-7 text-[11px] gap-1"
+                      onClick={selectAllVisible}>
+                      <CheckSquare className="w-3 h-3" /> Pilih Semua
+                    </Button>
+                    {offlineDevices.length > 0 && (
+                      <Button size="sm" variant="outline" className="rounded-sm h-7 text-[11px] gap-1 border-red-500/30 text-red-300 hover:bg-red-500/10"
+                        disabled={bulkRebooting}
+                        onClick={() => { selectAllOffline(); setTimeout(() => setConfirmBulk({ mode: "offline" }), 50); }}>
+                        <WifiOff className="w-3 h-3" />
+                        Reboot All Offline ({offlineDevices.length})
+                      </Button>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
             {/* Table */}
             {loading ? (
               <p className="text-muted-foreground text-sm text-center py-8 animate-pulse">Memuat perangkat...</p>
@@ -748,22 +877,52 @@ export default function GenieACSPage() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-left" style={{ minWidth: 900 }}>
+                <table className="w-full text-left" style={{ minWidth: isAdmin ? 960 : 900 }}>
                   <thead>
                     <tr className="border-b border-border">
-                      {headers.map(h => (
+                      {isAdmin && (
+                        <th className="px-3 py-2 w-8">
+                          <button
+                            className="text-muted-foreground hover:text-foreground transition-colors"
+                            onClick={selectedIds.size === devices.length ? clearSelection : selectAllVisible}
+                            title={selectedIds.size === devices.length ? "Deselect all" : "Select all"}
+                          >
+                            {selectedIds.size > 0 && selectedIds.size === devices.length
+                              ? <CheckSquare className="w-3.5 h-3.5 text-primary" />
+                              : selectedIds.size > 0
+                                ? <Square className="w-3.5 h-3.5 text-primary/50" />
+                                : <Square className="w-3.5 h-3.5" />
+                            }
+                          </button>
+                        </th>
+                      )}
+                      {headers.slice(isAdmin ? 1 : 0).map(h => (
                         <th key={h} className="px-3 py-2 text-[10px] text-muted-foreground uppercase tracking-wider font-medium whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {devices.map(d => (
-                      <DeviceRow
-                        key={d.id}
-                        device={d}
-                        isAdmin={isAdmin}
-                        onOpenModal={() => setSelectedDevice(d)}
-                      />
+                      <tr key={d.id} className={`border-b border-border/30 hover:bg-secondary/20 transition-colors group ${
+                        selectedIds.has(d.id) ? "bg-primary/5" : ""
+                      }`}>
+                        {isAdmin && (
+                          <td className="px-3 py-2.5">
+                            <button className="text-muted-foreground hover:text-foreground" onClick={() => toggleSelect(d.id)}>
+                              {selectedIds.has(d.id)
+                                ? <CheckSquare className="w-3.5 h-3.5 text-primary" />
+                                : <Square className="w-3.5 h-3.5" />
+                              }
+                            </button>
+                          </td>
+                        )}
+                        <DeviceRow
+                          key={d.id}
+                          device={d}
+                          isAdmin={isAdmin}
+                          onOpenModal={() => setSelectedDevice(d)}
+                        />
+                      </tr>
                     ))}
                   </tbody>
                 </table>

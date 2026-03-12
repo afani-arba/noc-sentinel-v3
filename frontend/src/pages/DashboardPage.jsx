@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
 import api from "@/lib/api";
+import useDeviceEvents from "@/hooks/useDeviceEvents";
 import {
   Server, ArrowDown, ArrowUp, Cpu, HardDrive, Activity, Monitor, Network,
   AlertTriangle, AlertCircle, Info, CheckCircle2, RefreshCw, Thermometer, Zap, Battery, Wifi,
-  Layers, CircuitBoard
+  Layers, CircuitBoard, Radio
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +38,25 @@ export default function DashboardPage() {
   // v3 — Top Talkers
   const [topTalkers, setTopTalkers] = useState([]);
   const [topTalkersRange, setTopTalkersRange] = useState("1h");
+
+  // ━━━ SSE Real-time ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  const { devices: sseDevices, summary: sseSummary, connected: sseConnected, lastUpdate: sseLastUpdate } = useDeviceEvents();
+
+  // Merge SSE data into stats summary ketika SSE aktif
+  useEffect(() => {
+    if (sseConnected && sseSummary && sseSummary.total > 0) {
+      setStats(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          total_devices: sseSummary.total,
+          online_devices: sseSummary.online,
+          offline_devices: sseSummary.offline,
+        };
+      });
+    }
+  }, [sseConnected, sseSummary]);
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   useEffect(() => {
     api.get("/devices").then(r => {
@@ -174,9 +194,29 @@ export default function DashboardPage() {
   return (
     <div className="space-y-4 pb-16" data-testid="dashboard-page">
       <div className="flex flex-col gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold font-['Rajdhani'] tracking-tight">Dashboard</h1>
-          <p className="text-xs sm:text-sm text-muted-foreground">Real-time network monitoring</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold font-['Rajdhani'] tracking-tight">Dashboard</h1>
+            <p className="text-xs sm:text-sm text-muted-foreground">Real-time network monitoring</p>
+          </div>
+          {/* SSE Live / Polling badge */}
+          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-sm border text-[10px] font-mono font-semibold transition-all ${
+            sseConnected
+              ? "bg-green-500/10 border-green-500/20 text-green-400"
+              : "bg-secondary/30 border-border text-muted-foreground"
+          }`}>
+            <div className={`w-1.5 h-1.5 rounded-full ${
+              sseConnected ? "bg-green-500 animate-pulse" : "bg-muted-foreground"
+            }`} />
+            {sseConnected ? (
+              <>
+                <Radio className="w-2.5 h-2.5" />
+                LIVE {sseLastUpdate ? `· ${new Date(sseLastUpdate).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""}
+              </>
+            ) : (
+              <>POLLING · 30s</>
+            )}
+          </div>
         </div>
         <div className="grid grid-cols-2 sm:flex sm:flex-row gap-2 sm:gap-3 sm:items-end">
           <div className="space-y-1">

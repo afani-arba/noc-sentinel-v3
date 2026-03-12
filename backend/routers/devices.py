@@ -4,7 +4,7 @@ Devices router: CRUD + dashboard + SNMP test + MikroTik API test.
 import uuid
 import asyncio
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
@@ -877,3 +877,159 @@ async def get_traffic_history(
     }
 
 # (system-resource endpoint is defined at line 171 — only one instance needed)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BANDWIDTH LIVE — per-interface real-time bandwidth dari last_poll_data
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/bandwidth/live/{device_id}")
+async def bandwidth_live(
+    device_id: str,
+    user=Depends(get_current_user),
+):
+    """
+    Return current bandwidth per-interface dari last_poll_data terbaru.
+    Data diambil dari MongoDB, tidak perlu koneksi langsung ke device.
+    """
+    db = get_db()
+    device = await db.devices.find_one({"id": device_id})
+    if not device:
+        raise HTTPException(404, "Device tidak ditemukan")
+
+    last_poll = device.get("last_poll_data") or {}
+    interfaces_raw = last_poll.get("interfaces", [])
+    bandwidth_map = last_poll.get("bandwidth") or {}
+
+    PHYSICAL_PREFIXES = ("ether", "sfp", "combo", "wlan", "lte", "fiber", "qsfp")
+    VIRTUAL_PREFIXES  = ("bridge", "vlan", "pppoe", "ppp", "l2tp", "pptp", "sstp",
+                         "eoip", "gre", "ovpn", "vrrp", "lo", "wg", "tun")
+
+    interfaces = []
+    for iface in interfaces_raw:
+        name = iface.get("name", "")
+        if not name:
+            continue
+        n = name.lower()
+        is_physical = any(n.startswith(p) for p in PHYSICAL_PREFIXES)
+        is_virtual   = any(n.startswith(v) for v in VIRTUAL_PREFIXES)
+
+        # bw data — cari di bandwidth_map terlebih dahulu
+        bw = bandwidth_map.get(name, {}) if isinstance(bandwidth_map, dict) else {}
+        dl_bps = bw.get("download_bps", 0) if bw else 0
+        ul_bps = bw.get("upload_bps", 0) if bw else 0
+
+        # Fallback: kalkulasi dari rx_bytes/tx_bytes jika ada di iface data (perlu delta, skip di sini)
+        interfaces.append({
+            "name": name,
+            "type": iface.get("type", ""),
+            "is_physical": is_physical and not is_virtual,
+            "running": iface.get("running", False),
+            "disabled": iface.get("disabled", False),
+            "mac": iface.get("mac", ""),
+            "download_bps": dl_bps,
+            "upload_bps": ul_bps,
+            "download_mbps": round(dl_bps / 1_000_000, 3),
+            "upload_mbps": round(ul_bps / 1_000_000, 3),
+            "rx_bytes": iface.get("rx_bytes", 0),
+            "tx_bytes": iface.get("tx_bytes", 0),
+        })
+
+    # Sort: physical first, then by name
+    interfaces.sort(key=lambda x: (not x["is_physical"], x["name"]))
+
+    return {
+        "device_id": device_id,
+        "name": device.get("name", ""),
+        "status": device.get("status", "unknown"),
+        "last_poll": device.get("last_poll", ""),
+        "cpu_load": last_poll.get("cpu_load", device.get("cpu_load", 0)),
+        "memory_usage": last_poll.get("memory_usage", device.get("memory_usage", 0)),
+        "interfaces": interfaces,
+        "total_download_mbps": round(sum(i["download_bps"] for i in interfaces) / 1_000_000, 3),
+        "total_upload_mbps": round(sum(i["upload_bps"] for i in interfaces) / 1_000_000, 3),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOPOLOGY — nodes + edges untuk network map
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/topology")
+async def get_topology(
+    user=Depends(get_current_user),
+):
+    """
+    Return data topology jaringan: semua device sebagai nodes.
+    Edges dibuat berdasarkan ARP neighbors dari last_poll_data (jika tersedia),
+    atau jika tidak ada ARP data maka semua device tampil sebagai independent nodes.
+    """
+    db = get_db()
+    devices = await db.devices.find(
+        {},
+        {"_id": 0, "id": 1, "name": 1, "ip_address": 1, "status": 1,
+         "model": 1, "cpu_load": 1, "memory_usage": 1, "uptime": 1,
+         "description": 1, "last_poll": 1, "last_poll_data": 1}
+    ).to_list(200)
+
+    nodes = []
+    edges = []  # list of {source, target, label}
+    seen_edges = set()
+    ip_to_id = {d["ip_address"]: d["id"] for d in devices if d.get("ip_address")}
+
+    for d in devices:
+        status = d.get("status", "unknown")
+        # Role detection dari model string
+        model_str = (d.get("model") or "").lower()
+        if any(k in model_str for k in ["router", "routeros", "chr"]):
+            role = "router"
+        elif any(k in model_str for k in ["switch", "css", "crs"]):
+            role = "switch"
+        elif any(k in model_str for k in ["wap", "cap", "hap", "ap"]):
+            role = "ap"
+        else:
+            role = "device"
+
+        last_poll = d.get("last_poll_data") or {}
+        cpu = last_poll.get("cpu_load", d.get("cpu_load", 0)) or 0
+        mem = last_poll.get("memory_usage", d.get("memory_usage", 0)) or 0
+
+        nodes.append({
+            "id": d["id"],
+            "label": d.get("name", d["id"]),
+            "ip": d.get("ip_address", ""),
+            "status": status,
+            "role": role,
+            "model": d.get("model", ""),
+            "cpu": cpu,
+            "memory": mem,
+            "uptime": d.get("uptime", ""),
+            "description": d.get("description", ""),
+            "last_poll": d.get("last_poll", ""),
+        })
+
+        # Cari ARP neighbors untuk membuat edges
+        arp_table = last_poll.get("arp", []) or []
+        for arp in arp_table:
+            neighbor_ip = arp.get("address") or arp.get("ip") or ""
+            if neighbor_ip and neighbor_ip in ip_to_id:
+                neighbor_id = ip_to_id[neighbor_ip]
+                edge_key = tuple(sorted([d["id"], neighbor_id]))
+                if edge_key not in seen_edges and d["id"] != neighbor_id:
+                    seen_edges.add(edge_key)
+                    edges.append({
+                        "id": f"{edge_key[0]}-{edge_key[1]}",
+                        "source": edge_key[0],
+                        "target": edge_key[1],
+                        "label": "",
+                    })
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "stats": {
+            "total": len(nodes),
+            "online": sum(1 for n in nodes if n["status"] == "online"),
+            "offline": sum(1 for n in nodes if n["status"] == "offline"),
+        }
+    }

@@ -53,6 +53,7 @@ from routers.wallboard import router as wallboard_router
 from routers.sla import router as sla_router
 from routers.incidents import router as incidents_router
 from routers.audit import router as audit_router
+from routers.events import router as events_router
 
 # ── App factory ────────────────────────────────────────────────────────────
 app = FastAPI(title="NOC-Sentinel API", version="3.0.0")
@@ -88,6 +89,7 @@ api.include_router(wallboard_router)
 api.include_router(sla_router)
 api.include_router(incidents_router)
 api.include_router(audit_router)
+api.include_router(events_router)
 app.include_router(api)
 
 # ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -99,6 +101,11 @@ async def startup():
     from core.polling import polling_loop
     asyncio.create_task(polling_loop())
     logger.info("Polling loop started")
+
+    # Start SSE device event poller
+    from routers.events import start_poller
+    start_poller()
+    logger.info("SSE event poller started")
 
     # Start UDP syslog server
     loop = asyncio.get_event_loop()

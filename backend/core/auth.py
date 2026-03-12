@@ -50,6 +50,19 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
+def decode_token(token: str) -> dict | None:
+    """
+    Decode JWT token tanpa DB lookup — untuk SSE endpoint yang tidak bisa
+    menggunakan Depends(get_current_user) karena EventSource tidak support headers.
+    Return payload dict jika valid, None jika tidak.
+    """
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        return payload
+    except Exception:
+        return None
+
+
 async def require_admin(user=Depends(get_current_user)):
     if user["role"] != "administrator":
         raise HTTPException(status_code=403, detail="Admin access required")

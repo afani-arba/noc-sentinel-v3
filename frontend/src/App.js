@@ -24,6 +24,8 @@ import WallDisplayPage from "@/pages/WallDisplayPage";
 import SLAPage from "@/pages/SLAPage";
 import IncidentsPage from "@/pages/IncidentsPage";
 import AuditLogPage from "@/pages/AuditLogPage";
+import BandwidthPage from "@/pages/BandwidthPage";
+import TopologyPage from "@/pages/TopologyPage";
 import Layout from "@/components/Layout";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -129,6 +131,9 @@ function App() {
             <Route path="sla" element={<SLAPage />} />
             <Route path="incidents" element={<IncidentsPage />} />
             <Route path="audit" element={<ProtectedRoute allowedRoles={["administrator"]}><AuditLogPage /></ProtectedRoute>} />
+            {/* v4 — New Features */}
+            <Route path="bandwidth" element={<BandwidthPage />} />
+            <Route path="topology" element={<TopologyPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
