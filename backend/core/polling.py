@@ -390,9 +390,24 @@ async def poll_single_device(device: dict) -> dict:
                 )
         except Exception as e:
             logger.warning(f"ROS6 delta calc gagal untuk {device.get('name','?')}: {e}")
-    # -- Simpan ke traffic_history (untuk grafik) ──────────────────────────────
+    # -- Hitung total bw untuk snapshot ─────────────────────────────────────────
     total_dl_bps = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
     total_ul_bps = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
+
+    # -- Ping real via ICMP (untuk wall display & SLA monitoring) ----------------
+    # API mode tidak melakukan ICMP ping saat poll — lakukan di sini agar
+    # traffic_history.ping_ms selalu terisi dengan nilai nyata.
+    real_ping_ms = ping_data.get("avg", 0) or 0
+    if not real_ping_ms and result.get("reachable"):
+        try:
+            ip = device.get("ip_address", "")
+            # parse host:port → ambil IP saja
+            ip_only = ip.split(":")[0] if ":" in ip else ip
+            if ip_only:
+                pr = await ping_service.ping_host(ip_only, count=2, timeout=2)
+                real_ping_ms = pr.get("avg", 0) or 0
+        except Exception:
+            real_ping_ms = 0
 
     snapshot = {
         "device_id":      did,
@@ -402,7 +417,7 @@ async def poll_single_device(device: dict) -> dict:
         "upload_mbps":    round(total_ul_bps / 1_000_000, 3),
         "cpu":            result.get("cpu", 0),
         "memory_percent": result.get("memory", {}).get("percent", 0),
-        "ping_ms":        ping_data.get("avg",    0) or 0,
+        "ping_ms":        round(real_ping_ms, 1),
         "jitter_ms":      ping_data.get("jitter", 0) or 0,
     }
     try:

@@ -317,9 +317,9 @@ export default function WallDisplayPage() {
         </div>
 
         {/* Right Panel */}
-        <div className="w-full lg:w-72 flex flex-col sm:flex-row lg:flex-col gap-3">
+        <div className="w-full lg:w-72 flex flex-col sm:flex-row lg:flex-col gap-3 lg:overflow-hidden">
           <div
-            className="rounded-xl border p-4 flex-1"
+            className="rounded-xl border p-4 flex flex-col flex-1 lg:overflow-hidden"
             style={{
               background: "rgba(255,255,255,0.03)",
               borderColor: "rgba(99,179,237,0.2)",
@@ -388,8 +388,9 @@ export default function WallDisplayPage() {
             </div>
 
             {/* ── Per-device ISP interface bandwidth ── */}
-            <div className="border-t border-white/10 pt-3 space-y-2 max-h-56 overflow-y-auto pr-1">
-              <p className="text-[9px] text-slate-500 uppercase tracking-widest mb-2">Per-Device ISP Bandwidth</p>
+            <div className="border-t border-white/10 pt-3 flex flex-col flex-1 min-h-0 overflow-hidden">
+              <p className="text-[9px] text-slate-500 uppercase tracking-widest mb-2 flex-shrink-0">Per-Device ISP Bandwidth</p>
+              <div className="flex-1 overflow-y-auto pr-1 space-y-2">
               {devices.filter(d => d.status === "online").map(d => {
                 const hist = deviceBwHistory[d.id] || [];
                 const latest = hist[hist.length - 1] || { dl: d.download_mbps || 0, ul: d.upload_mbps || 0 };
@@ -439,6 +440,7 @@ export default function WallDisplayPage() {
               {devices.filter(d => d.status === "online").length === 0 && (
                 <p className="text-[10px] text-slate-600 text-center py-2">No online devices</p>
               )}
+              </div>
             </div>
           </div>
 
