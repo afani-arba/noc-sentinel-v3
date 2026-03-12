@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
-import { Plus, Trash2, RefreshCw, Server, Wifi, WifiOff, Pencil, TestTube, Zap, Shield, ExternalLink } from "lucide-react";
+import { Plus, Trash2, RefreshCw, Server, Wifi, WifiOff, Pencil, Zap, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,8 +18,9 @@ export default function DevicesPage() {
   const [editing, setEditing] = useState(null);
   const [testing, setTesting] = useState("");
   const [form, setForm] = useState({
-    name: "", ip_address: "", snmp_community: "public", snmp_port: 161,
-    api_mode: "rest", api_username: "admin", api_password: "", api_port: "", use_https: false, api_ssl: true, api_plaintext_login: true, description: "",
+    name: "", ip_address: "",
+    api_mode: "rest", api_username: "admin", api_password: "",
+    api_port: "", use_https: false, api_ssl: true, api_plaintext_login: true, description: "",
   });
 
   const fetchDevices = useCallback(async () => {
@@ -34,14 +35,14 @@ export default function DevicesPage() {
 
   const openAdd = () => {
     setEditing(null);
-    setForm({ name: "", ip_address: "", snmp_community: "public", snmp_port: 161, api_mode: "rest", api_username: "admin", api_password: "", api_port: "", use_https: false, api_ssl: true, api_plaintext_login: true, description: "" });
+    setForm({ name: "", ip_address: "", api_mode: "rest", api_username: "admin", api_password: "", api_port: "", use_https: false, api_ssl: true, api_plaintext_login: true, description: "" });
     setDialogOpen(true);
   };
 
   const openEdit = (d) => {
     setEditing(d);
     setForm({
-      name: d.name, ip_address: d.ip_address || "", snmp_community: "public", snmp_port: d.snmp_port || 161,
+      name: d.name, ip_address: d.ip_address || "",
       api_mode: d.api_mode || "rest", api_username: d.api_username || "admin", api_password: "",
       api_port: d.api_port || "",
       use_https: d.use_https || false,
@@ -55,15 +56,9 @@ export default function DevicesPage() {
   const handleSave = async () => {
     try {
       const apiPort = form.api_port ? parseInt(form.api_port) : null;
-      const data = { 
-        ...form, 
-        snmp_port: parseInt(form.snmp_port) || 161, 
-        api_port: apiPort,
-        use_https: form.use_https,
-      };
+      const data = { ...form, api_port: apiPort, use_https: form.use_https };
       if (editing) {
         if (!data.api_password) delete data.api_password;
-        if (!data.snmp_community || data.snmp_community === "public") delete data.snmp_community;
         await api.put(`/devices/${editing.id}`, data);
         toast.success("Device updated");
       } else {
@@ -84,27 +79,14 @@ export default function DevicesPage() {
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
-  const handleTestSnmp = async (id) => {
-    setTesting(id + "_snmp");
-    try {
-      const r = await api.post(`/devices/${id}/test-snmp`);
-      if (r.data.snmp?.success) {
-        toast.success(`SNMP OK - ${r.data.snmp.sys_name} | Ping: ${r.data.ping?.reachable ? r.data.ping.avg + "ms" : "unreachable"}`);
-      } else {
-        toast.error(`SNMP Failed: ${r.data.snmp?.error || "timeout"}`);
-      }
-    } catch (e) { toast.error("Test failed"); }
-    setTesting("");
-  };
-
   const handleTestApi = async (id) => {
     setTesting(id + "_api");
     try {
       const r = await api.post(`/devices/${id}/test-api`);
       if (r.data.success) {
-        toast.success(`REST API OK - Identity: ${r.data.identity}`);
+        toast.success(`API OK — Identity: ${r.data.identity}`);
       } else {
-        toast.error(`REST API Failed: ${r.data.error || "connection error"}`);
+        toast.error(`API Failed: ${r.data.error || "connection error"}`);
       }
     } catch (e) { toast.error("API test failed"); }
     setTesting("");
@@ -114,7 +96,7 @@ export default function DevicesPage() {
     setTesting(id + "_poll");
     try {
       const r = await api.post(`/devices/${id}/poll`);
-      toast.success(r.data.reachable ? "Poll completed - device online" : "Poll completed - device offline");
+      toast.success(r.data.reachable ? "Poll OK — device online" : "Poll completed — device offline");
       fetchDevices();
     } catch (e) { toast.error("Poll failed"); }
     setTesting("");
@@ -125,7 +107,7 @@ export default function DevicesPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl md:text-3xl font-bold font-['Rajdhani'] tracking-tight">Devices</h1>
-          <p className="text-xs sm:text-sm text-muted-foreground">Manage MikroTik devices</p>
+          <p className="text-xs sm:text-sm text-muted-foreground">Manage MikroTik devices — polling via REST API</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="icon" onClick={fetchDevices} className="rounded-sm h-9 w-9" data-testid="devices-refresh-btn"><RefreshCw className="w-4 h-4" /></Button>
@@ -159,14 +141,11 @@ export default function DevicesPage() {
                 )}
               </div>
               <div className="mt-3 sm:mt-4 pt-2 sm:pt-3 border-t border-border/50 flex flex-wrap gap-1">
-                <Button variant="outline" size="sm" className="text-[10px] sm:text-xs gap-1 h-6 sm:h-7 rounded-sm px-2" onClick={() => handleTestSnmp(d.id)} disabled={testing===d.id+"_snmp"} data-testid={`test-snmp-${d.name}`}>
-                  <TestTube className="w-3 h-3" />{testing===d.id+"_snmp"?"...":"SNMP"}
-                </Button>
                 <Button variant="outline" size="sm" className="text-[10px] sm:text-xs gap-1 h-6 sm:h-7 rounded-sm px-2" onClick={() => handleTestApi(d.id)} disabled={testing===d.id+"_api"} data-testid={`test-api-${d.name}`}>
-                  <Zap className="w-3 h-3" />{testing===d.id+"_api"?"...":"API"}
+                  <Zap className="w-3 h-3" />{testing===d.id+"_api"?"...":"Test API"}
                 </Button>
                 <Button variant="outline" size="sm" className="text-[10px] sm:text-xs gap-1 h-6 sm:h-7 rounded-sm px-2 text-primary border-primary/30 hover:bg-primary/10" onClick={() => navigate(`/devices/${d.id}`)} data-testid={`detail-device-${d.name}`}>
-                  <ExternalLink className="w-3 h-3" />Detail
+                  <Zap className="w-3 h-3" />Detail
                 </Button>
                 <Button variant="ghost" size="sm" className="text-[10px] sm:text-xs gap-1 h-6 sm:h-7 rounded-sm px-2" onClick={() => openEdit(d)} data-testid={`edit-device-${d.name}`}><Pencil className="w-3 h-3" /></Button>
                 <Button variant="ghost" size="sm" className="text-[10px] sm:text-xs gap-1 h-6 sm:h-7 rounded-sm px-2 text-destructive" onClick={() => handleDelete(d.id, d.name)} data-testid={`delete-device-${d.name}`}><Trash2 className="w-3 h-3" /></Button>
@@ -180,7 +159,7 @@ export default function DevicesPage() {
         <DialogContent className="rounded-sm bg-card border-border max-w-lg max-h-[90vh] overflow-y-auto" data-testid="device-dialog">
           <DialogHeader>
             <DialogTitle className="font-['Rajdhani'] text-xl">{editing?"Edit Device":"Add Device"}</DialogTitle>
-            <DialogDescription>Configure MikroTik device with SNMP monitoring and REST API access.</DialogDescription>
+            <DialogDescription>Configure MikroTik device with REST API access (ROS 7+) or API Protocol (ROS 6+).</DialogDescription>
           </DialogHeader>
           <div className="space-y-5">
             <div className="space-y-1.5"><Label className="text-xs text-muted-foreground">Device Name</Label>
@@ -188,35 +167,18 @@ export default function DevicesPage() {
             <div className="space-y-1.5"><Label className="text-xs text-muted-foreground">IP Address</Label>
               <Input value={form.ip_address} onChange={e => setForm({...form, ip_address:e.target.value})} className="rounded-sm bg-background font-mono text-xs" placeholder="192.168.1.1" data-testid="device-form-ip" /></div>
 
-            {/* SNMP Section */}
-            <div className="border border-border/50 rounded-sm p-3 space-y-3">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1"><Shield className="w-3 h-3" /> SNMP Monitoring</p>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5"><Label className="text-xs text-muted-foreground">Community String</Label>
-                  <Input value={form.snmp_community} onChange={e => setForm({...form, snmp_community:e.target.value})} className="rounded-sm bg-background font-mono text-xs" placeholder="public" data-testid="device-form-snmp-community" /></div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">SNMP Port</Label>
-                  <Input type="number" value={form.snmp_port} onChange={e => setForm({...form, snmp_port:e.target.value})} className="rounded-sm bg-background font-mono text-xs" placeholder="161 (default)" data-testid="device-form-snmp-port" />
-                  <p className="text-[10px] text-muted-foreground/70">Isi jika port SNMP sudah diubah dari 161</p>
-                </div>
-              </div>
-            </div>
-
             {/* MikroTik API Section */}
             <div className="border border-border/50 rounded-sm p-3 space-y-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
                 <Zap className="w-3 h-3" /> MikroTik API
               </p>
-              
+
               {/* API Mode Selector */}
               <div className="space-y-1.5">
                 <Label className="text-xs text-muted-foreground">API Mode (RouterOS Version)</Label>
-                <Select 
-                  value={form.api_mode} 
-                  onValueChange={v => {
-                    // Hanya ubah mode, TIDAK auto-set port - biarkan user yang tentukan
-                    setForm({...form, api_mode: v});
-                  }}
+                <Select
+                  value={form.api_mode}
+                  onValueChange={v => setForm({...form, api_mode: v})}
                 >
                   <SelectTrigger className="rounded-sm bg-background text-xs" data-testid="device-form-api-mode">
                     <SelectValue />
@@ -227,9 +189,9 @@ export default function DevicesPage() {
                   </SelectContent>
                 </Select>
                 <p className="text-[10px] text-muted-foreground/70">
-                  {form.api_mode === "api" 
-                    ? "Untuk RouterOS versi 6.x - menggunakan port 8728/8729" 
-                    : "Untuk RouterOS versi 7.1+ - menggunakan REST API di port 443/80"}
+                  {form.api_mode === "api"
+                    ? "Untuk RouterOS versi 6.x — menggunakan port 8728/8729"
+                    : "Untuk RouterOS versi 7.1+ — menggunakan REST API di port 443/80"}
                 </p>
               </div>
 
@@ -239,23 +201,21 @@ export default function DevicesPage() {
                 <div className="space-y-1.5"><Label className="text-xs text-muted-foreground">API Password</Label>
                   <Input type="password" value={form.api_password} onChange={e => setForm({...form, api_password:e.target.value})} className="rounded-sm bg-background" placeholder={editing?"(unchanged)":""} data-testid="device-form-api-password" /></div>
               </div>
-              
+
               {/* Port Configuration */}
               {form.api_mode === "api" ? (
                 <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">
-                    API Port (RouterOS 6)
-                  </Label>
-                  <Input 
-                    type="number" 
-                    value={form.api_port} 
-                    onChange={e => setForm({...form, api_port:e.target.value})} 
-                    className="rounded-sm bg-background font-mono text-xs" 
+                  <Label className="text-xs text-muted-foreground">API Port (RouterOS 6)</Label>
+                  <Input
+                    type="number"
+                    value={form.api_port}
+                    onChange={e => setForm({...form, api_port:e.target.value})}
+                    className="rounded-sm bg-background font-mono text-xs"
                     placeholder={form.api_ssl ? "8729 (SSL, kosong = default)" : "8728 (kosong = default)"}
-                    data-testid="device-form-api-port" 
+                    data-testid="device-form-api-port"
                   />
                   <p className="text-[10px] text-muted-foreground/70">
-                    Kosongkan untuk menggunakan port default ({form.api_ssl ? "8729" : "8728"}). Isi jika port sudah diganti di IP › Services MikroTik.
+                    Kosongkan untuk port default ({form.api_ssl ? "8729" : "8728"}). Isi jika port sudah diganti di IP › Services.
                   </p>
                   <div className="flex items-center gap-2 pt-1">
                     <Label className="text-xs text-muted-foreground">SSL/Encrypted</Label>
@@ -287,18 +247,18 @@ export default function DevicesPage() {
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-xs text-muted-foreground">WWW Port</Label>
-                      <Input 
-                        type="number" 
-                        value={form.api_port} 
-                        onChange={e => setForm({...form, api_port:e.target.value})} 
-                        className="rounded-sm bg-background font-mono text-xs" 
+                      <Input
+                        type="number"
+                        value={form.api_port}
+                        onChange={e => setForm({...form, api_port:e.target.value})}
+                        className="rounded-sm bg-background font-mono text-xs"
                         placeholder={form.use_https ? "443 (kosong = default)" : "80 (kosong = default)"}
-                        data-testid="device-form-api-port" 
+                        data-testid="device-form-api-port"
                       />
                     </div>
                   </div>
                   <p className="text-[10px] text-muted-foreground/70">
-                    Kosongkan port untuk menggunakan default ({form.use_https ? "443" : "80"}). Isi jika port {form.use_https ? "www-ssl" : "www"} di IP › Services MikroTik sudah diubah.
+                    Kosongkan port untuk menggunakan default ({form.use_https ? "443" : "80"}). Isi jika port {form.use_https ? "www-ssl" : "www"} di IP › Services sudah diubah.
                   </p>
                 </div>
               )}

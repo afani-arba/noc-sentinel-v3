@@ -1,5 +1,5 @@
 """
-Devices router: CRUD + dashboard + SNMP test + MikroTik API test.
+Devices router: CRUD + dashboard + MikroTik API test.
 """
 import uuid
 import asyncio
@@ -10,21 +10,19 @@ from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 from core.db import get_db
 from core.auth import get_current_user, require_admin
-import snmp_service
+import ping_service
 from mikrotik_api import get_api_client
 from core.polling import poll_single_device
 
 router = APIRouter(tags=["devices"])
 logger = logging.getLogger(__name__)
 
-SAFE_DEVICE_FIELDS = {"_id": 0, "snmp_community": 0, "api_password": 0, "last_poll_data": 0}
+SAFE_DEVICE_FIELDS = {"_id": 0, "api_password": 0, "last_poll_data": 0}
 
 
 class DeviceCreate(BaseModel):
     name: str
     ip_address: str
-    snmp_community: str = "public"
-    snmp_port: int = 161
     api_mode: str = "rest"
     api_username: str = "admin"
     api_password: str = ""
@@ -38,8 +36,6 @@ class DeviceCreate(BaseModel):
 class DeviceUpdate(BaseModel):
     name: Optional[str] = None
     ip_address: Optional[str] = None
-    snmp_community: Optional[str] = None
-    snmp_port: Optional[int] = None
     api_mode: Optional[str] = None
     api_username: Optional[str] = None
     api_password: Optional[str] = None
@@ -101,7 +97,7 @@ async def create_device(data: DeviceCreate, user=Depends(require_admin)):
                          username=user.get("username", ""), user_id=user.get("id", ""))
     except Exception:
         pass
-    return {k: v for k, v in doc.items() if k not in ("_id", "snmp_community", "api_password", "last_poll_data")}
+    return {k: v for k, v in doc.items() if k not in ("_id", "api_password", "last_poll_data")}
 
 
 @router.put("/devices/{device_id}")
@@ -145,17 +141,6 @@ async def delete_device(device_id: str, user=Depends(require_admin)):
     except Exception:
         pass
     return {"message": "Deleted"}
-
-
-@router.post("/devices/{device_id}/test-snmp")
-async def test_snmp(device_id: str, user=Depends(get_current_user)):
-    db = get_db()
-    d = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not d:
-        raise HTTPException(404, "Device not found")
-    snmp_result = await snmp_service.test_connection(d["ip_address"], d.get("snmp_port", 161), d.get("snmp_community", "public"))
-    ping_result = await snmp_service.ping_host(d["ip_address"])
-    return {"snmp": snmp_result, "ping": ping_result}
 
 
 @router.post("/devices/{device_id}/test-api")
@@ -294,11 +279,10 @@ async def trigger_poll(device_id: str, user=Depends(get_current_user)):
 
 @router.post("/devices/test-new")
 async def test_new(data: DeviceCreate, user=Depends(get_current_user)):
-    snmp_r = await snmp_service.test_connection(data.ip_address, data.snmp_port, data.snmp_community)
-    ping_r = await snmp_service.ping_host(data.ip_address)
-    mt = get_api_client(data.model_dump())
-    api_r = await mt.test_connection()
-    return {"snmp": snmp_r, "ping": ping_r, "api": api_r}
+    ping_r = await ping_service.ping_host(data.ip_address)
+    mt     = get_api_client(data.model_dump())
+    api_r  = await mt.test_connection()
+    return {"ping": ping_r, "api": api_r}
 
 
 # ── Dashboard ──
