@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from "recharts";
 
-const REFRESH_INTERVAL = 10000; // 10 seconds
+const REFRESH_INTERVAL = 5000; // 5 seconds
 
 // Glow color by alert level
 function getGlowStyle(level, status) {
@@ -123,8 +123,13 @@ function DeviceCard({ device }) {
       <div className="grid grid-cols-3 gap-1 mt-1 pt-2 border-t border-white/10">
         <div className="text-center">
           <p className="text-[9px] text-slate-500 uppercase">Ping</p>
-          <p className={`text-[11px] font-mono font-bold ${device.ping_ms > 100 ? "text-yellow-400" : "text-cyan-400"}`}>
-            {isOffline ? "—" : `${device.ping_ms}ms`}
+          <p className={`text-[11px] font-mono font-bold ${
+            !isOffline && device.ping_ms > 100 ? "text-red-400" :
+            !isOffline && device.ping_ms > 50  ? "text-yellow-400" :
+            !isOffline && device.ping_ms > 10  ? "text-green-400" :
+            "text-cyan-400"
+          }`}>
+            {isOffline ? "—" : device.ping_ms > 0 ? `${device.ping_ms}ms` : "—"}
           </p>
         </div>
         <div className="text-center">

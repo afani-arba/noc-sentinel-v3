@@ -21,6 +21,16 @@ POLL_INTERVAL        = 30    # Detik antar polling cycle
 DEVICE_TIMEOUT       = 30    # Maks waktu per device (REST API + health)
 OFFLINE_GRACE_POLLS  = 2     # Gagal berturut-turut sebelum tandai offline
 MAX_CONCURRENT_POLLS = 20    # Paralel polling — aman untuk 100+ device
+OFFLINE_SKIP_AFTER   = 6     # Setelah N kali offline beruntun, skip polling sekian siklus
+OFFLINE_SKIP_CYCLES  = 4     # Jumlah siklus yang di-skip sebelum poll ulang
+
+# Interface virtual yang tidak perlu di-monitor untuk bandwidth
+_VIRTUAL_IFACE_TYPES = {
+    "bridge", "vlan", "pppoe-out", "pppoe-in", "l2tp", "pptp", "ovpn-client",
+    "ovpn-server", "sstp-client", "sstp-server", "gre", "eoip", "eoipv6",
+    "veth", "wireguard", "loopback", "6to4", "ipip", "ipip6",
+}
+_VIRTUAL_IFACE_PREFIXES = ("lo", "docker", "veth", "tun", "tap")
 
 
 # ── Core: Poll device via MikroTik API ───────────────────────────────────────
@@ -148,6 +158,7 @@ async def poll_via_api(device: dict) -> dict:
         running_ifaces = []
         for iface in (ifaces_raw if isinstance(ifaces_raw, list) else []):
             name     = iface.get("name", "")
+            itype    = iface.get("type", "").lower()
             running  = iface.get("running", False)
             disabled = str(iface.get("disabled", "false")).lower() == "true"
             status   = "down" if disabled else ("up" if running else "down")
@@ -157,7 +168,12 @@ async def poll_via_api(device: dict) -> dict:
                 "status": status,
                 "speed": 0,
             })
-            if running and not disabled and name:
+            # Hanya interface fisik/relevan yang masuk running_ifaces untuk BW monitoring
+            is_virtual = (
+                itype in _VIRTUAL_IFACE_TYPES
+                or name.lower().startswith(_VIRTUAL_IFACE_PREFIXES)
+            )
+            if running and not disabled and name and not is_virtual:
                 running_ifaces.append(name)
 
         # ── Bandwidth via monitor-traffic ──────────────────────────────────────
@@ -400,9 +416,8 @@ async def poll_single_device(device: dict) -> dict:
     real_ping_ms = ping_data.get("avg", 0) or 0
     if not real_ping_ms and result.get("reachable"):
         try:
-            ip = device.get("ip_address", "")
-            # parse host:port → ambil IP saja
-            ip_only = ip.split(":")[0] if ":" in ip else ip
+            ip_raw  = device.get("ip_address", "")
+            ip_only = get_host_only(ip_raw)  # IPv6-safe: handle [::1]:port
             if ip_only:
                 pr = await ping_service.ping_host(ip_only, count=2, timeout=2)
                 real_ping_ms = pr.get("avg", 0) or 0
@@ -498,13 +513,33 @@ async def polling_loop():
             db      = get_db()
             devices = await db.devices.find({}, {"_id": 0}).to_list(None)
             if devices:
-                logger.debug(f"Polling {len(devices)} device (max {MAX_CONCURRENT_POLLS} paralel)...")
+                # Fix C: skip device yang sudah lama offline (hemat resource)
+                tick = getattr(polling_loop, "_tick", 0) + 1
+                polling_loop._tick = tick
+
+                def _should_poll(dev):
+                    fails = dev.get("consecutive_poll_failures", 0)
+                    if fails < OFFLINE_SKIP_AFTER:
+                        return True
+                    # Skip setiap OFFLINE_SKIP_CYCLES siklus, poll 1 siklus
+                    return (tick % (OFFLINE_SKIP_CYCLES + 1)) == 0
+
+                to_poll = [d for d in devices if _should_poll(d)]
+                skipped = len(devices) - len(to_poll)
+                if skipped:
+                    logger.debug(f"Polling: {len(to_poll)} active, {skipped} offline skipped")
+
+                logger.debug(f"Polling {len(to_poll)} device (max {MAX_CONCURRENT_POLLS} paralel)...")
                 await asyncio.gather(
-                    *[poll_with_semaphore(d) for d in devices],
+                    *[poll_with_semaphore(d) for d in to_poll],
                     return_exceptions=True
                 )
 
-            # Bersihkan data lama: simpan 31 hari agar fitur "Bulan" berfungsi
+            # Fix D: Bersihkan traffic_snapshots yang sudah > 2 jam
+            snap_cutoff_ts = (datetime.now(timezone.utc) - timedelta(hours=2)).timestamp()
+            await db.traffic_snapshots.delete_many({"ts": {"$lt": snap_cutoff_ts}})
+
+            # Bersihkan traffic_history > 31 hari
             cutoff = (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
             await db.traffic_history.delete_many({"timestamp": {"$lt": cutoff}})
 

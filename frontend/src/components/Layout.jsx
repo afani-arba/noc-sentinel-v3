@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/App";
 import {
   LayoutDashboard, Users, Wifi, FileText, Server, Shield, LogOut, Menu, ChevronLeft, Settings, Bell, HardDrive, Terminal,
-  GitBranch, Route, Cable, ShieldAlert, Cpu, Receipt, Monitor, BarChart2, AlertTriangle, ClipboardList, Activity
+  GitBranch, Route, Cable, ShieldAlert, Cpu, Receipt, Monitor, BarChart2, AlertTriangle, ClipboardList, Activity, Download
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,6 +35,7 @@ const navItems = [
   { to: "/notifications", icon: Bell, label: "Notifikasi", adminOnly: true },
   { to: "/backups", icon: HardDrive, label: "Backup Config", adminOnly: true },
   { to: "/syslog", icon: Terminal, label: "Syslog", adminOnly: true },
+  { to: "/update", icon: Download, label: "Update Aplikasi", adminOnly: true },
   { to: "/settings", icon: Settings, label: "Pengaturan", adminOnly: true },
   { to: "/admin", icon: Shield, label: "Admin", adminOnly: true },
 ];

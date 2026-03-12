@@ -26,6 +26,7 @@ import IncidentsPage from "@/pages/IncidentsPage";
 import AuditLogPage from "@/pages/AuditLogPage";
 import BandwidthPage from "@/pages/BandwidthPage";
 import TopologyPage from "@/pages/TopologyPage";
+import UpdatePage from "@/pages/UpdatePage";
 import Layout from "@/components/Layout";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -134,6 +135,7 @@ function App() {
             {/* v4 — New Features */}
             <Route path="bandwidth" element={<BandwidthPage />} />
             <Route path="topology" element={<TopologyPage />} />
+            <Route path="update" element={<ProtectedRoute allowedRoles={["administrator"]}><UpdatePage /></ProtectedRoute>} />
           </Route>
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>

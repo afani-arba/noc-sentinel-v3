@@ -806,24 +806,37 @@ class MikroTikRouterAPI(MikroTikBase):
 
     async def get_all_interface_stats(self):
         """
-        ROS 6: Ambil stats SEMUA interface (rx-byte, tx-byte) dalam 1 koneksi.
-        Lebih efisien daripada memanggil get_interface_traffic per interface.
+        ROS 6: Ambil stats SEMUA interface fisik (rx-byte, tx-byte) dalam 1 koneksi.
+        Filter: skip interface virtual (bridge, vlan, pppoe-out, gre, eoip, dll).
         Return: dict {interface_name: {rx-bytes: int, tx-bytes: int}}
         """
+        _SKIP_TYPES = {
+            "bridge", "vlan", "pppoe-out", "pppoe-in", "l2tp", "pptp",
+            "ovpn-client", "ovpn-server", "sstp-client", "sstp-server",
+            "gre", "eoip", "eoipv6", "veth", "wireguard", "loopback",
+            "6to4", "ipip", "ipip6",
+        }
+        _SKIP_PREFIXES = ("lo", "docker", "veth", "tun", "tap")
         try:
             items = await asyncio.to_thread(self._list_resource, "/interface")
             result = {}
             for item in items:
-                name = item.get("name", "")
-                if name:
-                    result[name] = {
-                        "rx-bytes": int(item.get("rx-byte", 0) or 0),
-                        "tx-bytes": int(item.get("tx-byte", 0) or 0),
-                    }
+                name  = item.get("name", "")
+                itype = item.get("type", "").lower()
+                if not name:
+                    continue
+                # Skip virtual interfaces — hanya monitor interface fisik
+                if itype in _SKIP_TYPES or name.lower().startswith(_SKIP_PREFIXES):
+                    continue
+                result[name] = {
+                    "rx-bytes": int(item.get("rx-byte", 0) or 0),
+                    "tx-bytes": int(item.get("tx-byte", 0) or 0),
+                }
             return result
         except Exception as e:
             logger.debug(f"get_all_interface_stats ROS6 gagal: {e}")
             return {}
+
 
     # ── IP Address List ──
     async def list_ip_addresses(self):
