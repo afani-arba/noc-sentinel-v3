@@ -1,12 +1,9 @@
-"""
-Core polling module: poll individual devices and run the background polling loop.
-Also triggers WhatsApp notifications when threshold conditions are met.
-"""
 import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 from core.db import get_db
 import snmp_service
+from mikrotik_api import get_host_only
 
 logger = logging.getLogger(__name__)
 POLL_INTERVAL = 30
@@ -16,7 +13,9 @@ OFFLINE_GRACE_POLLS = 2   # Number of consecutive failed polls before marking of
 async def poll_single_device(device: dict) -> dict:
     db = get_db()
     did = device["id"]
-    host = device["ip_address"]
+    # Support format ip_address: "host" atau "host:port"
+    # SNMP hanya butuh host (plain IP tanpa port)
+    host = get_host_only(device["ip_address"])
     port = device.get("snmp_port", 161)
     comm = device.get("snmp_community", "public")
 

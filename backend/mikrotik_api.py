@@ -16,6 +16,33 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger(__name__)
 
 
+def parse_host_port(ip_address: str, default_port: int = None):
+    """
+    Parse 'host' or 'host:port' format dari field ip_address.
+    Support format:
+      - '192.168.1.1'          → ('192.168.1.1', default_port)
+      - '192.168.1.1:7701'     → ('192.168.1.1', 7701)
+      - '103.157.116.29:7701'  → ('103.157.116.29', 7701)
+
+    Returns: (host: str, port: int|None)
+    """
+    if not ip_address:
+        return ip_address, default_port
+
+    ip_address = str(ip_address).strip()
+
+    # Cek apakah mengandung port (host:port)
+    if ':' in ip_address:
+        parts = ip_address.rsplit(':', 1)
+        try:
+            port = int(parts[1])
+            return parts[0], port
+        except ValueError:
+            pass  # bukan port valid, kembali sebagai host saja
+
+    return ip_address, default_port
+
+
 # ── Custom SSL Adapter for MikroTik ROS 7.x ──────────────────────────────────
 # MikroTik ROS 7.x uses TLS ciphers/versions that OpenSSL 3.x rejects by default.
 # SECLEVEL=0 allows ALL ciphers; MINIMUM_SUPPORTED allows TLS 1.0/1.1/1.2/1.3.
@@ -87,14 +114,17 @@ class MikroTikBase:
 # ═══════════════════════════════════════════════════════════
 class MikroTikRestAPI(MikroTikBase):
     def __init__(self, host, username, password, port=443, use_ssl=True):
+        # Support format host:port — parse terlebih dahulu agar tidak double-port
+        parsed_host, parsed_port = parse_host_port(host, default_port=port)
+        self.host = parsed_host
+        self.port = parsed_port if parsed_port is not None else port
+        self.use_ssl = use_ssl
+
         scheme = "https" if use_ssl else "http"
-        self.base_url = f"{scheme}://{host}:{port}/rest"
+        self.base_url = f"{scheme}://{self.host}:{self.port}/rest"
         self.auth = (username, password)
         self.verify = False
-        self.timeout = 30  # Increased timeout to 30 seconds
-        self.host = host
-        self.port = port
-        self.use_ssl = use_ssl
+        self.timeout = 30
 
     def _request(self, method, path, data=None):
         url = f"{self.base_url}/{path}"
@@ -781,17 +811,38 @@ class MikroTikRouterAPI(MikroTikBase):
 
 
 # ═══════════════════════════════════════════════════════════
+# Helper — extract hanya host dari ip_address (tanpa port)
+# Digunakan untuk SNMP dan ICMP ping yang memerlukan plain IP
+# ═══════════════════════════════════════════════════════════
+def get_host_only(ip_address: str) -> str:
+    """Ambil hanya bagian host dari 'host:port' format."""
+    host, _ = parse_host_port(ip_address)
+    return host
+
+
+# ═══════════════════════════════════════════════════════════
 # Factory function
 # ═══════════════════════════════════════════════════════════
 def get_api_client(device: dict) -> MikroTikBase:
-    """Create the appropriate MikroTik API client based on device config."""
+    """
+    Create the appropriate MikroTik API client based on device config.
+    Mendukung ip_address dalam format 'host' atau 'host:port'.
+    Jika ip_address mengandung port (host:port), port tersebut digunakan
+    secara otomatis dan WWW Port / API Port field diabaikan.
+    """
     mode = device.get("api_mode", "rest")
+    raw_ip = device.get("ip_address", "")
+
+    # Parse host:port dari ip_address
+    parsed_host, port_from_ip = parse_host_port(raw_ip)
 
     if mode == "api":
-        # RouterOS 6+ API protocol
-        port = device.get("api_port") or 8728
+        # RouterOS 6+ API protocol (port default 8728)
+        # Jika ip_address mengandung port → pakai itu, else pakai api_port
+        port = port_from_ip if port_from_ip is not None else (device.get("api_port") or 8728)
+        logger.info(f"Creating RouterOS API client: host={parsed_host}, port={port}")
         return MikroTikRouterAPI(
-            host=device["ip_address"],
+            host=parsed_host,
             username=device.get("api_username", "admin"),
             password=device.get("api_password", ""),
             port=port,
@@ -799,15 +850,14 @@ def get_api_client(device: dict) -> MikroTikBase:
             plaintext_login=device.get("api_plaintext_login", True),
         )
     else:
-        # RouterOS 7+ REST API
-        port = device.get("api_port") or 443
-        # Gunakan use_https dari form, default False (HTTP)
+        # RouterOS 7+ REST API (port default 80 HTTP / 443 HTTPS)
         use_https = device.get("use_https", False)
-        
-        logger.info(f"Creating REST API client: host={device['ip_address']}, port={port}, https={use_https}")
-        
+        default_port = 443 if use_https else 80
+        # Jika ip_address mengandung port → pakai itu, else pakai api_port
+        port = port_from_ip if port_from_ip is not None else (device.get("api_port") or default_port)
+        logger.info(f"Creating REST API client: host={parsed_host}, port={port}, https={use_https}")
         return MikroTikRestAPI(
-            host=device["ip_address"],
+            host=parsed_host,
             username=device.get("api_username", "admin"),
             password=device.get("api_password", ""),
             port=port,
