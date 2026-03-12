@@ -3,44 +3,181 @@ import logging
 from datetime import datetime, timezone, timedelta
 from core.db import get_db
 import snmp_service
-from mikrotik_api import get_host_only
+from mikrotik_api import get_host_only, get_api_client
 
 logger = logging.getLogger(__name__)
 POLL_INTERVAL = 30
 OFFLINE_GRACE_POLLS = 2   # Number of consecutive failed polls before marking offline
 
 
+# ── REST API Fallback ─────────────────────────────────────────────────────────
+async def poll_via_rest_api(device: dict) -> dict:
+    """
+    Ambil data monitoring via MikroTik REST API sebagai fallback dari SNMP.
+    Menghasilkan struktur data yang sama dengan snmp_service.poll_device().
+    Digunakan ketika SNMP tidak dapat dijangkau (NAT/VPN/firewall).
+    """
+    try:
+        mt = get_api_client(device)
+
+        # Ambil semua data secara paralel
+        sys_res, health_raw, ifaces_raw = await asyncio.gather(
+            mt.get_system_resource(),
+            mt.get_system_health(),
+            mt.list_interfaces(),
+            return_exceptions=True,
+        )
+
+        if isinstance(sys_res, Exception):
+            sys_res = {}
+        if isinstance(health_raw, Exception):
+            health_raw = {}
+        if isinstance(ifaces_raw, Exception):
+            ifaces_raw = []
+
+        # ── Sistem Info ──────────────────────────────────────────────────────
+        sys_info = {}
+        if sys_res:
+            # Uptime: ROS API mengembalikan string "3d15h30m" atau seconds integer
+            uptime_raw = sys_res.get("uptime", "") or ""
+            uptime_seconds = 0
+            uptime_formatted = "N/A"
+            try:
+                # Format ROS: "3d15h30m10s"  atau "15h30m" dll
+                import re
+                d = int(re.search(r"(\d+)d", uptime_raw).group(1)) if "d" in uptime_raw else 0
+                h = int(re.search(r"(\d+)h", uptime_raw).group(1)) if "h" in uptime_raw else 0
+                m = int(re.search(r"(\d+)m", uptime_raw).group(1)) if "m" in uptime_raw else 0
+                s_match = re.search(r"(\d+)s", uptime_raw)
+                s_only = int(s_match.group(1)) if s_match else 0
+                uptime_seconds = d * 86400 + h * 3600 + m * 60 + s_only
+                uptime_formatted = f"{d}d {h}h {m}m"
+            except Exception:
+                uptime_formatted = uptime_raw or "N/A"
+
+            sys_info = {
+                "sys_name":       sys_res.get("platform", ""),
+                "board_name":     sys_res.get("board-name", sys_res.get("platform", "")),
+                "identity":       sys_res.get("platform", ""),
+                "ros_version":    sys_res.get("version", ""),
+                "architecture":   sys_res.get("architecture-name", ""),
+                "uptime_formatted": uptime_formatted,
+                "uptime_seconds": uptime_seconds,
+                "serial":         "",
+                "firmware":       sys_res.get("version", ""),
+            }
+
+        # ── CPU ──────────────────────────────────────────────────────────────
+        cpu_load = 0
+        try:
+            cpu_str = str(sys_res.get("cpu-load", "0") or "0")
+            cpu_load = int(cpu_str.strip().rstrip("%"))
+        except (ValueError, TypeError):
+            cpu_load = 0
+
+        # ── Memory ───────────────────────────────────────────────────────────
+        memory = {"total": 0, "used": 0, "percent": 0}
+        try:
+            total_mem = int(sys_res.get("total-memory", 0) or 0)
+            free_mem  = int(sys_res.get("free-memory",  0) or 0)
+            used_mem  = max(0, total_mem - free_mem)
+            if total_mem > 0:
+                memory = {
+                    "total":   total_mem,
+                    "used":    used_mem,
+                    "percent": round((used_mem / total_mem) * 100),
+                }
+        except (ValueError, TypeError):
+            pass
+
+        # ── Health (suhu, voltage) ────────────────────────────────────────────
+        health = {
+            "cpu_temp":   health_raw.get("cpu_temp",   0) if isinstance(health_raw, dict) else 0,
+            "board_temp": health_raw.get("board_temp", 0) if isinstance(health_raw, dict) else 0,
+            "voltage":    health_raw.get("voltage",    0) if isinstance(health_raw, dict) else 0,
+            "power":      health_raw.get("power",      0) if isinstance(health_raw, dict) else 0,
+        }
+
+        # ── Interfaces ───────────────────────────────────────────────────────
+        interfaces = []
+        for iface in (ifaces_raw if isinstance(ifaces_raw, list) else []):
+            name = iface.get("name", "")
+            running = iface.get("running", False)
+            disabled = iface.get("disabled", False)
+            status = "down" if disabled else ("up" if running else "down")
+            speed_raw = iface.get("actual-mtu", 0)  # fallback, actual speed needs extra call
+            interfaces.append({
+                "index":  iface.get(".id", ""),
+                "name":   name,
+                "status": status,
+                "speed":  0,
+            })
+
+        logger.info(
+            f"REST API poll success: {device.get('name', device.get('ip_address', '?'))} "
+            f"cpu={cpu_load}% mem={memory['percent']}%"
+        )
+
+        return {
+            "reachable": True,
+            "poll_mode": "rest_api",   # marker untuk UI/log
+            "ping":      {"reachable": True, "min": 0, "avg": 0, "max": 0, "jitter": 0, "loss": 0},
+            "system":    sys_info,
+            "cpu":       cpu_load,
+            "memory":    memory,
+            "interfaces": interfaces,
+            "traffic":   {},   # traffic delta requires sequential snapshots; SNMP-only for now
+            "health":    health,
+        }
+
+    except Exception as e:
+        logger.warning(f"REST API fallback failed for {device.get('name','?')}: {e}")
+        return {
+            "reachable": False, "poll_mode": "rest_api_failed",
+            "ping": {"reachable": False, "avg": 0, "jitter": 0, "loss": 100},
+            "system": {}, "cpu": 0,
+            "memory": {"total": 0, "used": 0, "percent": 0},
+            "interfaces": [], "traffic": {},
+            "health": {"cpu_temp": 0, "board_temp": 0, "voltage": 0, "power": 0},
+        }
+
+
 async def poll_single_device(device: dict) -> dict:
     db = get_db()
     did = device["id"]
-    # Support format ip_address: "host" atau "host:port"
-    # SNMP hanya butuh host (plain IP tanpa port)
+    # SNMP butuh plain IP (tanpa port)
     host = get_host_only(device["ip_address"])
     port = device.get("snmp_port", 161)
     comm = device.get("snmp_community", "public")
 
+    # ── Coba SNMP terlebih dahulu ─────────────────────────────────────────────
+    snmp_ok = False
+    result   = None
     try:
-        result = await asyncio.wait_for(snmp_service.poll_device(host, port, comm), timeout=55)
-    except asyncio.TimeoutError:
-        logger.warning(f"Poll timeout for {host} after 55s")
-        result = {
-            "reachable": False,
-            "ping": {"reachable": False, "avg": 0, "jitter": 0, "loss": 100},
-            "system": {}, "cpu": 0,
-            "memory": {"total": 0, "used": 0, "percent": 0},
-            "interfaces": [], "traffic": {},
-            "health": {"cpu_temp": 0, "board_temp": 0, "voltage": 0, "power": 0}
-        }
-    except Exception as poll_err:
-        logger.warning(f"Poll error for {host}: {poll_err}")
-        result = {
-            "reachable": False,
-            "ping": {"reachable": False, "avg": 0, "jitter": 0, "loss": 100},
-            "system": {}, "cpu": 0,
-            "memory": {"total": 0, "used": 0, "percent": 0},
-            "interfaces": [], "traffic": {},
-            "health": {"cpu_temp": 0, "board_temp": 0, "voltage": 0, "power": 0}
-        }
+        result = await asyncio.wait_for(snmp_service.poll_device(host, port, comm), timeout=25)
+        snmp_ok = result.get("reachable", False)
+    except Exception:
+        snmp_ok = False
+
+    # ── Fallback ke REST API jika SNMP tidak berhasil ─────────────────────────
+    if not snmp_ok:
+        api_mode = device.get("api_mode", "rest")
+        if api_mode in ("rest", "api"):
+            logger.info(
+                f"SNMP unreachable for {device.get('name', host)}, "
+                f"falling back to REST API polling"
+            )
+            result = await poll_via_rest_api(device)
+        else:
+            # Tidak ada REST API configured — kembalikan offline
+            result = {
+                "reachable": False,
+                "ping": {"reachable": False, "avg": 0, "jitter": 0, "loss": 100},
+                "system": {}, "cpu": 0,
+                "memory": {"total": 0, "used": 0, "percent": 0},
+                "interfaces": [], "traffic": {},
+                "health": {"cpu_temp": 0, "board_temp": 0, "voltage": 0, "power": 0},
+            }
 
     now = datetime.now(timezone.utc).isoformat()
 
