@@ -38,23 +38,40 @@ async def wallboard_status(user=Depends(get_current_user)):
         upload_bps = 0
         isp_interfaces = d.get("isp_interfaces", [])
 
+        # Daftar prefix/nama interface virtual yang dikecualikan dari perhitungan BW
+        VIRTUAL_PREFIXES = (
+            "bridge", "vlan", "lo", "loopback", "ovpn", "pppoe-", "pptp",
+            "l2tp", "eoip", "gre", "wireguard", "wg", "veth", "docker",
+            "ip6tnl", "sit", "tun", "tap", "dummy",
+        )
+
+        def is_physical(name: str) -> bool:
+            """Return True jika interface bukan virtual (perlu dihitung di fallback)."""
+            n = name.lower()
+            return not any(n.startswith(p) for p in VIRTUAL_PREFIXES)
+
         if last_bw:
             bw = last_bw.get("bandwidth") or {}
             if bw and isp_interfaces:
-                # Hanya gunakan ISP interface yang terdeteksi (comment-based detection)
+                # Priority 1: gunakan ISP interface yang terdeteksi (comment-based detection)
                 for iface in isp_interfaces:
                     iface_bw = bw.get(iface, {})
                     if isinstance(iface_bw, dict):
                         download_bps += iface_bw.get("download_bps", 0)
                         upload_bps   += iface_bw.get("upload_bps",   0)
-                # Jika tidak ada ISP interface yang match di bandwidth dict,
-                # JANGAN sum semua interface — biarkan 0 agar tidak terhitung ganda
-                # User harus set isp_interfaces di device config
-            elif bw and not isp_interfaces:
-                # Tidak ada ISP interface terdeteksi → tidak bisa hitung bandwidth akurat
-                # Biarkan 0 daripada sum semua interface (yang akan double-count)
-                download_bps = 0
-                upload_bps   = 0
+                # Priority 2 (fallback): jika tidak ada isp_interface yang match di bw dict
+                # (misal ROS7 key format berbeda), sum physical interface saja
+                if download_bps == 0 and upload_bps == 0:
+                    for iface_name, iface_bw in bw.items():
+                        if isinstance(iface_bw, dict) and is_physical(iface_name):
+                            download_bps += iface_bw.get("download_bps", 0)
+                            upload_bps   += iface_bw.get("upload_bps",   0)
+            elif bw:
+                # Tidak ada ISP interface terdeteksi → sum physical interface saja
+                for iface_name, iface_bw in bw.items():
+                    if isinstance(iface_bw, dict) and is_physical(iface_name):
+                        download_bps += iface_bw.get("download_bps", 0)
+                        upload_bps   += iface_bw.get("upload_bps",   0)
 
 
         # Determine alert level
