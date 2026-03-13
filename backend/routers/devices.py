@@ -434,19 +434,42 @@ async def dashboard_interfaces(device_id: str = "", user=Depends(get_current_use
     if not device or not device.get("last_poll_data"):
         return {"interfaces": ["all"], "isp_interfaces": []}
 
-    # Physical interface prefixes – exclude virtual/tunnel/software
+    # ── Virtual interface types yang dikecualikan (dari field 'type' MikroTik) ──
+    VIRTUAL_TYPES = {
+        "bridge", "vlan", "pppoe-out", "pppoe-in", "l2tp-out", "l2tp-in",
+        "pptp-out", "pptp-in", "sstp-out", "sstp-in", "ovpn-client", "ovpn-server",
+        "eoip", "eoipv6", "gre", "gre6", "ipip", "ipip6", "6to4",
+        "veth", "wireguard", "loopback", "bonding",
+    }
+    # ── Prefix nama yang jelas virtual (fallback jika type tidak tersedia) ───
+    VIRTUAL_PREFIXES = (
+        "bridge", "vlan", "pppoe-", "ppp-", "l2tp", "pptp", "sstp",
+        "eoip", "gre", "ovpn", "vrrp", "lo", "wg", "tun", "ipip",
+        "sit", "ip6tnl", "veth", "docker", "dummy",
+    )
+    # ── Prefix fisik yang selalu di-include ─────────────────────────────────
     PHYSICAL_PREFIXES = ("ether", "sfp", "combo", "wlan", "lte", "fiber", "qsfp", "xsfp")
-    VIRTUAL_PREFIXES  = ("bridge", "vlan", "pppoe", "ppp", "l2tp", "pptp", "sstp", "eoip", "gre", "ovpn", "vrrp", "lo", "wg", "tun", "ipip")
-    all_ifaces = [i["name"] for i in device["last_poll_data"].get("interfaces", []) if i.get("name")]
-    physical = []
-    for name in all_ifaces:
-        n = name.lower()
-        if any(n.startswith(p) for p in PHYSICAL_PREFIXES):
-            physical.append(name)
-        elif not any(n.startswith(v) for v in VIRTUAL_PREFIXES):
-            physical.append(name)
 
-    # Deduplicate
+    iface_list = device["last_poll_data"].get("interfaces", [])
+    physical = []
+    for iface in iface_list:
+        name  = (iface.get("name") or "").strip()
+        itype = (iface.get("type") or "").lower().strip()
+        if not name:
+            continue
+        n = name.lower()
+
+        # Skip jika type eksplisit virtual
+        if itype in VIRTUAL_TYPES:
+            continue
+        # Skip jika nama dimulai dengan prefix virtual
+        if any(n.startswith(p) for p in VIRTUAL_PREFIXES):
+            continue
+        # Include jika nama dimulai dengan prefix fisik dikenal
+        # ATAU nama tidak dimulai dengan prefix virtual (unknown type → masuk)
+        physical.append(name)
+
+    # Deduplicate — jaga urutan
     seen = set()
     unique_physical = []
     for n in physical:
@@ -454,17 +477,18 @@ async def dashboard_interfaces(device_id: str = "", user=Depends(get_current_use
             seen.add(n)
             unique_physical.append(n)
 
-    # ISP interfaces saved from comment detection (detect first → suggest default)
+    # ISP interfaces dari comment detection (disimpan oleh polling cycle)
     isp_interfaces = device.get("isp_interfaces", [])
 
-    # Sort: ISP interfaces first, then remaining physical interfaces
+    # Sort: ISP interfaces didahulukan, lalu sisanya alphabetical
     isp_set = set(isp_interfaces)
-    ordered = [i for i in isp_interfaces if i in set(unique_physical)]
-    ordered += [i for i in unique_physical if i not in isp_set]
+    ordered_isp = [i for i in isp_interfaces if i in set(unique_physical)]
+    ordered_rest = sorted(i for i in unique_physical if i not in isp_set)
+    ordered = ordered_isp + ordered_rest
 
     return {
-        "interfaces": ["all"] + ordered,
-        "isp_interfaces": ordered[:len(isp_interfaces)],  # confirmed ISP interfaces
+        "interfaces":     ["all"] + ordered,
+        "isp_interfaces": ordered_isp,      # interface terdeteksi sebagai ISP uplink
     }
 
 

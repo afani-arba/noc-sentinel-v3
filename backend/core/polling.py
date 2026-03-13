@@ -406,7 +406,32 @@ async def poll_single_device(device: dict) -> dict:
                 )
         except Exception as e:
             logger.warning(f"ROS6 delta calc gagal untuk {device.get('name','?')}: {e}")
-    # -- Hitung total bw untuk snapshot ─────────────────────────────────────────
+    # -- Hitung isp_bandwidth: traffic hanya dari interface ISP (comment-detected) --
+    # isp_interfaces disimpan di devices collection dari setiap polling cycle.
+    # Ini dipakai wallboard untuk menampilkan DL/UL yang akurat (hanya traffic ISP).
+    isp_interfaces = device.get("isp_interfaces", [])
+    isp_bw = {}
+    if bw and isp_interfaces:
+        for iface_name in isp_interfaces:
+            iface_data = bw.get(iface_name)
+            if isinstance(iface_data, dict):
+                isp_bw[iface_name] = {
+                    "download_bps": iface_data.get("download_bps", 0),
+                    "upload_bps":   iface_data.get("upload_bps", 0),
+                    "status":       iface_data.get("status", "up"),
+                }
+
+    # -- Hitung total ISP bw (sum semua ISP interface) ────────────────────────────
+    if isp_bw:
+        # Ada ISP interface terdeteksi → pakai ISP-only untuk total
+        isp_dl_bps = sum(v.get("download_bps", 0) for v in isp_bw.values())
+        isp_ul_bps = sum(v.get("upload_bps",   0) for v in isp_bw.values())
+    else:
+        # Fallback: sum semua interface yang ada di bw
+        isp_dl_bps = 0
+        isp_ul_bps = 0
+
+    # -- Hitung total bw untuk snapshot (semua interface) ────────────────────────
     total_dl_bps = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
     total_ul_bps = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
 
@@ -425,15 +450,17 @@ async def poll_single_device(device: dict) -> dict:
             real_ping_ms = 0
 
     snapshot = {
-        "device_id":      did,
-        "timestamp":      now,
-        "bandwidth":      bw,
-        "download_mbps":  round(total_dl_bps / 1_000_000, 3),
-        "upload_mbps":    round(total_ul_bps / 1_000_000, 3),
-        "cpu":            result.get("cpu", 0),
-        "memory_percent": result.get("memory", {}).get("percent", 0),
-        "ping_ms":        round(real_ping_ms, 1),
-        "jitter_ms":      ping_data.get("jitter", 0) or 0,
+        "device_id":       did,
+        "timestamp":       now,
+        "bandwidth":       bw,           # semua interface fisik
+        "isp_bandwidth":   isp_bw,       # hanya interface ISP (bisa multi-ISP)
+        # ISP-aware total: gunakan isp_bw jika ada, fallback ke total semua interface
+        "download_mbps":   round((isp_dl_bps if isp_bw else total_dl_bps) / 1_000_000, 3),
+        "upload_mbps":     round((isp_ul_bps if isp_bw else total_ul_bps) / 1_000_000, 3),
+        "cpu":             result.get("cpu", 0),
+        "memory_percent":  result.get("memory", {}).get("percent", 0),
+        "ping_ms":         round(real_ping_ms, 1),
+        "jitter_ms":       ping_data.get("jitter", 0) or 0,
     }
     try:
         await db.traffic_history.insert_one(snapshot)

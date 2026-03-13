@@ -461,10 +461,24 @@ class MikroTikRestAPI(MikroTikBase):
         """
         Return list of interface names that are marked as ISP/WAN/INPUT uplinks
         via their 'comment' field in MikroTik.
-        Keywords checked (case-insensitive): ISP, INPUT, WAN, UPLINK, UPSTREAM.
-        Falls back to empty list if none found (caller should fallback to 'all').
+
+        Keywords checked (case-insensitive) — LOCKED IN CODE (ISP1..ISP20, WAN, INPUT):
+          isp, isp1..isp20, wan, wan1..wan20, input, input1..input20,
+          uplink, upstream, internet, gateway
+
+        Multi-ISP: semua interface yang match akan dikembalikan (support sampai 20 ISP).
+        Falls back to empty list if none found (caller should fallback to 'all physical').
         """
-        ISP_KEYWORDS = ("isp", "input", "wan", "uplink", "upstream")
+        # ── Keyword ISP detection — dikunci di kode ──────────────────────────────
+        ISP_KEYWORDS = (
+            "isp",
+            *[f"isp{i}" for i in range(1, 21)],   # isp1 .. isp20
+            "wan",
+            *[f"wan{i}" for i in range(1, 21)],   # wan1 .. wan20
+            "input",
+            *[f"input{i}" for i in range(1, 21)], # input1 .. input20
+            "uplink", "upstream", "internet", "gateway",
+        )
         try:
             ifaces = await self._async_req("GET", "interface")
             if not isinstance(ifaces, list):
@@ -836,9 +850,23 @@ class MikroTikRouterAPI(MikroTikBase):
         """
         Return list of interface names that are marked as ISP/WAN/INPUT uplinks
         via their 'comment' field in MikroTik.
-        Keywords checked (case-insensitive): ISP, INPUT, WAN, UPLINK, UPSTREAM.
+
+        Keywords checked (case-insensitive) — LOCKED IN CODE (ISP1..ISP20, WAN, INPUT):
+          isp, isp1..isp20, wan, wan1..wan20, input, input1..input20,
+          uplink, upstream, internet, gateway
+
+        Multi-ISP: semua interface yang match dikembalikan (support sampai 20 ISP).
         """
-        ISP_KEYWORDS = ("isp", "input", "wan", "uplink", "upstream")
+        # ── Keyword ISP detection — dikunci di kode ──────────────────────────────
+        ISP_KEYWORDS = (
+            "isp",
+            *[f"isp{i}" for i in range(1, 21)],   # isp1 .. isp20
+            "wan",
+            *[f"wan{i}" for i in range(1, 21)],   # wan1 .. wan20
+            "input",
+            *[f"input{i}" for i in range(1, 21)], # input1 .. input20
+            "uplink", "upstream", "internet", "gateway",
+        )
         try:
             items = await asyncio.to_thread(self._list_resource, "/interface")
             ifaces = self._normalize_items(items)

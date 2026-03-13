@@ -105,6 +105,7 @@ export default function DeviceDetailPage() {
   const [device, setDevice] = useState(null);
   const [history, setHistory] = useState([]);
   const [availableIfaces, setAvailableIfaces] = useState([]);
+  const [ispIfaces, setIspIfaces] = useState([]);     // interface ISP dari comment detection
   const [selectedIface, setSelectedIface] = useState("all");
   const [range, setRange] = useState("24h");
   const [dateFilter, setDateFilter] = useState(""); // YYYY-MM-DD
@@ -128,9 +129,11 @@ export default function DeviceDetailPage() {
       // Interface list dari /dashboard/interfaces
       const ifData = ifaceRes.data || {};
       const ifaces = ifData.interfaces || [];
+      const ispList = ifData.isp_interfaces || [];
       if (ifaces.length > 0) {
         setAvailableIfaces(ifaces);
       }
+      setIspIfaces(ispList);
 
       // Traffic history dari /dashboard/traffic-history
       const hist = Array.isArray(histRes.data) ? histRes.data : [];
@@ -152,6 +155,7 @@ export default function DeviceDetailPage() {
     setLoading(false);
     setRefreshing(false);
   }, [id, selectedIface, range, dateFilter]);
+
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -234,20 +238,34 @@ export default function DeviceDetailPage() {
           <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Interface</span>
         </div>
         <div className="flex flex-wrap gap-1">
-          {(availableIfaces.length > 0 ? availableIfaces : ["all"]).map((iface) => (
-            <button
-              key={iface}
-              onClick={() => setSelectedIface(iface)}
-              className={`px-2.5 py-1 rounded-sm text-[10px] font-mono font-semibold border transition-all ${
-                selectedIface === iface
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "bg-transparent text-muted-foreground border-border hover:border-primary/50 hover:text-foreground"
-              }`}
-            >
-              {iface === "all" ? "All" : iface}
-            </button>
-          ))}
+          {(availableIfaces.length > 0 ? availableIfaces : ["all"]).map((iface) => {
+            const isISP = ispIfaces.includes(iface);
+            return (
+              <button
+                key={iface}
+                onClick={() => setSelectedIface(iface)}
+                className={`px-2.5 py-1 rounded-sm text-[10px] font-mono font-semibold border transition-all flex items-center gap-1 ${
+                  selectedIface === iface
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-transparent text-muted-foreground border-border hover:border-primary/50 hover:text-foreground"
+                }`}
+              >
+                {iface === "all" ? "All" : iface}
+                {isISP && (
+                  <span className="text-[8px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold">
+                    ISP
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
+        {ispIfaces.length > 0 && (
+          <span className="text-[9px] text-amber-400/70 ml-1">
+            📡 {ispIfaces.length} ISP interface terdeteksi
+          </span>
+        )}
+
 
         <div className="w-px h-5 bg-border hidden sm:block" />
 
