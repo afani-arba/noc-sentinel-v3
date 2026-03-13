@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
-import { Plus, Trash2, RefreshCw, Server, Wifi, WifiOff, Pencil, Zap, ExternalLink } from "lucide-react";
+import { Plus, Trash2, Server, Wifi, WifiOff, Pencil, Zap, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -110,7 +110,6 @@ export default function DevicesPage() {
           <p className="text-xs sm:text-sm text-muted-foreground">Manage MikroTik devices — polling via REST API</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="icon" onClick={fetchDevices} className="rounded-sm h-9 w-9" data-testid="devices-refresh-btn"><RefreshCw className="w-4 h-4" /></Button>
           <Button onClick={openAdd} size="sm" className="rounded-sm gap-2" data-testid="add-device-btn"><Plus className="w-4 h-4" /> <span className="hidden sm:inline">Add Device</span></Button>
         </div>
       </div>
