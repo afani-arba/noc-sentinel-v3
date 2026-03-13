@@ -259,7 +259,6 @@ export default function DashboardPage() {
               )}
             </div>
           </div>
-          <Button variant="outline" size="icon" className="h-9 w-9 rounded-sm col-span-2 sm:col-span-1 justify-self-end" onClick={fetchStats} data-testid="dashboard-refresh-btn"><RefreshCw className="w-4 h-4" /></Button>
         </div>
       </div>
 
