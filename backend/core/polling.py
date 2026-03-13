@@ -162,19 +162,29 @@ async def poll_via_api(device: dict) -> dict:
             running  = iface.get("running", False)
             disabled = str(iface.get("disabled", "false")).lower() == "true"
             status   = "down" if disabled else ("up" if running else "down")
-            interfaces.append({
-                "index": iface.get(".id", ""),
-                "name":  name,
-                "status": status,
-                "speed": 0,
-            })
-            # Hanya interface fisik/relevan yang masuk running_ifaces untuk BW monitoring
+            # ── Cek apakah interface virtual ────────────────────────────────
             is_virtual = (
                 itype in _VIRTUAL_IFACE_TYPES
                 or name.lower().startswith(_VIRTUAL_IFACE_PREFIXES)
+                or name.startswith("<")   # Dynamic PPPoE session: "<pppoe-username>"
             )
+
+            # Simpan interface ke list beserta field type dan virtual flag
+            # (field 'type' diperlukan oleh /dashboard/interfaces untuk filter)
+            if name:
+                interfaces.append({
+                    "index":   iface.get(".id", ""),
+                    "name":    name,
+                    "type":    itype,       # field type dari MikroTik
+                    "status":  status,
+                    "speed":   0,
+                    "virtual": is_virtual,  # flag virtual untuk filter frontend
+                })
+
+            # Hanya interface fisik/relevan yang masuk running_ifaces untuk BW monitoring
             if running and not disabled and name and not is_virtual:
                 running_ifaces.append(name)
+
 
         # ── Bandwidth via monitor-traffic ──────────────────────────────────────
         # Ambil bandwidth real-time untuk setiap interface yang running.

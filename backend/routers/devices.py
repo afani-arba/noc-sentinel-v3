@@ -1,4 +1,4 @@
-"""
+﻿"""
 Devices router: CRUD + dashboard + MikroTik API test.
 """
 import uuid
@@ -31,7 +31,7 @@ class DeviceCreate(BaseModel):
     api_ssl: bool = True
     api_plaintext_login: bool = True
     description: str = ""
-    winbox_address: Optional[str] = None  # Alamat Winbox remote — opsional, isi jika berbeda dari ip_address
+    winbox_address: Optional[str] = None  # Alamat Winbox remote â€” opsional, isi jika berbeda dari ip_address
 
 
 class DeviceUpdate(BaseModel):
@@ -45,7 +45,7 @@ class DeviceUpdate(BaseModel):
     api_ssl: Optional[bool] = None
     api_plaintext_login: Optional[bool] = None
     description: Optional[str] = None
-    winbox_address: Optional[str] = None  # Alamat Winbox remote — opsional
+    winbox_address: Optional[str] = None  # Alamat Winbox remote â€” opsional
 
 
 def filter_devices_for_user(devices: list, user: dict) -> list:
@@ -273,8 +273,8 @@ async def get_ip_addresses(device_id: str, user=Depends(get_current_user)):
 async def get_system_health(device_id: str, user=Depends(get_current_user)):
     """
     Ambil data sensor hardware dari MikroTik.
-    - ROS 6.x (API Protocol): /system/health — {name, value, type} per sensor
-    - ROS 7.x (REST API): /rest/system/health — [{name, value, type}]
+    - ROS 6.x (API Protocol): /system/health â€” {name, value, type} per sensor
+    - ROS 7.x (REST API): /rest/system/health â€” [{name, value, type}]
     Fallback: baca dari MongoDB jika live API call gagal/kosong.
     """
     db = get_db()
@@ -345,7 +345,7 @@ async def test_new(data: DeviceCreate, user=Depends(get_current_user)):
     return {"ping": ping_r, "api": api_r}
 
 
-# ── Dashboard ──
+# â”€â”€ Dashboard â”€â”€
 @router.get("/dashboard/stats")
 async def dashboard_stats(device_id: str = "", interface: str = "", user=Depends(get_current_user)):
     db = get_db()
@@ -356,12 +356,12 @@ async def dashboard_stats(device_id: str = "", interface: str = "", user=Depends
     device = await db.devices.find_one({"id": device_id}, {"_id": 0}) if device_id else None
 
     query = {"device_id": device_id} if device_id else {}
-    # BUG 3 FIX: limit 200→300 agar cukup untuk 144 titik terbaru
+    # BUG 3 FIX: limit 200â†’300 agar cukup untuk 144 titik terbaru
     history = await db.traffic_history.find(query, {"_id": 0}).sort("timestamp", -1).to_list(300)
     history.reverse()
 
     traffic_data = []
-    for h in history[-144:]:   # BUG 3 FIX: was -60 (30 menit), now 144×30s = 72 menit
+    for h in history[-144:]:   # BUG 3 FIX: was -60 (30 menit), now 144Ã—30s = 72 menit
         try:
             utc_time = datetime.fromisoformat(h["timestamp"].replace("Z", "+00:00"))
             local_time = (utc_time.replace(tzinfo=None) if utc_time.tzinfo else utc_time) + timedelta(hours=7)
@@ -434,42 +434,48 @@ async def dashboard_interfaces(device_id: str = "", user=Depends(get_current_use
     if not device or not device.get("last_poll_data"):
         return {"interfaces": ["all"], "isp_interfaces": []}
 
-    # ── Virtual interface types yang dikecualikan (dari field 'type' MikroTik) ──
+    iface_list = device["last_poll_data"].get("interfaces", [])
+
+    # â”€â”€ Filter virtual interface â€” berlapis â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # Layer 1: gunakan flag 'virtual' yang sudah dihitung oleh polling.py
+    # Layer 2: fallback prefix-based detection untuk data lama (tanpa flag 'virtual')
     VIRTUAL_TYPES = {
         "bridge", "vlan", "pppoe-out", "pppoe-in", "l2tp-out", "l2tp-in",
         "pptp-out", "pptp-in", "sstp-out", "sstp-in", "ovpn-client", "ovpn-server",
         "eoip", "eoipv6", "gre", "gre6", "ipip", "ipip6", "6to4",
         "veth", "wireguard", "loopback", "bonding",
     }
-    # ── Prefix nama yang jelas virtual (fallback jika type tidak tersedia) ───
     VIRTUAL_PREFIXES = (
-        "bridge", "vlan", "pppoe-", "ppp-", "l2tp", "pptp", "sstp",
+        "bridge", "vlan", "pppoe", "ppp-", "ppp0", "l2tp", "pptp", "sstp",
         "eoip", "gre", "ovpn", "vrrp", "lo", "wg", "tun", "ipip",
         "sit", "ip6tnl", "veth", "docker", "dummy",
     )
-    # ── Prefix fisik yang selalu di-include ─────────────────────────────────
-    PHYSICAL_PREFIXES = ("ether", "sfp", "combo", "wlan", "lte", "fiber", "qsfp", "xsfp")
 
-    iface_list = device["last_poll_data"].get("interfaces", [])
     physical = []
     for iface in iface_list:
         name  = (iface.get("name") or "").strip()
         itype = (iface.get("type") or "").lower().strip()
         if not name:
             continue
-        n = name.lower()
 
-        # Skip jika type eksplisit virtual
+        # Skip dynamic session: nama dimulai dengan '<' (PPPoE active sessions)
+        if name.startswith("<"):
+            continue
+
+        # Layer 1: polling.py sudah menghitung flag 'virtual'
+        if iface.get("virtual") is True:
+            continue
+
+        # Layer 2: fallback untuk data lama (sebelum field 'virtual' ada)
         if itype in VIRTUAL_TYPES:
             continue
-        # Skip jika nama dimulai dengan prefix virtual
+        n = name.lower()
         if any(n.startswith(p) for p in VIRTUAL_PREFIXES):
             continue
-        # Include jika nama dimulai dengan prefix fisik dikenal
-        # ATAU nama tidak dimulai dengan prefix virtual (unknown type → masuk)
+
         physical.append(name)
 
-    # Deduplicate — jaga urutan
+    # Deduplicate â€” jaga urutan
     seen = set()
     unique_physical = []
     for n in physical:
@@ -482,13 +488,13 @@ async def dashboard_interfaces(device_id: str = "", user=Depends(get_current_use
 
     # Sort: ISP interfaces didahulukan, lalu sisanya alphabetical
     isp_set = set(isp_interfaces)
-    ordered_isp = [i for i in isp_interfaces if i in set(unique_physical)]
+    ordered_isp  = [i for i in isp_interfaces if i in set(unique_physical)]
     ordered_rest = sorted(i for i in unique_physical if i not in isp_set)
     ordered = ordered_isp + ordered_rest
 
     return {
         "interfaces":     ["all"] + ordered,
-        "isp_interfaces": ordered_isp,      # interface terdeteksi sebagai ISP uplink
+        "isp_interfaces": ordered_isp,
     }
 
 
@@ -579,19 +585,19 @@ async def traffic_history_range(
         start, end = now_utc - timedelta(hours=24), now_utc
 
     # BUG 1 FIX: gunakan format yang sama dengan cara polling menyimpan (+00:00 isoformat)
-    # polling.py: datetime.now(timezone.utc).isoformat() → "2024-03-11T12:00:00.123456+00:00"
+    # polling.py: datetime.now(timezone.utc).isoformat() â†’ "2024-03-11T12:00:00.123456+00:00"
     # Sebelumnya ".isoformat()" bisa berbeda microsecond precision, sekarang di-floor ke detik
     start_str = start.strftime("%Y-%m-%dT%H:%M:%S+00:00")
     end_str   = now_utc.strftime("%Y-%m-%dT%H:%M:%S+00:00")  # always use current time as end
 
     # BUG 2 FIX: interval bucket untuk downsampling
-    # Polling setiap 30 detik → target ~100–200 titik per grafik
+    # Polling setiap 30 detik â†’ target ~100â€“200 titik per grafik
     interval_ms = {
-        "1h":    60_000,        # 1-menit bucket  → ~60  titik
-        "12h":   300_000,       # 5-menit bucket  → ~144 titik
-        "24h":   600_000,       # 10-menit bucket → ~144 titik
-        "week":  3_600_000,     # 1-jam bucket    → ~168 titik
-        "month": 10_800_000,    # 3-jam bucket    → ~240 titik
+        "1h":    60_000,        # 1-menit bucket  â†’ ~60  titik
+        "12h":   300_000,       # 5-menit bucket  â†’ ~144 titik
+        "24h":   600_000,       # 10-menit bucket â†’ ~144 titik
+        "week":  3_600_000,     # 1-jam bucket    â†’ ~168 titik
+        "month": 10_800_000,    # 3-jam bucket    â†’ ~240 titik
     }.get(range, 600_000)
 
     base_match: dict = {"timestamp": {"$gte": start_str, "$lte": end_str}}
@@ -620,7 +626,7 @@ async def traffic_history_range(
                 {"$sort": {"_id": 1}},
             ]
         else:
-            # ── Pipeline "all" — ISP-aware ─────────────────────────────────────
+            # â”€â”€ Pipeline "all" â€” ISP-aware â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             # Prioritas 1: isp_bandwidth (sum semua ISP interface, disimpan oleh polling.py)
             #   Format: {isp_bandwidth: {ether1: {download_bps, upload_bps}, ether2: {...}}}
             # Prioritas 2: fallback ke sum semua bandwidth.* (lama, jika isp_bandwidth tidak ada)
@@ -864,7 +870,7 @@ async def bandwidth_heatmap(
     return {"metric": metric, "days": days, "data": result, "unit": "Mbps" if metric == "bandwidth" else "%"}
 
 
-# ── Traffic History (per-device with interface + range + date filter) ─────────
+# â”€â”€ Traffic History (per-device with interface + range + date filter) â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/devices/{device_id}/traffic-history")
 async def get_traffic_history(
@@ -872,7 +878,7 @@ async def get_traffic_history(
     limit: int = 144,
     interface: str = "",
     range: str = "12h",   # 1h | 12h | 24h
-    date: str = "",        # YYYY-MM-DD → return 24h of that date
+    date: str = "",        # YYYY-MM-DD â†’ return 24h of that date
     user=Depends(get_current_user)
 ):
     """
@@ -984,12 +990,12 @@ async def get_traffic_history(
         "history": result,
     }
 
-# (system-resource endpoint is defined at line 171 — only one instance needed)
+# (system-resource endpoint is defined at line 171 â€” only one instance needed)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# BANDWIDTH LIVE — per-interface real-time bandwidth dari traffic_history
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# BANDWIDTH LIVE â€” per-interface real-time bandwidth dari traffic_history
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/bandwidth/live/{device_id}")
 async def bandwidth_live(
@@ -1006,13 +1012,13 @@ async def bandwidth_live(
     if not device:
         raise HTTPException(404, "Device tidak ditemukan")
 
-    # ── Ambil data traffic_history terbaru (1 record = 1 poll cycle) ─────────
+    # â”€â”€ Ambil data traffic_history terbaru (1 record = 1 poll cycle) â”€â”€â”€â”€â”€â”€â”€â”€â”€
     latest = await db.traffic_history.find_one(
         {"device_id": device_id},
         sort=[("timestamp", -1)]
     )
 
-    # ── Ambil 10 record terakhir untuk grafik trend (5 menit @ 30s interval) ─
+    # â”€â”€ Ambil 10 record terakhir untuk grafik trend (5 menit @ 30s interval) â”€
     history_records = await db.traffic_history.find(
         {"device_id": device_id},
         {"_id": 0, "timestamp": 1, "bandwidth": 1, "download_mbps": 1, "upload_mbps": 1,
@@ -1024,7 +1030,7 @@ async def bandwidth_live(
     if latest:
         bandwidth_map = latest.get("bandwidth") or {}
 
-    # ── Ambil daftar interface dari last_poll_data untuk metadata ─────────────
+    # â”€â”€ Ambil daftar interface dari last_poll_data untuk metadata â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     last_poll = device.get("last_poll_data") or {}
     interfaces_raw = last_poll.get("interfaces", [])
 
@@ -1072,11 +1078,11 @@ async def bandwidth_live(
     # Sort: physical first, then running first, then by name
     interfaces.sort(key=lambda x: (not x["is_physical"], not x.get("running", False), x["name"]))
 
-    # ── Total bandwidth ───────────────────────────────────────────────────────
+    # â”€â”€ Total bandwidth â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     total_dl = sum(i["download_bps"] for i in interfaces)
     total_ul = sum(i["upload_bps"]   for i in interfaces)
 
-    # ── Format history untuk grafik (timestamp + total dalam Mbps) ───────────
+    # â”€â”€ Format history untuk grafik (timestamp + total dalam Mbps) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     trend = []
     for rec in history_records:
         ts = rec.get("timestamp", "")
@@ -1111,9 +1117,9 @@ async def bandwidth_live(
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TOPOLOGY — nodes + edges untuk network map
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# TOPOLOGY â€” nodes + edges untuk network map
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/topology")
 async def get_topology(
@@ -1195,7 +1201,7 @@ async def get_topology(
     }
 
 
-# ── Device Reboot ────────────────────────────────────────────────────────────
+# â”€â”€ Device Reboot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post("/devices/{device_id}/reboot")
 async def reboot_device(device_id: str, user=Depends(require_admin)):
@@ -1211,7 +1217,7 @@ async def reboot_device(device_id: str, user=Depends(require_admin)):
         raise HTTPException(404, "Device tidak ditemukan")
 
     if device.get("status") == "offline":
-        raise HTTPException(400, "Device sedang offline — tidak bisa reboot")
+        raise HTTPException(400, "Device sedang offline â€” tidak bisa reboot")
 
     ip = device["ip_address"]
     username = device.get("api_username", "admin")
@@ -1222,7 +1228,7 @@ async def reboot_device(device_id: str, user=Depends(require_admin)):
 
     try:
         if api_mode == "api":
-            # ROS 6 — RouterOS API Socket
+            # ROS 6 â€” RouterOS API Socket
             import routeros_api
             api_port = device.get("api_port") or (8729 if device.get("api_ssl") else 8728)
             api_ssl = device.get("api_ssl", False)
@@ -1236,7 +1242,7 @@ async def reboot_device(device_id: str, user=Depends(require_admin)):
             api.get_resource("/system").call("reboot")
             conn.disconnect()
         else:
-            # ROS 7 — REST API
+            # ROS 7 â€” REST API
             port = device.get("api_port") or (443 if device.get("use_https") else 80)
             scheme = "https" if device.get("use_https") else "http"
             url = f"{scheme}://{ip}:{port}/rest/system/reboot"
@@ -1270,14 +1276,14 @@ async def reboot_device(device_id: str, user=Depends(require_admin)):
         raise HTTPException(500, f"Gagal reboot: {str(e)}")
 
 
-# ── Winbox Remote URL ────────────────────────────────────────────────────────
+# â”€â”€ Winbox Remote URL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/devices/{device_id}/winbox-url")
 async def get_winbox_url(device_id: str, user=Depends(require_admin)):
     """
     Kembalikan URL Winbox dengan credential yang sudah terisi otomatis.
     Format: winbox://username:password@ip_address
-    Password disimpan di server — tidak pernah dikirim ke frontend JS bundle.
+    Password disimpan di server â€” tidak pernah dikirim ke frontend JS bundle.
     Hanya admin yang bisa akses endpoint ini.
     """
     import urllib.parse
@@ -1300,7 +1306,7 @@ async def get_winbox_url(device_id: str, user=Depends(require_admin)):
     enc_pass = urllib.parse.quote(password, safe="")
 
     # Format Winbox URL dengan credential
-    # winbox://user:password@address  → Winbox langsung pre-fill, user cukup klik Connect
+    # winbox://user:password@address  â†’ Winbox langsung pre-fill, user cukup klik Connect
     # Kompatibel dengan Winbox desktop (Windows) DAN Winbox mobile app (Android/iOS)
     if password:
         winbox_url = f"winbox://{enc_user}:{enc_pass}@{winbox_addr}"
