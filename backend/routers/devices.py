@@ -620,11 +620,26 @@ async def traffic_history_range(
                 {"$sort": {"_id": 1}},
             ]
         else:
-            # Semua interface: jumlahkan semua bandwidth lalu rata-ratakan per bucket
+            # ── Pipeline "all" — ISP-aware ─────────────────────────────────────
+            # Prioritas 1: isp_bandwidth (sum semua ISP interface, disimpan oleh polling.py)
+            #   Format: {isp_bandwidth: {ether1: {download_bps, upload_bps}, ether2: {...}}}
+            # Prioritas 2: fallback ke sum semua bandwidth.* (lama, jika isp_bandwidth tidak ada)
             pipeline = [
                 {"$match": base_match},
                 {"$addFields": {
                     "ts_ms": {"$toLong": {"$dateFromString": {"dateString": "$timestamp"}}},
+                    # Sum semua ISP interface dari isp_bandwidth (multi-ISP aware)
+                    "isp_dl": {"$reduce": {
+                        "input": {"$objectToArray": {"$ifNull": ["$isp_bandwidth", {}]}},
+                        "initialValue": 0,
+                        "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.download_bps", 0]}]},
+                    }},
+                    "isp_ul": {"$reduce": {
+                        "input": {"$objectToArray": {"$ifNull": ["$isp_bandwidth", {}]}},
+                        "initialValue": 0,
+                        "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.upload_bps", 0]}]},
+                    }},
+                    # Fallback: sum semua interface di bandwidth (untuk device tanpa ISP comment)
                     "total_dl": {"$reduce": {
                         "input": {"$objectToArray": {"$ifNull": ["$bandwidth", {}]}},
                         "initialValue": 0,
@@ -635,16 +650,32 @@ async def traffic_history_range(
                         "initialValue": 0,
                         "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.upload_bps", 0]}]},
                     }},
+                    # Jumlah ISP interface yang dideteksi (>0 = ada isp_bandwidth valid)
+                    "isp_count": {"$size": {"$objectToArray": {"$ifNull": ["$isp_bandwidth", {}]}}},
+                }},
+                {"$addFields": {
+                    # Pilih ISP-only jika tersedia, fallback ke semua bandwidth
+                    "dl_bps": {"$cond": {
+                        "if":   {"$gt": ["$isp_count", 0]},
+                        "then": "$isp_dl",
+                        "else": "$total_dl",
+                    }},
+                    "ul_bps": {"$cond": {
+                        "if":   {"$gt": ["$isp_count", 0]},
+                        "then": "$isp_ul",
+                        "else": "$total_ul",
+                    }},
                 }},
                 {"$group": {
                     "_id": {"$subtract": ["$ts_ms", {"$mod": ["$ts_ms", interval_ms]}]},
-                    "download_bps": {"$avg": "$total_dl"},
-                    "upload_bps":   {"$avg": "$total_ul"},
+                    "download_bps": {"$avg": "$dl_bps"},
+                    "upload_bps":   {"$avg": "$ul_bps"},
                     "ping_ms":      {"$avg": {"$ifNull": ["$ping_ms",  0]}},
                     "jitter_ms":    {"$avg": {"$ifNull": ["$jitter_ms",0]}},
                 }},
                 {"$sort": {"_id": 1}},
             ]
+
 
         buckets = await db.traffic_history.aggregate(pipeline).to_list(5000)
 
@@ -690,11 +721,18 @@ async def traffic_history_range(
             except Exception:
                 label = ""
 
-            bw = h.get("bandwidth") or {}
+            bw     = h.get("bandwidth")     or {}
+            isp_bw = h.get("isp_bandwidth") or {}
             if interface and interface != "all":
+                # Interface spesifik: cari di bandwidth dict
                 ib = bw.get(interface, {})
                 dl, ul = ib.get("download_bps", 0), ib.get("upload_bps", 0)
+            elif isp_bw:
+                # ISP-aware: sum semua interface ISP (multi-ISP)
+                dl = sum(v.get("download_bps", 0) for v in isp_bw.values() if isinstance(v, dict))
+                ul = sum(v.get("upload_bps",   0) for v in isp_bw.values() if isinstance(v, dict))
             else:
+                # Fallback: sum semua interface di bandwidth
                 dl = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
                 ul = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
 
