@@ -4,7 +4,7 @@ import useDeviceEvents from "@/hooks/useDeviceEvents";
 import {
   Server, ArrowDown, ArrowUp, Cpu, HardDrive, Activity, Monitor, Network,
   AlertTriangle, AlertCircle, Info, CheckCircle2, RefreshCw, Thermometer, Zap, Battery,
-  Layers, CircuitBoard, Radio
+  Layers, CircuitBoard, Radio, GitCompare, Wifi, TrendingUp
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +35,13 @@ export default function DashboardPage() {
   // v3 — Top Talkers
   const [topTalkers, setTopTalkers] = useState([]);
   const [topTalkersRange, setTopTalkersRange] = useState("1h");
+  // v4 — ISP Multi-series
+  const [ispSeries, setIspSeries] = useState([]);  // [{name, data:[{time,download,upload}]}]
+  const [ispRange, setIspRange]   = useState("24h");
+  // v4 — Historical Comparison
+  const [compareData, setCompareData] = useState(null); // {current, previous, anomalies}
+  const [comparePeriod, setComparePeriod] = useState("week");
+  const [showCompare, setShowCompare] = useState(false);
 
   // ━━━ SSE Real-time ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   const { devices: sseDevices, summary: sseSummary, connected: sseConnected, lastUpdate: sseLastUpdate } = useDeviceEvents();
@@ -165,6 +172,24 @@ export default function DashboardPage() {
       .then(r => setTopTalkers(r.data || []))
       .catch(() => setTopTalkers([]));
   }, [topTalkersRange]);
+
+  // v4 — ISP Multi-series chart
+  useEffect(() => {
+    if (!selectedDevice || selectedDevice === "all") { setIspSeries([]); return; }
+    api.get("/dashboard/isp-traffic-history", { params: { device_id: selectedDevice, range: ispRange } })
+      .then(r => setIspSeries(r.data?.series || []))
+      .catch(() => setIspSeries([]));
+  }, [selectedDevice, ispRange]);
+
+  // v4 — Historical Comparison
+  useEffect(() => {
+    if (!showCompare) return;
+    const params = { period: comparePeriod };
+    if (selectedDevice && selectedDevice !== "all") params.device_id = selectedDevice;
+    api.get("/dashboard/traffic-compare", { params })
+      .then(r => setCompareData(r.data))
+      .catch(() => setCompareData(null));
+  }, [showCompare, comparePeriod, selectedDevice]);
 
   if (loading && !stats) return <div className="flex items-center justify-center h-64" data-testid="dashboard-loading"><span className="text-muted-foreground text-sm">Loading dashboard...</span></div>;
   if (!stats) return null;
@@ -351,8 +376,142 @@ export default function DashboardPage() {
               </div>
             )}
           </div>
+
+          {/* ── ISP Multi-series Chart (hanya jika device spesifik & ada multi-ISP) ── */}
+          {ispSeries.length > 1 && selectedDevice !== "all" && (
+            <div className="bg-card border border-border rounded-sm p-3 sm:p-5" data-testid="isp-multi-chart">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 sm:mb-4 gap-2">
+                <h3 className="text-base sm:text-lg font-semibold font-['Rajdhani'] flex items-center gap-2">
+                  <Wifi className="w-4 h-4 text-violet-400" />
+                  ISP per-Interface
+                  <span className="text-xs text-muted-foreground font-normal">— multi-ISP comparison</span>
+                </h3>
+                <div className="flex gap-1">
+                  {["1h", "12h", "24h", "week"].map(r => (
+                    <button key={r} onClick={() => setIspRange(r)}
+                      className={`text-[10px] px-2 py-1 rounded-sm border transition-colors ${
+                        ispRange === r ? "bg-violet-600 text-white border-violet-600" : "border-border text-muted-foreground hover:border-violet-500/50"
+                      }`}>{r}</button>
+                  ))}
+                </div>
+              </div>
+              {/* Download chart */}
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Download (Mbps)</p>
+              <div className="h-36 sm:h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+                    <XAxis dataKey="time" type="category" allowDuplicatedCategory={false} tick={{ fill: "#a1a1aa", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#27272a" }} />
+                    <YAxis tick={{ fill: "#a1a1aa", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#27272a" }} width={40} />
+                    <Tooltip {...ttStyle} />
+                    <Legend iconType="line" wrapperStyle={{ fontSize: "11px", color: "#a1a1aa" }} />
+                    {ispSeries.map((s, i) => {
+                      const colors = ["#8b5cf6","#06b6d4","#f59e0b","#10b981","#f43f5e","#3b82f6","#ec4899","#84cc16"];
+                      return (
+                        <Line key={s.name} data={s.data} type="monotone" dataKey="download"
+                          stroke={colors[i % colors.length]} strokeWidth={2} dot={false}
+                          name={`${s.name} ↓`} />
+                      );
+                    })}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              {/* Upload chart */}
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1 mt-3">Upload (Mbps)</p>
+              <div className="h-36 sm:h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+                    <XAxis dataKey="time" type="category" allowDuplicatedCategory={false} tick={{ fill: "#a1a1aa", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#27272a" }} />
+                    <YAxis tick={{ fill: "#a1a1aa", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#27272a" }} width={40} />
+                    <Tooltip {...ttStyle} />
+                    <Legend iconType="line" wrapperStyle={{ fontSize: "11px", color: "#a1a1aa" }} />
+                    {ispSeries.map((s, i) => {
+                      const colors = ["#8b5cf6","#06b6d4","#f59e0b","#10b981","#f43f5e","#3b82f6","#ec4899","#84cc16"];
+                      return (
+                        <Line key={s.name} data={s.data} type="monotone" dataKey="upload"
+                          stroke={colors[i % colors.length]} strokeWidth={2} dot={false} strokeDasharray="5 3"
+                          name={`${s.name} ↑`} />
+                      );
+                    })}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          {/* ── Historical Comparison Panel ────────────────────────── */}
+          <div className="bg-card border border-border rounded-sm p-3 sm:p-5" data-testid="historical-compare">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 gap-2">
+              <h3 className="text-base sm:text-lg font-semibold font-['Rajdhani'] flex items-center gap-2">
+                <GitCompare className="w-4 h-4 text-amber-400" />
+                Perbandingan Historis
+                <span className="text-xs text-muted-foreground font-normal">— today vs sebelumnya</span>
+              </h3>
+              <div className="flex items-center gap-2">
+                <div className="flex gap-1">
+                  {[["week","vs 7hr lalu"],["month","vs 30hr lalu"]].map(([p,lbl]) => (
+                    <button key={p} onClick={() => { setComparePeriod(p); setShowCompare(true); }}
+                      className={`text-[10px] px-2 py-1 rounded-sm border transition-colors ${
+                        comparePeriod === p && showCompare ? "bg-amber-600 text-white border-amber-600" : "border-border text-muted-foreground hover:border-amber-500/50"
+                      }`}>{lbl}</button>
+                  ))}
+                </div>
+                {!showCompare && (
+                  <button onClick={() => setShowCompare(true)}
+                    className="text-[10px] px-3 py-1 rounded-sm border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 transition-colors">
+                    Tampilkan
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {showCompare && compareData ? (
+              <>
+                {/* Anomaly badges */}
+                {compareData.anomalies?.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-3">
+                    <span className="text-[10px] text-amber-400 font-semibold uppercase tracking-wider">⚠ Anomali detected:</span>
+                    {compareData.anomalies.slice(0, 5).map((a, i) => (
+                      <span key={i} className="text-[10px] px-2 py-0.5 rounded-sm bg-amber-500/10 border border-amber-500/20 text-amber-300 font-mono">
+                        {a.time} {a.type === "download_spike" ? "↓" : "↑"} {a.value}M (baseline: {a.baseline}M)
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="h-48">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+                      <XAxis dataKey="time" type="category" allowDuplicatedCategory={false} tick={{ fill: "#a1a1aa", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#27272a" }} />
+                      <YAxis tick={{ fill: "#a1a1aa", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#27272a" }} width={40} />
+                      <Tooltip {...ttStyle} />
+                      <Legend iconType="line" wrapperStyle={{ fontSize: "11px", color: "#a1a1aa" }} />
+                      <Line data={compareData.current}  dataKey="download" name="Hari Ini ↓" stroke="#3b82f6" strokeWidth={2} dot={false} type="monotone" />
+                      <Line data={compareData.previous} dataKey="download" name={`${compareData.offset_days}hr lalu ↓`} stroke="#3b82f6" strokeWidth={1.5} dot={false} strokeDasharray="5 3" type="monotone" />
+                      <Line data={compareData.current}  dataKey="upload"   name="Hari Ini ↑"  stroke="#10b981" strokeWidth={2} dot={false} type="monotone" />
+                      <Line data={compareData.previous} dataKey="upload"   name={`${compareData.offset_days}hr lalu ↑`} stroke="#10b981" strokeWidth={1.5} dot={false} strokeDasharray="5 3" type="monotone" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                {compareData.current?.length === 0 && compareData.previous?.length === 0 && (
+                  <p className="text-xs text-muted-foreground text-center py-4">Data historis tidak tersedia untuk periode ini</p>
+                )}
+              </>
+            ) : showCompare ? (
+              <div className="h-32 flex items-center justify-center"><RefreshCw className="w-4 h-4 animate-spin text-muted-foreground" /></div>
+            ) : (
+              <div className="h-32 flex items-center justify-center bg-secondary/10 rounded-sm border border-dashed border-border">
+                <div className="text-center">
+                  <TrendingUp className="w-8 h-8 mx-auto mb-2 text-muted-foreground/30" />
+                  <p className="text-sm text-muted-foreground">Klik "Tampilkan" untuk melihat perbandingan traffic</p>
+                </div>
+              </div>
+            )}
+          </div>
         </>
       )}
+
 
       {/* Bottom Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

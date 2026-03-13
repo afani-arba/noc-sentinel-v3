@@ -1,4 +1,4 @@
-﻿"""
+"""
 Devices router: CRUD + dashboard + MikroTik API test.
 """
 import uuid
@@ -753,7 +753,211 @@ async def traffic_history_range(
 
 
 
-# -- Top Talkers (v3) ---------------------------------------------------------
+# ── ISP Multi-Series Traffic History ─────────────────────────────────────────
+@router.get("/dashboard/isp-traffic-history")
+async def isp_traffic_history_multi(
+    device_id: str = "",
+    range: str = "24h",
+    user=Depends(get_current_user)
+):
+    """
+    Return per-ISP interface traffic as separate series.
+    Response: {labels: [...], series: [{name: "ether1", data: [{time, download, upload},...]},...]}
+    Digunakan untuk grafik multi-series ISP1 vs ISP2 di dashboard.
+    """
+    if not device_id:
+        return {"labels": [], "series": []}
+
+    db = get_db()
+    now    = datetime.now(timezone.utc)
+    ranges = {"1h": 1, "12h": 12, "24h": 24, "week": 168, "month": 720}
+    hours  = ranges.get(range, 24)
+    since  = now - timedelta(hours=hours)
+
+    # Interval bucketing (sama dengan traffic-history)
+    intervals = {"1h": 60_000, "12h": 300_000, "24h": 600_000,
+                 "week": 3_600_000, "month": 14_400_000}
+    interval_ms = intervals.get(range, 600_000)
+
+    base_match = {
+        "device_id": device_id,
+        "timestamp": {"$gte": since.isoformat()},
+        "isp_bandwidth": {"$exists": True, "$ne": {}},
+    }
+
+    try:
+        # Aggregation: unwind isp_bandwidth object → per-interface buckets
+        pipeline = [
+            {"$match": base_match},
+            {"$addFields": {
+                "ts_ms": {"$toLong": {"$dateFromString": {"dateString": "$timestamp"}}},
+                "isp_pairs": {"$objectToArray": {"$ifNull": ["$isp_bandwidth", {}]}},
+            }},
+            {"$unwind": "$isp_pairs"},
+            {"$addFields": {
+                "bucket": {"$subtract": ["$ts_ms", {"$mod": ["$ts_ms", interval_ms]}]},
+                "iface_name": "$isp_pairs.k",
+                "dl_bps":     {"$ifNull": ["$isp_pairs.v.download_bps", 0]},
+                "ul_bps":     {"$ifNull": ["$isp_pairs.v.upload_bps",   0]},
+            }},
+            {"$group": {
+                "_id":          {"bucket": "$bucket", "iface": "$iface_name"},
+                "download_bps": {"$avg": "$dl_bps"},
+                "upload_bps":   {"$avg": "$ul_bps"},
+            }},
+            {"$sort": {"_id.bucket": 1}},
+        ]
+
+        raw = await db.traffic_history.aggregate(pipeline).to_list(10000)
+
+        # Kelompokkan per interface
+        from collections import defaultdict
+        series_map = defaultdict(list)
+        all_buckets = sorted({d["_id"]["bucket"] for d in raw})
+
+        for bucket in all_buckets:
+            utc_dt   = datetime.fromtimestamp(bucket / 1000, tz=timezone.utc)
+            local_dt = utc_dt + timedelta(hours=7)
+            label    = (local_dt.strftime("%d/%m %H:00") if range in ("week", "month")
+                        else local_dt.strftime("%H:%M"))
+
+            for doc in raw:
+                if doc["_id"]["bucket"] == bucket:
+                    iface = doc["_id"]["iface"]
+                    series_map[iface].append({
+                        "time":     label,
+                        "download": round((doc.get("download_bps") or 0) / 1_000_000, 2),
+                        "upload":   round((doc.get("upload_bps")   or 0) / 1_000_000, 2),
+                    })
+
+        series = [{"name": iface, "data": pts} for iface, pts in sorted(series_map.items())]
+        return {"series": series, "range": range}
+
+    except Exception as e:
+        logger.warning(f"isp-traffic-history aggregation failed: {e}")
+        return {"series": [], "range": range}
+
+
+# ── Historical Comparison ─────────────────────────────────────────────────────
+@router.get("/dashboard/traffic-compare")
+async def traffic_compare(
+    device_id: str = "",
+    period: str = "week",   # "week" = hari ini vs 7hr lalu, "month" = vs 30hr lalu
+    user=Depends(get_current_user)
+):
+    """
+    Bandingkan traffic hari ini (24h terakhir) vs periode yang sama N hari lalu.
+    Response: {current: [{time, download, upload}], previous: [{time, download, upload}],
+               anomalies: [{time, type, value, baseline}]}
+    """
+    db = get_db()
+    now = datetime.now(timezone.utc)
+
+    # Periode perbandingan
+    offset_days = {"week": 7, "month": 30}.get(period, 7)
+    interval_ms = 600_000  # 10 menit per bucket
+
+    def build_window_pipeline(start: datetime, end: datetime, device_id: str):
+        base = {"timestamp": {"$gte": start.isoformat(), "$lt": end.isoformat()}}
+        if device_id:
+            base["device_id"] = device_id
+        return [
+            {"$match": base},
+            {"$addFields": {
+                "ts_ms":   {"$toLong": {"$dateFromString": {"dateString": "$timestamp"}}},
+                "isp_dl":  {"$reduce": {
+                    "input": {"$objectToArray": {"$ifNull": ["$isp_bandwidth", {}]}},
+                    "initialValue": 0,
+                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.download_bps", 0]}]},
+                }},
+                "isp_ul":  {"$reduce": {
+                    "input": {"$objectToArray": {"$ifNull": ["$isp_bandwidth", {}]}},
+                    "initialValue": 0,
+                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.upload_bps",   0]}]},
+                }},
+                "isp_cnt": {"$size": {"$objectToArray": {"$ifNull": ["$isp_bandwidth", {}]}}},
+                "all_dl":  {"$reduce": {
+                    "input": {"$objectToArray": {"$ifNull": ["$bandwidth", {}]}},
+                    "initialValue": 0,
+                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.download_bps", 0]}]},
+                }},
+                "all_ul":  {"$reduce": {
+                    "input": {"$objectToArray": {"$ifNull": ["$bandwidth", {}]}},
+                    "initialValue": 0,
+                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.upload_bps",   0]}]},
+                }},
+            }},
+            {"$addFields": {
+                "dl_bps": {"$cond": {"if": {"$gt": ["$isp_cnt", 0]}, "then": "$isp_dl", "else": "$all_dl"}},
+                "ul_bps": {"$cond": {"if": {"$gt": ["$isp_cnt", 0]}, "then": "$isp_ul", "else": "$all_ul"}},
+            }},
+            {"$group": {
+                "_id":          {"$subtract": ["$ts_ms", {"$mod": ["$ts_ms", interval_ms]}]},
+                "download_bps": {"$avg": "$dl_bps"},
+                "upload_bps":   {"$avg": "$ul_bps"},
+            }},
+            {"$sort": {"_id": 1}},
+        ]
+
+    def fmt_bucket(bucket_ms: int) -> str:
+        utc = datetime.fromtimestamp(bucket_ms / 1000, tz=timezone.utc)
+        wib = utc + timedelta(hours=7)
+        return wib.strftime("%H:%M")
+
+    def buckets_to_list(raw: list) -> list:
+        out = []
+        for b in raw:
+            ts_ms = b.get("_id")
+            if not isinstance(ts_ms, (int, float)) or ts_ms <= 0:
+                continue
+            out.append({
+                "time":     fmt_bucket(int(ts_ms)),
+                "download": round((b.get("download_bps") or 0) / 1_000_000, 2),
+                "upload":   round((b.get("upload_bps")   or 0) / 1_000_000, 2),
+            })
+        return out
+
+    try:
+        # Current window: now-24h → now
+        curr_start = now - timedelta(hours=24)
+        curr_raw   = await db.traffic_history.aggregate(
+            build_window_pipeline(curr_start, now, device_id)).to_list(5000)
+        current = buckets_to_list(curr_raw)
+
+        # Previous window: same 24h, offset_days ago
+        prev_end   = now - timedelta(days=offset_days)
+        prev_start = prev_end - timedelta(hours=24)
+        prev_raw   = await db.traffic_history.aggregate(
+            build_window_pipeline(prev_start, prev_end, device_id)).to_list(5000)
+        previous = buckets_to_list(prev_raw)
+
+        # Anomaly detection — flag points >2x baseline average
+        anomalies = []
+        if previous and current:
+            baseline_dl = sum(p["download"] for p in previous) / len(previous) if previous else 0
+            baseline_ul = sum(p["upload"] for p in previous) / len(previous) if previous else 0
+            for pt in current:
+                if baseline_dl > 0 and pt["download"] > baseline_dl * 2.5:
+                    anomalies.append({"time": pt["time"], "type": "download_spike",
+                                      "value": pt["download"], "baseline": round(baseline_dl, 2)})
+                if baseline_ul > 0 and pt["upload"] > baseline_ul * 2.5:
+                    anomalies.append({"time": pt["time"], "type": "upload_spike",
+                                      "value": pt["upload"],   "baseline": round(baseline_ul, 2)})
+
+        return {
+            "current":   current,
+            "previous":  previous,
+            "anomalies": anomalies,
+            "period":    period,
+            "offset_days": offset_days,
+        }
+    except Exception as e:
+        logger.warning(f"traffic-compare failed: {e}")
+        return {"current": [], "previous": [], "anomalies": [], "period": period}
+
+
+
+
 @router.get("/dashboard/top-talkers")
 async def top_talkers(
     limit: int = 10,
