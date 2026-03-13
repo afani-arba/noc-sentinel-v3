@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/App";
 import {
   LayoutDashboard, Users, Wifi, FileText, Server, Shield, LogOut, Menu, ChevronLeft, Settings, Bell, HardDrive, Terminal,
-  GitBranch, Route, Cable, ShieldAlert, Cpu, Receipt, Monitor, BarChart2, AlertTriangle, ClipboardList, Activity, Download
+  GitBranch, Route, Cable, ShieldAlert, Cpu, Receipt, Monitor, BarChart2, AlertTriangle, ClipboardList, Activity, Download, CalendarClock
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,6 +34,7 @@ const navItems = [
   { to: "/billing", icon: Receipt, label: "Billing", adminOnly: true },
   { to: "/notifications", icon: Bell, label: "Notifikasi", adminOnly: true },
   { to: "/backups", icon: HardDrive, label: "Backup Config", adminOnly: true },
+  { to: "/scheduler", icon: CalendarClock, label: "Scheduler & Monitor", adminOnly: true },
   { to: "/syslog", icon: Terminal, label: "Syslog", adminOnly: true },
   { to: "/update", icon: Download, label: "Update Aplikasi", adminOnly: true },
   { to: "/settings", icon: Settings, label: "Pengaturan", adminOnly: true },

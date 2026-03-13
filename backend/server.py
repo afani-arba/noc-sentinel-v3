@@ -55,6 +55,9 @@ from routers.sla import router as sla_router
 from routers.incidents import router as incidents_router
 from routers.audit import router as audit_router
 from routers.events import router as events_router
+from routers.scheduler import router as scheduler_router
+from routers.speedtest import router as speedtest_router
+from routers.routing_alerts import router as routing_alerts_router
 
 # ── Background task references (FIX BUG #3: simpan reference agar tidak di-GC) ──
 _background_tasks: list = []
@@ -85,6 +88,24 @@ async def lifespan(app: FastAPI):
     syslog_tasks = await start_syslog_server(loop)
     if syslog_tasks:
         _background_tasks.extend(syslog_tasks)  # FIX BUG #3: simpan reference
+
+    # Start auto-backup scheduler
+    from services.backup_service import auto_backup_loop
+    backup_task = asyncio.create_task(auto_backup_loop())
+    _background_tasks.append(backup_task)
+    logger.info("Auto backup scheduler started")
+
+    # Start BGP/OSPF alert monitor
+    from services.routing_alert_service import bgp_ospf_alert_loop
+    bgp_task = asyncio.create_task(bgp_ospf_alert_loop())
+    _background_tasks.append(bgp_task)
+    logger.info("BGP/OSPF alert monitor started")
+
+    # Start speed test scheduler
+    from services.speedtest_service import speedtest_loop
+    speedtest_task = asyncio.create_task(speedtest_loop())
+    _background_tasks.append(speedtest_task)
+    logger.info("Speed test scheduler started")
 
     logger.info("NOC-Sentinel ready!")
 
@@ -147,6 +168,9 @@ api.include_router(sla_router)
 api.include_router(incidents_router)
 api.include_router(audit_router)
 api.include_router(events_router)
+api.include_router(scheduler_router)
+api.include_router(speedtest_router)
+api.include_router(routing_alerts_router)
 app.include_router(api)
 
 

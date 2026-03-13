@@ -4,6 +4,11 @@ Export strategy (in order):
   1. SSH /export terse  (works for both RouterOS 6 and 7, most reliable)
   2. REST API /export   (RouterOS 7+ REST API fallback)
 Backups stored in /backups/ directory relative to backend folder.
+
+Auto-backup scheduler:
+  - Runs daily at configurable time (default 02:00 WIB = 19:00 UTC)
+  - Backs up all online devices
+  - Cleans up backups older than retention_days (default 30)
 """
 import asyncio
 import logging
@@ -187,3 +192,133 @@ def delete_backup_file(filename: str) -> bool:
         path.unlink()
         return True
     return False
+
+
+# ── Auto-Backup Scheduler ────────────────────────────────────────────────────
+
+DEFAULT_BACKUP_HOUR = 19   # 02:00 WIB = 19:00 UTC
+DEFAULT_BACKUP_MINUTE = 0
+DEFAULT_RETENTION_DAYS = 30
+
+
+async def _get_scheduler_config() -> dict:
+    """Load scheduler config from DB (collection: scheduler_config)."""
+    db = get_db()
+    cfg = await db.scheduler_config.find_one({"type": "backup"}, {"_id": 0})
+    if not cfg:
+        cfg = {}
+    return {
+        "enabled": cfg.get("enabled", True),
+        "hour_utc": cfg.get("hour_utc", DEFAULT_BACKUP_HOUR),
+        "minute_utc": cfg.get("minute_utc", DEFAULT_BACKUP_MINUTE),
+        "retention_days": cfg.get("retention_days", DEFAULT_RETENTION_DAYS),
+    }
+
+
+def cleanup_old_backups(retention_days: int = DEFAULT_RETENTION_DAYS) -> int:
+    """Delete backup files older than retention_days. Returns count deleted."""
+    from datetime import timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    deleted = 0
+    for f in BACKUP_DIR.iterdir():
+        if f.is_file() and f.suffix in (".rsc", ".backup"):
+            mtime = datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc)
+            if mtime < cutoff:
+                f.unlink()
+                deleted += 1
+                logger.info(f"Auto-cleanup: deleted old backup {f.name}")
+    return deleted
+
+
+async def backup_all_devices() -> dict:
+    """
+    Backup all online devices. Returns summary dict.
+    Called by auto_backup_loop or manual trigger.
+    """
+    db = get_db()
+    devices = await db.devices.find({"status": "online"}, {"_id": 0}).to_list(1000)
+    total = len(devices)
+    success = 0
+    failed = 0
+    errors = []
+
+    logger.info(f"Auto backup started: {total} online devices")
+
+    for device in devices:
+        try:
+            result = await backup_device_api(device)
+            if result["success"]:
+                success += 1
+                logger.info(f"Auto backup OK: {device.get('name')} → {result.get('filename')}")
+            else:
+                failed += 1
+                err = f"{device.get('name')}: {result.get('error', 'Unknown')}"
+                errors.append(err)
+                logger.warning(f"Auto backup failed: {err}")
+        except Exception as e:
+            failed += 1
+            err = f"{device.get('name')}: {e}"
+            errors.append(err)
+            logger.error(f"Auto backup exception: {err}")
+
+    # Simpan history ke DB
+    summary = {
+        "type": "auto_backup_run",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "total": total,
+        "success": success,
+        "failed": failed,
+        "errors": errors[:20],  # cap agar tidak terlalu besar
+    }
+    await db.scheduler_history.insert_one({**summary})
+
+    logger.info(f"Auto backup finished: {success}/{total} succeeded, {failed} failed")
+    return summary
+
+
+async def auto_backup_loop():
+    """
+    Background task: run backup_all_devices setiap hari pada jam yang dikonfigurasi.
+    Default: 19:00 UTC (= 02:00 WIB).
+    """
+    import asyncio as _asyncio
+
+    logger.info("Auto backup scheduler started")
+
+    while True:
+        try:
+            cfg = await _get_scheduler_config()
+            if not cfg["enabled"]:
+                await _asyncio.sleep(300)  # cek lagi setelah 5 menit
+                continue
+
+            now = datetime.now(timezone.utc)
+            target_hour = cfg["hour_utc"]
+            target_minute = cfg["minute_utc"]
+
+            # Hitung waktu tunggu sampai jam backup berikutnya
+            next_run = now.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
+            if next_run <= now:
+                # Sudah lewat hari ini → jadwalkan besok
+                from datetime import timedelta
+                next_run += timedelta(days=1)
+
+            wait_seconds = (next_run - now).total_seconds()
+            logger.info(f"Auto backup: next run at {next_run.isoformat()} (in {wait_seconds/3600:.1f}h)")
+
+            await _asyncio.sleep(wait_seconds)
+
+            # Jalankan backup
+            await backup_all_devices()
+
+            # Cleanup backup lama
+            deleted = cleanup_old_backups(cfg["retention_days"])
+            if deleted:
+                logger.info(f"Auto-cleanup: {deleted} old backup files removed")
+
+        except _asyncio.CancelledError:
+            logger.info("Auto backup scheduler cancelled")
+            break
+        except Exception as e:
+            logger.error(f"Auto backup loop error: {e}")
+            await _asyncio.sleep(60)  # retry setelah 1 menit jika ada error

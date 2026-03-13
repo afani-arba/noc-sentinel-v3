@@ -28,6 +28,8 @@ class NotificationSettings(BaseModel):
     notify_memory: bool = True   # FIX BUG #17: tambahkan field yang hilang, konsisten dengan notification_service.py
     notify_ping_high: bool = False
     notify_interface_down: bool = False
+    notify_bgp: bool = True       # Alert saat BGP peer down/recover
+    notify_ospf: bool = True      # Alert saat OSPF neighbor down/recover
     watched_interfaces: List[str] = []   # interface names to monitor for down events
     thresholds: dict = {"cpu": 80, "ping_ms": 100}
     # Telegram
