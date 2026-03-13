@@ -3,7 +3,7 @@ import api from "@/lib/api";
 import useDeviceEvents from "@/hooks/useDeviceEvents";
 import {
   Server, ArrowDown, ArrowUp, Cpu, HardDrive, Activity, Monitor, Network,
-  AlertTriangle, AlertCircle, Info, CheckCircle2, RefreshCw, Thermometer, Zap, Battery, Wifi,
+  AlertTriangle, AlertCircle, Info, CheckCircle2, RefreshCw, Thermometer, Zap, Battery,
   Layers, CircuitBoard, Radio
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -32,9 +32,6 @@ export default function DashboardPage() {
   const [dateFilter, setDateFilter] = useState("");
   const [trafficData, setTrafficData] = useState(null); // null = use stats.traffic_data
   const [loadingTraffic, setLoadingTraffic] = useState(false);
-  // WAN detect
-  const [wanDetecting, setWanDetecting] = useState(false);
-  const [wanInterface, setWanInterface] = useState("");
   // v3 — Top Talkers
   const [topTalkers, setTopTalkers] = useState([]);
   const [topTalkersRange, setTopTalkersRange] = useState("1h");
@@ -154,22 +151,6 @@ export default function DashboardPage() {
   }, [trafficRange, dateFilter, selectedDevice, selectedInterface]);
 
 
-  const detectWan = async () => {
-    if (!selectedDevice || selectedDevice === "all") return;
-    setWanDetecting(true);
-    try {
-      const r = await api.get("/dashboard/wan-interface", { params: { device_id: selectedDevice } });
-      if (r.data.wan_interface) {
-        setWanInterface(r.data.wan_interface);
-        setSelectedInterface(r.data.wan_interface);
-      } else {
-        setWanInterface("");
-        alert("Tidak ada interface yang bisa mencapai 8.8.8.8");
-      }
-    } catch { /* ignore */ }
-    setWanDetecting(false);
-  };
-
   useEffect(() => {
     fetchStats();
     const iv = setInterval(fetchStats, 30000);
@@ -243,7 +224,6 @@ export default function DashboardPage() {
           </div>
           <div className="space-y-1">
             <label className="text-[10px] text-muted-foreground uppercase tracking-widest flex items-center gap-1"><Network className="w-3 h-3" /> Interface
-              {wanInterface && <Badge variant="outline" className="rounded-sm text-[10px] ml-1 text-cyan-400 border-cyan-500/30">WAN: {wanInterface}</Badge>}
             </label>
             <div className="flex gap-1">
               <Select value={selectedInterface} onValueChange={setSelectedInterface}>
@@ -252,11 +232,6 @@ export default function DashboardPage() {
                   {interfaces.map(i => <SelectItem key={i} value={i}><span className="font-mono text-xs">{i === "all" ? "All Interfaces" : i}</span></SelectItem>)}
                 </SelectContent>
               </Select>
-              {selectedDevice !== "all" && (
-                <Button variant="outline" size="icon" className="h-9 w-9 rounded-sm flex-shrink-0" onClick={detectWan} disabled={wanDetecting} title="Detect WAN interface via ping 8.8.8.8">
-                  {wanDetecting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Wifi className="w-3.5 h-3.5 text-cyan-500" />}
-                </Button>
-              )}
             </div>
           </div>
         </div>
