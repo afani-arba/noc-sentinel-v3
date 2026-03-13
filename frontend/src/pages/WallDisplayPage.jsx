@@ -1,10 +1,12 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import api from "@/lib/api";
 import {
   Server, Cpu, HardDrive, Activity, Wifi, WifiOff, AlertTriangle,
-  CheckCircle2, RefreshCw, Monitor, ZapOff, TrendingUp, TrendingDown
+  CheckCircle2, RefreshCw, Monitor, ZapOff, TrendingUp, TrendingDown,
+  Power, ExternalLink, X, Loader2, Info, Clock
 } from "lucide-react";
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from "recharts";
+import { toast } from "sonner";
 
 const REFRESH_INTERVAL = 5000; // 5 seconds
 
@@ -66,13 +68,185 @@ function MetricBar({ value, max = 100, color }) {
   );
 }
 
-function DeviceCard({ device }) {
+// ── Device Action Modal ───────────────────────────────────────────────────────
+function DeviceActionModal({ device, onClose }) {
+  const [rebooting, setRebooting] = useState(false);
+  const [rebooted, setRebooted] = useState(false);
+
+  // Klik di luar modal → tutup
+  const handleBackdropClick = (e) => {
+    if (e.target === e.currentTarget) onClose();
+  };
+
+  const handleReboot = async () => {
+    if (!window.confirm(`Yakin ingin reboot device "${device.identity || device.name}" (${device.ip_address})?`)) return;
+    setRebooting(true);
+    try {
+      await api.post(`/devices/${device.id}/reboot`);
+      setRebooted(true);
+      toast.success(`Perintah reboot dikirim ke ${device.identity || device.name}`);
+      setTimeout(onClose, 2500);
+    } catch (e) {
+      const msg = e.response?.data?.detail || "Gagal mengirim perintah reboot";
+      toast.error(msg);
+    }
+    setRebooting(false);
+  };
+
+  const handleWinbox = () => {
+    // Buka Winbox via protocol handler (winbox://IP)
+    // Jika Winbox tidak terinstall, coba buka web Winbox (port 80 MikroTik)
+    const ip = device.ip_address;
+    window.open(`winbox://${ip}`, "_blank");
+    toast.info(`Membuka Winbox ke ${ip}...`);
+  };
+
+  const handleWebFig = () => {
+    const ip = device.ip_address;
+    const port = device.api_port || 80;
+    const scheme = device.use_https ? "https" : "http";
+    window.open(`${scheme}://${ip}`, "_blank");
+  };
+
+  const isOffline = device.status === "offline";
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(8px)" }}
+      onClick={handleBackdropClick}
+    >
+      <div
+        className="relative w-full max-w-sm rounded-2xl border p-5 flex flex-col gap-4"
+        style={{
+          background: "linear-gradient(135deg, rgba(15,23,42,0.98) 0%, rgba(2,8,23,0.98) 100%)",
+          borderColor: isOffline ? "rgba(239,68,68,0.5)" : "rgba(34,197,94,0.4)",
+          boxShadow: isOffline
+            ? "0 0 40px rgba(239,68,68,0.25), 0 25px 50px rgba(0,0,0,0.8)"
+            : "0 0 40px rgba(34,197,94,0.15), 0 25px 50px rgba(0,0,0,0.8)",
+        }}
+      >
+        {/* Close button */}
+        <button
+          onClick={onClose}
+          className="absolute top-3 right-3 w-7 h-7 rounded-full flex items-center justify-center bg-white/5 hover:bg-white/10 transition-colors"
+        >
+          <X className="w-3.5 h-3.5 text-slate-400" />
+        </button>
+
+        {/* Header */}
+        <div className="flex items-start gap-3">
+          <div
+            className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
+              isOffline ? "bg-red-500/15 border border-red-500/30" : "bg-green-500/15 border border-green-500/30"
+            }`}
+          >
+            <Server className={`w-5 h-5 ${isOffline ? "text-red-400" : "text-green-400"}`} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-bold text-white text-base truncate">{device.identity || device.name}</p>
+            <p className="text-xs font-mono text-slate-400">{device.ip_address}</p>
+            <div className="mt-1">
+              {isOffline
+                ? <span className="flex items-center gap-1 text-red-400 text-[11px] font-semibold"><span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />OFFLINE</span>
+                : <span className="flex items-center gap-1 text-green-400 text-[11px] font-semibold"><span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />ONLINE</span>
+              }
+            </div>
+          </div>
+        </div>
+
+        {/* Device Info */}
+        <div className="rounded-xl bg-white/[0.04] border border-white/[0.08] p-3 space-y-2">
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            {device.model && (
+              <div><p className="text-slate-500 text-[10px] uppercase tracking-wider">Model</p><p className="text-slate-200 font-mono truncate">{device.model}</p></div>
+            )}
+            {device.ros_version && (
+              <div><p className="text-slate-500 text-[10px] uppercase tracking-wider">RouterOS</p><p className="text-slate-200 font-mono">v{device.ros_version}</p></div>
+            )}
+            {!isOffline && device.cpu_load != null && (
+              <div><p className="text-slate-500 text-[10px] uppercase tracking-wider">CPU</p><p className={`font-mono font-semibold ${device.cpu_load > 80 ? "text-red-400" : device.cpu_load > 60 ? "text-yellow-400" : "text-green-400"}`}>{device.cpu_load}%</p></div>
+            )}
+            {!isOffline && device.memory_usage != null && (
+              <div><p className="text-slate-500 text-[10px] uppercase tracking-wider">Memory</p><p className={`font-mono font-semibold ${device.memory_usage > 80 ? "text-red-400" : device.memory_usage > 60 ? "text-yellow-400" : "text-blue-400"}`}>{device.memory_usage}%</p></div>
+            )}
+            {!isOffline && device.ping_ms > 0 && (
+              <div><p className="text-slate-500 text-[10px] uppercase tracking-wider">Ping</p><p className={`font-mono font-semibold ${device.ping_ms > 100 ? "text-red-400" : device.ping_ms > 50 ? "text-yellow-400" : "text-cyan-400"}`}>{device.ping_ms}ms</p></div>
+            )}
+            {device.uptime && (
+              <div><p className="text-slate-500 text-[10px] uppercase tracking-wider">Uptime</p><p className="text-slate-300 font-mono text-[10px]">{device.uptime}</p></div>
+            )}
+          </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="space-y-2">
+          {/* Reboot */}
+          <button
+            onClick={handleReboot}
+            disabled={rebooting || rebooted || isOffline}
+            className={`w-full flex items-center justify-center gap-2.5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${
+              rebooted
+                ? "bg-green-500/20 border border-green-500/40 text-green-400 cursor-default"
+                : isOffline
+                  ? "bg-white/5 border border-white/10 text-slate-600 cursor-not-allowed"
+                  : "bg-red-500/15 border border-red-500/30 text-red-400 hover:bg-red-500/25 hover:border-red-500/50 active:scale-95"
+            }`}
+          >
+            {rebooting ? (
+              <><Loader2 className="w-4 h-4 animate-spin" /> Mengirim perintah reboot...</>
+            ) : rebooted ? (
+              <><CheckCircle2 className="w-4 h-4" /> Reboot dikirim! Device akan restart...</>
+            ) : (
+              <><Power className="w-4 h-4" /> Reboot Device{isOffline ? " (Offline)" : ""}</>
+            )}
+          </button>
+
+          {/* Remote Winbox */}
+          <button
+            onClick={handleWinbox}
+            disabled={isOffline}
+            className={`w-full flex items-center justify-center gap-2.5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${
+              isOffline
+                ? "bg-white/5 border border-white/10 text-slate-600 cursor-not-allowed"
+                : "bg-blue-500/15 border border-blue-500/30 text-blue-400 hover:bg-blue-500/25 hover:border-blue-500/50 active:scale-95"
+            }`}
+          >
+            <ExternalLink className="w-4 h-4" />
+            Remote Winbox
+          </button>
+
+          {/* WebFig */}
+          <button
+            onClick={handleWebFig}
+            disabled={isOffline}
+            className={`w-full flex items-center justify-center gap-2.5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${
+              isOffline
+                ? "bg-white/5 border border-white/10 text-slate-600 cursor-not-allowed"
+                : "bg-cyan-500/15 border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/25 hover:border-cyan-500/50 active:scale-95"
+            }`}
+          >
+            <Wifi className="w-4 h-4" />
+            Buka WebFig (Browser)
+          </button>
+        </div>
+
+        {isOffline && (
+          <p className="text-[10px] text-slate-600 text-center">Reboot dan remote tidak tersedia saat device offline</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DeviceCard({ device, onSelect }) {
   const glowStyle = getGlowStyle(device.alert_level, device.status);
   const isOffline = device.status === "offline";
 
   return (
     <div
-      className="relative rounded-xl border p-4 flex flex-col gap-2 transition-all duration-500"
+      onClick={() => onSelect(device)}
+      className="relative rounded-xl border p-4 flex flex-col gap-2 transition-all duration-500 cursor-pointer hover:scale-[1.02] hover:brightness-110 select-none"
       style={{
         background: "linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)",
         backdropFilter: "blur(12px)",
@@ -190,8 +364,9 @@ export default function WallDisplayPage() {
   const [data, setData] = useState(null);
   const [events, setEvents] = useState([]);
   const [time, setTime] = useState(new Date());
-  const [bwHistory, setBwHistory] = useState([]);          // aggregated total history
-  const [deviceBwHistory, setDeviceBwHistory] = useState({}); // per-device history: {id: [{dl, ul}]}
+  const [bwHistory, setBwHistory] = useState([]);
+  const [deviceBwHistory, setDeviceBwHistory] = useState({});
+  const [selectedDevice, setSelectedDevice] = useState(null); // untuk modal aksi
 
   const fetchData = async () => {
     try {
@@ -315,8 +490,8 @@ export default function WallDisplayPage() {
               </div>
             </div>
           ) : (
-            <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))" }}>
-              {devices.map(d => <DeviceCard key={d.id} device={d} />)}
+          <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))" }}>
+              {devices.map(d => <DeviceCard key={d.id} device={d} onSelect={setSelectedDevice} />)}
             </div>
           )}
         </div>
@@ -511,6 +686,14 @@ export default function WallDisplayPage() {
           <p className="text-slate-600 text-xs text-center font-mono">No recent events</p>
         )}
       </div>
+
+      {/* ── DEVICE ACTION MODAL ──────────────────────────────────────── */}
+      {selectedDevice && (
+        <DeviceActionModal
+          device={selectedDevice}
+          onClose={() => setSelectedDevice(null)}
+        />
+      )}
     </div>
   );
 }

@@ -1129,3 +1129,78 @@ async def get_topology(
             "offline": sum(1 for n in nodes if n["status"] == "offline"),
         }
     }
+
+
+# ── Device Reboot ────────────────────────────────────────────────────────────
+
+@router.post("/devices/{device_id}/reboot")
+async def reboot_device(device_id: str, user=Depends(require_admin)):
+    """
+    Kirim perintah reboot ke device MikroTik.
+    Mendukung REST API (ROS 7.x) dan API Socket (ROS 6.x).
+    Membutuhkan role administrator.
+    """
+    import httpx
+    db = get_db()
+    device = await db.devices.find_one({"id": device_id})
+    if not device:
+        raise HTTPException(404, "Device tidak ditemukan")
+
+    if device.get("status") == "offline":
+        raise HTTPException(400, "Device sedang offline — tidak bisa reboot")
+
+    ip = device["ip_address"]
+    username = device.get("api_username", "admin")
+    password = device.get("api_password", "")
+    api_mode = device.get("api_mode", "rest")
+
+    logger.info(f"Reboot requested: {device.get('name')} ({ip}) by {user.get('username')}")
+
+    try:
+        if api_mode == "api":
+            # ROS 6 — RouterOS API Socket
+            import routeros_api
+            api_port = device.get("api_port") or (8729 if device.get("api_ssl") else 8728)
+            api_ssl = device.get("api_ssl", False)
+            conn = routeros_api.RouterOsApiPool(
+                ip, username=username, password=password,
+                port=api_port, use_ssl=api_ssl,
+                ssl_verify=False, ssl_verify_hostname=False,
+                plaintext_login=True
+            )
+            api = conn.get_api()
+            api.get_resource("/system").call("reboot")
+            conn.disconnect()
+        else:
+            # ROS 7 — REST API
+            port = device.get("api_port") or (443 if device.get("use_https") else 80)
+            scheme = "https" if device.get("use_https") else "http"
+            url = f"{scheme}://{ip}:{port}/rest/system/reboot"
+            async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
+                resp = await client.post(url, auth=(username, password))
+                # 200 OK atau 204 No Content = sukses
+                # ROS bisa langsung reboot sebelum response, jadi 408 timeout juga normal
+                if resp.status_code not in (200, 204, 408):
+                    raise HTTPException(400, f"MikroTik error: HTTP {resp.status_code}")
+
+        # Catat di audit log
+        await db.audit_logs.insert_one({
+            "action": "device_reboot",
+            "device_id": device_id,
+            "device_name": device.get("name"),
+            "ip_address": ip,
+            "performed_by": user.get("username"),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+        return {
+            "success": True,
+            "message": f"Perintah reboot berhasil dikirim ke {device.get('name')} ({ip}). Device akan restart dalam beberapa detik.",
+            "device_id": device_id,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Reboot failed for {ip}: {e}")
+        raise HTTPException(500, f"Gagal reboot: {str(e)}")
