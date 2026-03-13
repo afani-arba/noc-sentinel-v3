@@ -31,6 +31,7 @@ class DeviceCreate(BaseModel):
     api_ssl: bool = True
     api_plaintext_login: bool = True
     description: str = ""
+    winbox_address: Optional[str] = None  # Alamat Winbox remote — opsional, isi jika berbeda dari ip_address
 
 
 class DeviceUpdate(BaseModel):
@@ -44,6 +45,7 @@ class DeviceUpdate(BaseModel):
     api_ssl: Optional[bool] = None
     api_plaintext_login: Optional[bool] = None
     description: Optional[str] = None
+    winbox_address: Optional[str] = None  # Alamat Winbox remote — opsional
 
 
 def filter_devices_for_user(devices: list, user: dict) -> list:
@@ -1222,11 +1224,13 @@ async def get_winbox_url(device_id: str, user=Depends(require_admin)):
     if not device:
         raise HTTPException(404, "Device tidak ditemukan")
 
-    ip       = device.get("ip_address", "")
-    username = device.get("api_username", "admin")
-    password = device.get("api_password", "")
+    ip_api      = device.get("ip_address", "")
+    # Gunakan winbox_address jika diset, fallback ke ip_address
+    winbox_addr = (device.get("winbox_address") or "").strip() or ip_api
+    username    = device.get("api_username", "admin")
+    password    = device.get("api_password", "")
 
-    if not ip:
+    if not winbox_addr:
         raise HTTPException(400, "Device tidak memiliki IP address")
 
     # URL-encode username dan password untuk menghindari karakter khusus
@@ -1235,24 +1239,27 @@ async def get_winbox_url(device_id: str, user=Depends(require_admin)):
 
     # Format Winbox URL dengan credential
     # winbox://user:password@address  → Winbox langsung pre-fill, user cukup klik Connect
+    # Kompatibel dengan Winbox desktop (Windows) DAN Winbox mobile app (Android/iOS)
     if password:
-        winbox_url = f"winbox://{enc_user}:{enc_pass}@{ip}"
+        winbox_url = f"winbox://{enc_user}:{enc_pass}@{winbox_addr}"
     else:
-        winbox_url = f"winbox://{enc_user}@{ip}"
+        winbox_url = f"winbox://{enc_user}@{winbox_addr}"
 
     # Catat di audit log
     await db.audit_logs.insert_one({
         "action": "winbox_access",
         "device_id": device_id,
         "device_name": device.get("name"),
-        "ip_address": ip,
+        "ip_address": winbox_addr,
         "performed_by": user.get("username"),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
 
     return {
         "url": winbox_url,
-        "address": ip,
+        "address": winbox_addr,
+        "api_address": ip_api,
+        "has_remote_address": bool(device.get("winbox_address", "").strip()),
         "username": username,
         "device_name": device.get("name"),
         "device_id": device_id,
@@ -1270,10 +1277,12 @@ async def get_connection_info(device_id: str, user=Depends(require_admin)):
     if not device:
         raise HTTPException(404, "Device tidak ditemukan")
 
+    winbox_addr_raw = (device.get("winbox_address") or "").strip()
     return {
         "id": device.get("id"),
         "name": device.get("name"),
         "ip_address": device.get("ip_address"),
+        "winbox_address": winbox_addr_raw or None,   # None jika tidak diset
         "api_username": device.get("api_username", "admin"),
         "api_mode": device.get("api_mode", "rest"),
         "api_port": device.get("api_port"),

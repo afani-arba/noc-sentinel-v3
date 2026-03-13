@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
-import { Plus, Trash2, Server, Wifi, WifiOff, Pencil, Zap, ExternalLink } from "lucide-react";
+import { Plus, Trash2, Server, Wifi, WifiOff, Pencil, Zap, ExternalLink, Monitor } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,7 +18,7 @@ export default function DevicesPage() {
   const [editing, setEditing] = useState(null);
   const [testing, setTesting] = useState("");
   const [form, setForm] = useState({
-    name: "", ip_address: "",
+    name: "", ip_address: "", winbox_address: "",
     api_mode: "rest", api_username: "admin", api_password: "",
     api_port: "", use_https: false, api_ssl: true, api_plaintext_login: true, description: "",
   });
@@ -35,7 +35,7 @@ export default function DevicesPage() {
 
   const openAdd = () => {
     setEditing(null);
-    setForm({ name: "", ip_address: "", api_mode: "rest", api_username: "admin", api_password: "", api_port: "", use_https: false, api_ssl: true, api_plaintext_login: true, description: "" });
+    setForm({ name: "", ip_address: "", winbox_address: "", api_mode: "rest", api_username: "admin", api_password: "", api_port: "", use_https: false, api_ssl: true, api_plaintext_login: true, description: "" });
     setDialogOpen(true);
   };
 
@@ -43,6 +43,7 @@ export default function DevicesPage() {
     setEditing(d);
     setForm({
       name: d.name, ip_address: d.ip_address || "",
+      winbox_address: d.winbox_address || "",
       api_mode: d.api_mode || "rest", api_username: d.api_username || "admin", api_password: "",
       api_port: d.api_port || "",
       use_https: d.use_https || false,
@@ -57,6 +58,9 @@ export default function DevicesPage() {
     try {
       const apiPort = form.api_port ? parseInt(form.api_port) : null;
       const data = { ...form, api_port: apiPort, use_https: form.use_https };
+      // winbox_address: kirim null jika kosong (bukan string kosong)
+      if (!data.winbox_address || !data.winbox_address.trim()) data.winbox_address = null;
+      else data.winbox_address = data.winbox_address.trim();
       if (editing) {
         if (!data.api_password) delete data.api_password;
         await api.put(`/devices/${editing.id}`, data);
@@ -163,8 +167,28 @@ export default function DevicesPage() {
           <div className="space-y-5">
             <div className="space-y-1.5"><Label className="text-xs text-muted-foreground">Device Name</Label>
               <Input value={form.name} onChange={e => setForm({...form, name:e.target.value})} className="rounded-sm bg-background" placeholder="Router-Core-01" data-testid="device-form-name" /></div>
-            <div className="space-y-1.5"><Label className="text-xs text-muted-foreground">IP Address</Label>
+            <div className="space-y-1.5"><Label className="text-xs text-muted-foreground">IP Address <span className="text-muted-foreground/50">(untuk API / polling)</span></Label>
               <Input value={form.ip_address} onChange={e => setForm({...form, ip_address:e.target.value})} className="rounded-sm bg-background font-mono text-xs" placeholder="192.168.1.1" data-testid="device-form-ip" /></div>
+
+            {/* Winbox Remote Address */}
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <Monitor className="w-3 h-3" />
+                Alamat Winbox Remote
+                <span className="text-muted-foreground/40 font-normal">(opsional)</span>
+              </Label>
+              <Input
+                value={form.winbox_address}
+                onChange={e => setForm({...form, winbox_address: e.target.value})}
+                className="rounded-sm bg-background font-mono text-xs"
+                placeholder="IP publik / DDNS — contoh: 203.0.113.5 atau my-router.dyndns.org"
+                data-testid="device-form-winbox-address"
+              />
+              <p className="text-[10px] text-muted-foreground/60">
+                Kosongkan jika Winbox diakses melalui IP yang sama dengan API. Isi jika MikroTik
+                berada di balik NAT atau memiliki IP publik/DDNS yang berbeda.
+              </p>
+            </div>
 
             {/* MikroTik API Section */}
             <div className="border border-border/50 rounded-sm p-3 space-y-3">
