@@ -72,6 +72,39 @@ function MetricBar({ value, max = 100, color }) {
 function DeviceActionModal({ device, onClose }) {
   const [rebooting, setRebooting] = useState(false);
   const [rebooted, setRebooted] = useState(false);
+  const [winboxLoading, setWinboxLoading] = useState(false);
+  const [connInfo, setConnInfo] = useState(null); // username dari server
+
+  // Ambil info koneksi dari server saat modal terbuka
+  useEffect(() => {
+    if (!device?.id || device.status === "offline") return;
+    api.get(`/devices/${device.id}/connection-info`)
+      .then(r => setConnInfo(r.data))
+      .catch(() => {}); // silent fail — optional info
+  }, [device?.id]);
+
+  const handleWinbox = async () => {
+    setWinboxLoading(true);
+    try {
+      // Minta URL winbox dari server (credential aman di backend, tidak expose ke browser)
+      const res = await api.get(`/devices/${device.id}/winbox-url`);
+      const { url, address, username } = res.data;
+      // Format: winbox://user:password@ip — Winbox langsung pre-fill, tinggal klik Connect
+      window.open(url, "_blank");
+      toast.success(`Winbox dibuka ke ${address} (user: ${username})`);
+    } catch (e) {
+      const msg = e.response?.data?.detail || "Gagal membuka Winbox";
+      toast.error(msg);
+    }
+    setWinboxLoading(false);
+  };
+
+  const handleWebFig = () => {
+    const ip = device.ip_address;
+    const scheme = (connInfo?.use_https || device.use_https) ? "https" : "http";
+    window.open(`${scheme}://${ip}`, "_blank");
+    toast.info(`Membuka WebFig ke ${ip}...`);
+  };
 
   // Klik di luar modal → tutup
   const handleBackdropClick = (e) => {
@@ -91,21 +124,6 @@ function DeviceActionModal({ device, onClose }) {
       toast.error(msg);
     }
     setRebooting(false);
-  };
-
-  const handleWinbox = () => {
-    // Buka Winbox via protocol handler (winbox://IP)
-    // Jika Winbox tidak terinstall, coba buka web Winbox (port 80 MikroTik)
-    const ip = device.ip_address;
-    window.open(`winbox://${ip}`, "_blank");
-    toast.info(`Membuka Winbox ke ${ip}...`);
-  };
-
-  const handleWebFig = () => {
-    const ip = device.ip_address;
-    const port = device.api_port || 80;
-    const scheme = device.use_https ? "https" : "http";
-    window.open(`${scheme}://${ip}`, "_blank");
   };
 
   const isOffline = device.status === "offline";
@@ -155,7 +173,6 @@ function DeviceActionModal({ device, onClose }) {
           </div>
         </div>
 
-        {/* Device Info */}
         <div className="rounded-xl bg-white/[0.04] border border-white/[0.08] p-3 space-y-2">
           <div className="grid grid-cols-2 gap-2 text-xs">
             {device.model && (
@@ -177,6 +194,27 @@ function DeviceActionModal({ device, onClose }) {
               <div><p className="text-slate-500 text-[10px] uppercase tracking-wider">Uptime</p><p className="text-slate-300 font-mono text-[10px]">{device.uptime}</p></div>
             )}
           </div>
+          {/* Credential info untuk Winbox */}
+          {!isOffline && connInfo?.api_username && (
+            <div className="border-t border-white/[0.08] pt-2 mt-1">
+              <p className="text-slate-500 text-[10px] uppercase tracking-wider mb-1">Winbox Credential</p>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 rounded-lg bg-blue-500/10 border border-blue-500/20 px-2 py-1.5">
+                  <p className="text-[9px] text-blue-400/70">Address</p>
+                  <p className="text-blue-300 font-mono text-[11px]">{device.ip_address}</p>
+                </div>
+                <div className="flex-1 rounded-lg bg-blue-500/10 border border-blue-500/20 px-2 py-1.5">
+                  <p className="text-[9px] text-blue-400/70">Username</p>
+                  <p className="text-blue-300 font-mono text-[11px]">{connInfo.api_username}</p>
+                </div>
+                <div className="flex-1 rounded-lg bg-blue-500/10 border border-blue-500/20 px-2 py-1.5">
+                  <p className="text-[9px] text-blue-400/70">Password</p>
+                  <p className="text-blue-300 font-mono text-[11px]">••••••••</p>
+                </div>
+              </div>
+              <p className="text-[9px] text-slate-600 mt-1.5">✓ Credential akan terisi otomatis saat Winbox dibuka</p>
+            </div>
+          )}
         </div>
 
         {/* Action Buttons */}
@@ -205,15 +243,17 @@ function DeviceActionModal({ device, onClose }) {
           {/* Remote Winbox */}
           <button
             onClick={handleWinbox}
-            disabled={isOffline}
+            disabled={isOffline || winboxLoading}
             className={`w-full flex items-center justify-center gap-2.5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${
               isOffline
                 ? "bg-white/5 border border-white/10 text-slate-600 cursor-not-allowed"
                 : "bg-blue-500/15 border border-blue-500/30 text-blue-400 hover:bg-blue-500/25 hover:border-blue-500/50 active:scale-95"
             }`}
           >
-            <ExternalLink className="w-4 h-4" />
-            Remote Winbox
+            {winboxLoading
+              ? <><Loader2 className="w-4 h-4 animate-spin" /> Membuka Winbox...</>
+              : <><ExternalLink className="w-4 h-4" /> Remote Winbox (auto-login)</>
+            }
           </button>
 
           {/* WebFig */}

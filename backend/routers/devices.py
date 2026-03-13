@@ -1204,3 +1204,81 @@ async def reboot_device(device_id: str, user=Depends(require_admin)):
     except Exception as e:
         logger.error(f"Reboot failed for {ip}: {e}")
         raise HTTPException(500, f"Gagal reboot: {str(e)}")
+
+
+# ── Winbox Remote URL ────────────────────────────────────────────────────────
+
+@router.get("/devices/{device_id}/winbox-url")
+async def get_winbox_url(device_id: str, user=Depends(require_admin)):
+    """
+    Kembalikan URL Winbox dengan credential yang sudah terisi otomatis.
+    Format: winbox://username:password@ip_address
+    Password disimpan di server — tidak pernah dikirim ke frontend JS bundle.
+    Hanya admin yang bisa akses endpoint ini.
+    """
+    import urllib.parse
+    db = get_db()
+    device = await db.devices.find_one({"id": device_id})
+    if not device:
+        raise HTTPException(404, "Device tidak ditemukan")
+
+    ip       = device.get("ip_address", "")
+    username = device.get("api_username", "admin")
+    password = device.get("api_password", "")
+
+    if not ip:
+        raise HTTPException(400, "Device tidak memiliki IP address")
+
+    # URL-encode username dan password untuk menghindari karakter khusus
+    enc_user = urllib.parse.quote(username, safe="")
+    enc_pass = urllib.parse.quote(password, safe="")
+
+    # Format Winbox URL dengan credential
+    # winbox://user:password@address  → Winbox langsung pre-fill, user cukup klik Connect
+    if password:
+        winbox_url = f"winbox://{enc_user}:{enc_pass}@{ip}"
+    else:
+        winbox_url = f"winbox://{enc_user}@{ip}"
+
+    # Catat di audit log
+    await db.audit_logs.insert_one({
+        "action": "winbox_access",
+        "device_id": device_id,
+        "device_name": device.get("name"),
+        "ip_address": ip,
+        "performed_by": user.get("username"),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+    return {
+        "url": winbox_url,
+        "address": ip,
+        "username": username,
+        "device_name": device.get("name"),
+        "device_id": device_id,
+    }
+
+
+@router.get("/devices/{device_id}/connection-info")
+async def get_connection_info(device_id: str, user=Depends(require_admin)):
+    """
+    Kembalikan informasi koneksi device TANPA password (aman untuk display di UI).
+    Digunakan oleh modal Wall Display untuk menampilkan info koneksi.
+    """
+    db = get_db()
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0, "api_password": 0})
+    if not device:
+        raise HTTPException(404, "Device tidak ditemukan")
+
+    return {
+        "id": device.get("id"),
+        "name": device.get("name"),
+        "ip_address": device.get("ip_address"),
+        "api_username": device.get("api_username", "admin"),
+        "api_mode": device.get("api_mode", "rest"),
+        "api_port": device.get("api_port"),
+        "use_https": device.get("use_https", False),
+        "model": device.get("model"),
+        "ros_version": device.get("ros_version"),
+        "status": device.get("status"),
+    }
