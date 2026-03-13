@@ -12,6 +12,7 @@ Structure:
 import os
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -55,14 +56,70 @@ from routers.incidents import router as incidents_router
 from routers.audit import router as audit_router
 from routers.events import router as events_router
 
-# ── App factory ────────────────────────────────────────────────────────────
-app = FastAPI(title="NOC-Sentinel API", version="3.0.0")
+# ── Background task references (FIX BUG #3: simpan reference agar tidak di-GC) ──
+_background_tasks: list = []
 
-# CORS
+
+# ── Lifespan (FIX BUG #2: ganti deprecated @app.on_event) ────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifecycle manager: startup → yield → shutdown"""
+    logger.info("NOC-Sentinel v3.0 starting up...")
+
+    # Start device polling background task
+    from core.polling import polling_loop
+    poll_task = asyncio.create_task(polling_loop())
+    _background_tasks.append(poll_task)  # FIX BUG #3: simpan reference
+    logger.info("Polling loop started")
+
+    # Start SSE device event poller
+    from routers.events import start_poller
+    sse_task = start_poller()
+    _background_tasks.append(sse_task)   # FIX BUG #3: simpan reference
+    logger.info("SSE event poller started")
+
+    # Start UDP syslog server
+    # FIX BUG #1: gunakan get_running_loop() bukan get_event_loop()
+    loop = asyncio.get_running_loop()
+    from syslog_server import start_syslog_server
+    syslog_tasks = await start_syslog_server(loop)
+    if syslog_tasks:
+        _background_tasks.extend(syslog_tasks)  # FIX BUG #3: simpan reference
+
+    logger.info("NOC-Sentinel ready!")
+
+    yield  # Server berjalan di sini
+
+    # ── Shutdown ──────────────────────────────────────────────────────────
+    logger.info("NOC-Sentinel shutting down...")
+    # Cancel semua background tasks
+    for task in _background_tasks:
+        if not task.done():
+            task.cancel()
+    if _background_tasks:
+        await asyncio.gather(*_background_tasks, return_exceptions=True)
+    from core.db import close_db
+    close_db()
+    logger.info("NOC-Sentinel shutdown complete")
+
+
+# ── App factory ────────────────────────────────────────────────────────────
+app = FastAPI(title="NOC-Sentinel API", version="3.0.0", lifespan=lifespan)
+
+# FIX BUG #4: CORS — jika origins = "*", nonaktifkan credentials agar compatible
+_cors_origins_raw = os.environ.get("CORS_ORIGINS", "").strip()
+if _cors_origins_raw and _cors_origins_raw != "*":
+    _cors_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+    _allow_credentials = True
+else:
+    # Wildcard — credentials harus False (spec CORS tidak izinkan keduanya)
+    _cors_origins = ["*"]
+    _allow_credentials = False
+
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_credentials=_allow_credentials,
+    allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -91,35 +148,6 @@ api.include_router(incidents_router)
 api.include_router(audit_router)
 api.include_router(events_router)
 app.include_router(api)
-
-# ── Lifecycle ──────────────────────────────────────────────────────────────
-@app.on_event("startup")
-async def startup():
-    logger.info("NOC-Sentinel v3.0 starting up...")
-
-    # Start device polling background task
-    from core.polling import polling_loop
-    asyncio.create_task(polling_loop())
-    logger.info("Polling loop started")
-
-    # Start SSE device event poller
-    from routers.events import start_poller
-    start_poller()
-    logger.info("SSE event poller started")
-
-    # Start UDP syslog server
-    loop = asyncio.get_event_loop()
-    from syslog_server import start_syslog_server
-    await start_syslog_server(loop)
-
-    logger.info("NOC-Sentinel ready!")
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    from core.db import close_db
-    close_db()
-    logger.info("NOC-Sentinel shutdown")
 
 
 @app.get("/")

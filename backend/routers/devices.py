@@ -58,14 +58,14 @@ def filter_devices_for_user(devices: list, user: dict) -> list:
 @router.get("/devices")
 async def list_devices(user=Depends(get_current_user)):
     db = get_db()
-    devs = await db.devices.find({}, SAFE_DEVICE_FIELDS).to_list(100)
+    devs = await db.devices.find({}, SAFE_DEVICE_FIELDS).to_list(1000)  # FIX BUG #12: was 100
     return filter_devices_for_user(devs, user)
 
 
 @router.get("/devices/full")
 async def list_devices_full(user=Depends(require_admin)):
     db = get_db()
-    devs = await db.devices.find({}, {"_id": 0}).to_list(100)
+    devs = await db.devices.find({}, {"_id": 0}).to_list(1000)  # FIX BUG #12: was 100
     for d in devs:
         d.pop("last_poll_data", None)
     return devs
@@ -74,7 +74,7 @@ async def list_devices_full(user=Depends(require_admin)):
 @router.get("/devices/all")
 async def list_all_devices_for_admin(user=Depends(require_admin)):
     db = get_db()
-    return await db.devices.find({}, {"_id": 0, "id": 1, "name": 1, "ip_address": 1}).to_list(100)
+    return await db.devices.find({}, {"_id": 0, "id": 1, "name": 1, "ip_address": 1}).to_list(1000)  # FIX BUG #12: was 100
 
 
 @router.post("/devices", status_code=201)
@@ -347,7 +347,9 @@ async def test_new(data: DeviceCreate, user=Depends(get_current_user)):
 @router.get("/dashboard/stats")
 async def dashboard_stats(device_id: str = "", interface: str = "", user=Depends(get_current_user)):
     db = get_db()
-    all_devs = await db.devices.find({}, SAFE_DEVICE_FIELDS).to_list(100)
+    all_devs = await db.devices.find({}, SAFE_DEVICE_FIELDS).to_list(1000)  # FIX BUG #12: was 100
+    # FIX BUG #15: filter berdasarkan akses user (non-admin hanya lihat device yang diizinkan)
+    all_devs = filter_devices_for_user(all_devs, user)
     online = sum(1 for d in all_devs if d.get("status") == "online")
     device = await db.devices.find_one({"id": device_id}, {"_id": 0}) if device_id else None
 
@@ -700,7 +702,7 @@ async def top_talkers(
         {"_id": 0, "device_id": 1, "bandwidth": 1}
     ).to_list(5000)
 
-    devices = await db.devices.find({}, {"_id": 0, "id": 1, "name": 1, "ip_address": 1}).to_list(100)
+    devices = await db.devices.find({}, {"_id": 0, "id": 1, "name": 1, "ip_address": 1}).to_list(1000)  # FIX BUG #12: was 100
     dev_map = {d["id"]: d for d in devices}
 
     tally = {}

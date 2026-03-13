@@ -158,6 +158,31 @@ async def kanban_board(user=Depends(get_current_user)):
     }
 
 
+# FIX BUG #9: /stats/overview HARUS ada SEBELUM /{incident_id}
+# Karena FastAPI mencocokkan route secara berurutan, jika /{incident_id}
+# didaftarkan lebih dulu, /stats/overview tidak pernah bisa diakses.
+@router.get("/stats/overview")
+async def incident_stats(user=Depends(get_current_user)):
+    """Return incident statistics for dashboard widgets."""
+    db = get_db()
+    open_count = await db.incidents.count_documents({"status": "open"})
+    in_progress_count = await db.incidents.count_documents({"status": "in_progress"})
+    resolved_count = await db.incidents.count_documents({"status": "resolved"})
+
+    # Breakdown by severity
+    severity_counts = {}
+    for sev in VALID_SEVERITIES:
+        severity_counts[sev] = await db.incidents.count_documents({"severity": sev, "status": {"$ne": "resolved"}})
+
+    return {
+        "open": open_count,
+        "in_progress": in_progress_count,
+        "resolved": resolved_count,
+        "total_active": open_count + in_progress_count,
+        "by_severity": severity_counts,
+    }
+
+
 @router.get("/{incident_id}")
 async def get_incident(incident_id: str, user=Depends(get_current_user)):
     """Get a single incident with full details and timeline."""
@@ -166,6 +191,7 @@ async def get_incident(incident_id: str, user=Depends(get_current_user)):
     if not inc:
         raise HTTPException(404, "Incident not found")
     return inc
+
 
 
 @router.post("", status_code=201)
@@ -352,23 +378,5 @@ async def delete_incident(incident_id: str, user=Depends(require_admin)):
     return {"message": "Incident deleted"}
 
 
-@router.get("/stats/overview")
-async def incident_stats(user=Depends(get_current_user)):
-    """Return incident statistics for dashboard widgets."""
-    db = get_db()
-    open_count = await db.incidents.count_documents({"status": "open"})
-    in_progress_count = await db.incidents.count_documents({"status": "in_progress"})
-    resolved_count = await db.incidents.count_documents({"status": "resolved"})
+# (dipindahkan ke atas /{incident_id} — lihat FIX BUG #9)
 
-    # Breakdown by severity
-    severity_counts = {}
-    for sev in VALID_SEVERITIES:
-        severity_counts[sev] = await db.incidents.count_documents({"severity": sev, "status": {"$ne": "resolved"}})
-
-    return {
-        "open": open_count,
-        "in_progress": in_progress_count,
-        "resolved": resolved_count,
-        "total_active": open_count + in_progress_count,
-        "by_severity": severity_counts,
-    }

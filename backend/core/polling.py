@@ -508,7 +508,7 @@ async def polling_loop():
                 return None
 
     while True:
-        start = asyncio.get_event_loop().time()
+        start = asyncio.get_running_loop().time()  # FIX BUG #7: get_running_loop()
         try:
             db      = get_db()
             devices = await db.devices.find({}, {"_id": 0}).to_list(None)
@@ -549,6 +549,6 @@ async def polling_loop():
             logger.error(f"Poll loop error: {e}")
 
         # Tunggu interval berikutnya (dikurangi waktu yang sudah terpakai)
-        elapsed    = asyncio.get_event_loop().time() - start
+        elapsed    = asyncio.get_running_loop().time() - start  # FIX BUG #7
         sleep_time = max(1, POLL_INTERVAL - elapsed)
         await asyncio.sleep(sleep_time)

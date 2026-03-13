@@ -1,53 +1,55 @@
 """
 Ping Service — ICMP & TCP connectivity checks.
-Digunakan oleh polling untuk mengukur latency/reachability.
-Tidak menggunakan SNMP sama sekali.
+Digunakan oleh polling untuk mengukur latency/reachability ke device itu sendiri.
 """
 import asyncio
 import logging
 import re
+import time as _time
 
 logger = logging.getLogger(__name__)
 
 
 async def ping_host(host: str, count: int = 4, timeout: int = 5) -> dict:
     """
-    Real ICMP ping ke 8.8.8.8 (Google) dan 1.1.1.1 (Cloudflare).
-    Mengembalikan hasil terbaik (latency terendah) dari kedua target.
-    Parameter 'host' dipertahankan untuk kompatibilitas API namun tidak digunakan
-    sebagai ping target — ping selalu ke internet (bukan ke MikroTik-nya).
+    Real ICMP ping ke host (IP device MikroTik).
+    Mengembalikan latency, packet loss, dan jitter hasil ping ke device.
+
+    FIX BUG #5: Sebelumnya selalu ping ke 8.8.8.8/1.1.1.1 (internet),
+    bukan ke device. Sekarang ping langsung ke host yang diberikan.
     """
-    results = await asyncio.gather(
-        _icmp_ping("8.8.8.8", count=count, timeout=timeout),
-        _icmp_ping("1.1.1.1", count=count, timeout=timeout),
-        return_exceptions=True
-    )
-
-    valid = [r for r in results if isinstance(r, dict) and r.get("reachable")]
-
-    if not valid:
+    if not host:
         return {"reachable": False, "min": 0, "avg": 0, "max": 0, "jitter": 0, "loss": 100}
 
-    # Kembalikan jalur internet terbaik (avg ping terendah)
-    best = min(valid, key=lambda r: r.get("avg", 9999))
-    return best
+    return await _icmp_ping(host, count=count, timeout=timeout)
 
 
 async def _icmp_ping(target: str, count: int = 4, timeout: int = 5) -> dict:
     """
     Real ICMP ping menggunakan system ping command.
     Berjalan di Linux (server) dengan binary ping standar.
+
+    FIX BUG #6: asyncio.wait_for sekarang membungkus proc.communicate(),
+    bukan hanya pembuatan subprocess. Ini mencegah hang tak terbatas.
     """
     try:
-        proc = await asyncio.wait_for(
-            asyncio.create_subprocess_exec(
-                "ping", "-c", str(count), "-W", str(timeout), "-q", target,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            ),
-            timeout=timeout * count + 5
+        proc = await asyncio.create_subprocess_exec(
+            "ping", "-c", str(count), "-W", str(timeout), "-q", target,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await proc.communicate()
+        # FIX BUG #6: wrap communicate() dengan wait_for, bukan create_subprocess_exec
+        try:
+            stdout, _ = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=timeout * count + 5
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            logger.debug(f"ICMP ping ke {target} timeout")
+            return {"reachable": False, "min": 0, "avg": 0, "max": 0, "jitter": 0, "loss": 100, "target": target}
+
         output = stdout.decode("utf-8", errors="ignore")
 
         # Parse packet loss
@@ -79,26 +81,50 @@ async def _icmp_ping(target: str, count: int = 4, timeout: int = 5) -> dict:
         return {"reachable": False, "min": 0, "avg": 0, "max": 0, "jitter": 0, "loss": 100, "target": target}
 
 
+async def internet_ping(count: int = 2, timeout: int = 3) -> dict:
+    """
+    Ping ke internet (8.8.8.8 dan 1.1.1.1) untuk memeriksa konektivitas server.
+    Terpisah dari ping_host agar tidak bertukar fungsi.
+    Mengembalikan hasil terbaik (latency terendah) dari kedua target.
+    """
+    results = await asyncio.gather(
+        _icmp_ping("8.8.8.8", count=count, timeout=timeout),
+        _icmp_ping("1.1.1.1", count=count, timeout=timeout),
+        return_exceptions=True
+    )
+
+    valid = [r for r in results if isinstance(r, dict) and r.get("reachable")]
+
+    if not valid:
+        return {"reachable": False, "min": 0, "avg": 0, "max": 0, "jitter": 0, "loss": 100}
+
+    # Kembalikan jalur internet terbaik (avg ping terendah)
+    best = min(valid, key=lambda r: r.get("avg", 9999))
+    return best
+
+
 async def tcp_ping(host: str, ports: list, count: int = 3, timeout: int = 2) -> dict:
     """
     TCP ping fallback — cek reachability via TCP handshake.
     Berguna jika ICMP diblok tapi TCP port terbuka.
     """
-    import time
     latencies = []
 
     for _ in range(count):
         for port in ports:
             try:
-                start = time.time()
+                start = _time.monotonic()
                 reader, writer = await asyncio.wait_for(
                     asyncio.open_connection(host, port),
                     timeout=timeout
                 )
-                latency = (time.time() - start) * 1000
+                latency = (_time.monotonic() - start) * 1000
                 latencies.append(latency)
                 writer.close()
-                await writer.wait_closed()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
                 break
             except Exception:
                 continue

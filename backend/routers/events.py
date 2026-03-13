@@ -105,9 +105,11 @@ async def _device_poller():
         await asyncio.sleep(5)   # interval 5 detik
 
 
-def start_poller():
-    """Dipanggil dari server.py startup event."""
-    asyncio.create_task(_device_poller())
+def start_poller() -> asyncio.Task:
+    """Dipanggil dari server.py startup. Return task reference agar tidak di-GC."""
+    # FIX BUG #3: kembalikan task reference sehingga server.py bisa menyimpannya
+    task = asyncio.create_task(_device_poller())
+    return task
 
 
 # ── SSE Endpoint ─────────────────────────────────────────────────────────────
@@ -115,6 +117,9 @@ def start_poller():
 @router.get("/devices")
 async def stream_device_events(
     request: Request,
+    # FIX BUG #16 (CATATAN KEAMANAN): Token JWT di URL yang tersimpan di access log & browser history.
+    # Alternatif yang aman: gunakan short-lived one-time ticket yang di-exchange sebelum SSE.
+    # Untuk saat ini dipertahankan karena SSE/EventSource tidak mendukung custom headers.
     token: str = Query(..., description="JWT token (karena EventSource tidak bisa kirim header)"),
 ):
     """

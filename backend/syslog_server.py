@@ -76,7 +76,11 @@ class SyslogProtocol(asyncio.DatagramProtocol):
 
     def datagram_received(self, data: bytes, addr: tuple):
         entry = parse_syslog(data, addr)
-        self.queue.put_nowait(entry)
+        try:
+            self.queue.put_nowait(entry)
+        except asyncio.QueueFull:
+            # FIX BUG #23: log warning saat queue penuh, jangan silent drop
+            logger.warning(f"Syslog queue penuh ({self.queue.maxsize} items)! Pesan dari {addr[0]} dibuang.")
 
     def error_received(self, exc):
         logger.warning(f"Syslog UDP error: {exc}")
@@ -84,17 +88,21 @@ class SyslogProtocol(asyncio.DatagramProtocol):
 
 async def _db_writer(queue: asyncio.Queue):
     """Consumer: reads from queue and inserts into MongoDB."""
+    # FIX BUG #24: CancelledError harus ditangkap di loop luar (saat await queue.get())
+    # bukan hanya di dalam try block. Pola yang benar:
     while True:
-        entry = await queue.get()
         try:
-            db = get_db()
-            await db.syslog_entries.insert_one(entry)
+            entry = await queue.get()  # CancelledError bisa terjadi di sini
+            try:
+                db = get_db()
+                await db.syslog_entries.insert_one(entry)
+            except Exception as e:
+                logger.error(f"Syslog DB write error: {e}")
+            finally:
+                queue.task_done()
         except asyncio.CancelledError:
+            logger.info("Syslog DB writer shutting down")
             break
-        except Exception as e:
-            logger.error(f"Syslog DB write error: {e}")
-        finally:
-            queue.task_done()
 
 
 async def _cleanup_old_logs():
@@ -113,8 +121,10 @@ async def _cleanup_old_logs():
         await asyncio.sleep(3600)  # Run every hour
 
 
-async def start_syslog_server(loop: asyncio.AbstractEventLoop):
-    """Start the UDP syslog server and background writer. Returns coroutine to await."""
+async def start_syslog_server(loop: asyncio.AbstractEventLoop) -> list:
+    """Start the UDP syslog server and background writer.
+    FIX BUG #3: Kembalikan list task references agar bisa disimpan server.py.
+    """
     queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
 
     try:
@@ -127,7 +137,9 @@ async def start_syslog_server(loop: asyncio.AbstractEventLoop):
     except OSError as e:
         logger.error(f"Failed to start syslog server on port {SYSLOG_PORT}: {e}")
         logger.warning("Syslog server will be disabled. Try SYSLOG_PORT=5140 (non-privileged).")
-        return
+        return []
 
-    asyncio.create_task(_db_writer(queue))
-    asyncio.create_task(_cleanup_old_logs())
+    # FIX BUG #3: simpan reference agar task tidak di-GC
+    writer_task = asyncio.create_task(_db_writer(queue))
+    cleanup_task = asyncio.create_task(_cleanup_old_logs())
+    return [writer_task, cleanup_task]

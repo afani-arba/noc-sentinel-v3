@@ -16,11 +16,22 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 JWT_SECRET = os.environ.get("JWT_SECRET") or os.environ.get("SECRET_KEY")
 if not JWT_SECRET:
-    JWT_SECRET = "dev_secret_change_in_production"
-    warnings.warn(
-        "JWT_SECRET (or SECRET_KEY) not set! Using insecure default. Set SECRET_KEY in .env",
-        UserWarning,
-    )
+    # FIX BUG #17: Jangan izinkan aplikasi berjalan tanpa secret yang aman.
+    # Set DEV_MODE=1 di .env hanya untuk development lokal.
+    if os.environ.get("DEV_MODE", "").strip() == "1":
+        JWT_SECRET = "dev_secret_do_not_use_in_production"
+        warnings.warn(
+            "[DEV_MODE] JWT_SECRET not set! Using insecure placeholder. "
+            "Set JWT_SECRET in .env before deploying.",
+            UserWarning,
+            stacklevel=2,
+        )
+    else:
+        raise RuntimeError(
+            "JWT_SECRET (or SECRET_KEY) environment variable must be set. "
+            "Generate one dengan: python -c \"import secrets; print(secrets.token_hex(32))\" "
+            "lalu tambahkan ke file .env"
+        )
 
 
 def create_token(user_data: dict) -> str:

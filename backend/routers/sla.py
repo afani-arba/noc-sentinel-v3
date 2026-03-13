@@ -171,7 +171,8 @@ async def sla_devices(
     devices = await db.devices.find({}, {"_id": 0, "id": 1, "name": 1, "ip_address": 1, "status": 1, "model": 1}).to_list(200)
 
     all_events = await db.sla_events.find(
-        {"timestamp": {"$gte": start_str}},
+        # FIX BUG #11: tambahkan filter $lte end_str agar tidak ada event dari masa depan
+        {"timestamp": {"$gte": start_str, "$lte": end.isoformat()}},
         {"_id": 0}
     ).to_list(10000)
 
@@ -259,9 +260,15 @@ async def sla_heatmap(
             total_downtime += sla["downtime_seconds"]
             total_incidents += sla["incident_count"]
 
-        # Average downtime across devices (per-day, hours)
-        downtime_hours = round(total_downtime / max(len(devices), 1) / 3600, 2)
-        uptime_pct = round(100 - (downtime_hours / 24 * 100), 2)
+        # FIX BUG #10: Rumus uptime heatmap yang benar.
+        # Hitung berdasarkan total downtime semua device dibagi total waktu tersedia
+        # (bukan dibagi per-device yang hanya valid untuk 1 device).
+        num_devices = max(len(devices), 1)
+        total_available_seconds = 86400 * num_devices  # 24 jam x jumlah device
+        # downtime sudah merupakan sum (bukan average) dari semua device
+        downtime_pct = (total_downtime / total_available_seconds) * 100
+        uptime_pct = round(max(0.0, 100.0 - downtime_pct), 2)
+        downtime_hours = round(total_downtime / 3600, 2)  # total downtime semua device
 
         result.append({
             "date": day_start.strftime("%Y-%m-%d"),
