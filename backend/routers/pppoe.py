@@ -40,20 +40,44 @@ async def _get_mt_api(device_id: str):
 async def list_pppoe_users(device_id: str = "", search: str = "", user=Depends(get_current_user)):
     if not device_id:
         return []
+    mt, device = await _get_mt_api(device_id)
+
+    # Ambil secrets dan active secara terpisah agar jika salah satu gagal
+    # (misal: device tidak punya PPPoE server), yang lain tetap ditampilkan
     try:
-        mt, _ = await _get_mt_api(device_id)
         secrets = await mt.list_pppoe_secrets()
-        active_list = await mt.list_pppoe_active()
+        if not isinstance(secrets, list):
+            secrets = []
     except Exception as e:
-        raise HTTPException(502, f"MikroTik API error: {e}")
+        raise HTTPException(502, f"Gagal mengambil PPPoE secrets: {e}")
+
+    try:
+        active_list = await mt.list_pppoe_active()
+        if not isinstance(active_list, list):
+            active_list = []
+    except Exception:
+        # active bisa gagal jika PPPoE server belum dikonfigurasi — tidak fatal
+        active_list = []
+
+    # Build set nama user yang sedang online
     active_names = {a.get("name", "") for a in active_list}
+
+    # Filter: hanya tampilkan user dengan service "pppoe" atau kosong (default pppoe)
+    # ROS6 mengembalikan field "service", ROS7 juga sama
     result = []
     for s in secrets:
+        svc = str(s.get("service", "pppoe") or "pppoe").lower()
+        # Tampilkan jika service adalah pppoe atau any
+        if svc not in ("pppoe", "any", ""):
+            continue
         s["is_online"] = s.get("name", "") in active_names
+        s["active_count"] = len(active_names)  # info total active
         if search and search.lower() not in str(s).lower():
             continue
         result.append(s)
+
     return result
+
 
 
 @router.post("/pppoe-users", status_code=201)

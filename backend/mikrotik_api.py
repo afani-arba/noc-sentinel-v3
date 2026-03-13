@@ -567,6 +567,141 @@ class MikroTikRestAPI(MikroTikBase):
         except Exception:
             return []
 
+    # ── PPPoE (ROS 7.x REST API) ──────────────────────────────────────────────
+    # Endpoint: /rest/ppp/secret  (PPPoE user secrets)
+    #           /rest/ppp/active  (active PPPoE connections)
+    #           /rest/ppp/profile (PPP profiles)
+
+    async def list_pppoe_secrets(self):
+        """List PPPoE secrets (users) dari /ppp/secret."""
+        try:
+            items = await self._async_req("GET", "ppp/secret")
+            return items if isinstance(items, list) else []
+        except Exception as e:
+            logger.warning(f"list_pppoe_secrets REST failed: {e}")
+            return []
+
+    async def create_pppoe_secret(self, data):
+        """Buat PPPoE secret baru."""
+        try:
+            return await self._async_req("PUT", "ppp/secret", data)
+        except Exception as e:
+            raise Exception(f"Gagal membuat PPPoE user: {e}")
+
+    async def update_pppoe_secret(self, mt_id, data):
+        """Update PPPoE secret berdasarkan .id MikroTik."""
+        try:
+            # REST API ROS7: PATCH /ppp/secret/<mt_id>
+            return await self._async_req("PATCH", f"ppp/secret/{mt_id}", data)
+        except Exception as e:
+            raise Exception(f"Gagal mengupdate PPPoE user: {e}")
+
+    async def delete_pppoe_secret(self, mt_id):
+        """Hapus PPPoE secret berdasarkan .id MikroTik."""
+        try:
+            return await self._async_req("DELETE", f"ppp/secret/{mt_id}")
+        except Exception as e:
+            raise Exception(f"Gagal menghapus PPPoE user: {e}")
+
+    async def list_pppoe_active(self):
+        """List koneksi PPPoE yang aktif dari /ppp/active."""
+        try:
+            items = await self._async_req("GET", "ppp/active")
+            return items if isinstance(items, list) else []
+        except Exception as e:
+            logger.warning(f"list_pppoe_active REST failed: {e}")
+            return []
+
+    async def disable_pppoe_user(self, username):
+        """Disable PPPoE user berdasarkan username."""
+        try:
+            secrets = await self.list_pppoe_secrets()
+            for s in secrets:
+                if s.get("name") == username:
+                    mt_id = s.get(".id", "")
+                    return await self._async_req("PATCH", f"ppp/secret/{mt_id}", {"disabled": "true"})
+            raise Exception(f"PPPoE user '{username}' tidak ditemukan")
+        except Exception as e:
+            raise Exception(f"Gagal disable PPPoE user: {e}")
+
+    async def enable_pppoe_user(self, username):
+        """Enable PPPoE user berdasarkan username."""
+        try:
+            secrets = await self.list_pppoe_secrets()
+            for s in secrets:
+                if s.get("name") == username:
+                    mt_id = s.get(".id", "")
+                    return await self._async_req("PATCH", f"ppp/secret/{mt_id}", {"disabled": "false"})
+            raise Exception(f"PPPoE user '{username}' tidak ditemukan")
+        except Exception as e:
+            raise Exception(f"Gagal enable PPPoE user: {e}")
+
+    # ── PPP Profiles ──────────────────────────────────────────────────────────
+    async def list_pppoe_profiles(self):
+        """List PPP profiles dari /ppp/profile."""
+        try:
+            items = await self._async_req("GET", "ppp/profile")
+            return items if isinstance(items, list) else []
+        except Exception as e:
+            logger.warning(f"list_pppoe_profiles REST failed: {e}")
+            return []
+
+    # ── Hotspot (ROS 7.x REST API) ────────────────────────────────────────────
+    async def list_hotspot_users(self):
+        try:
+            items = await self._async_req("GET", "ip/hotspot/user")
+            return items if isinstance(items, list) else []
+        except Exception:
+            return []
+
+    async def create_hotspot_user(self, data):
+        return await self._async_req("PUT", "ip/hotspot/user", data)
+
+    async def update_hotspot_user(self, mt_id, data):
+        return await self._async_req("PATCH", f"ip/hotspot/user/{mt_id}", data)
+
+    async def delete_hotspot_user(self, mt_id):
+        return await self._async_req("DELETE", f"ip/hotspot/user/{mt_id}")
+
+    async def list_hotspot_active(self):
+        try:
+            items = await self._async_req("GET", "ip/hotspot/active")
+            return items if isinstance(items, list) else []
+        except Exception:
+            return []
+
+    async def disable_hotspot_user(self, username):
+        users = await self.list_hotspot_users()
+        for u in users:
+            if u.get("name") == username:
+                mt_id = u.get(".id", "")
+                return await self._async_req("PATCH", f"ip/hotspot/user/{mt_id}", {"disabled": "true"})
+        raise Exception(f"Hotspot user '{username}' tidak ditemukan")
+
+    async def enable_hotspot_user(self, username):
+        users = await self.list_hotspot_users()
+        for u in users:
+            if u.get("name") == username:
+                mt_id = u.get(".id", "")
+                return await self._async_req("PATCH", f"ip/hotspot/user/{mt_id}", {"disabled": "false"})
+        raise Exception(f"Hotspot user '{username}' tidak ditemukan")
+
+    async def list_hotspot_profiles(self):
+        try:
+            items = await self._async_req("GET", "ip/hotspot/user/profile")
+            return items if isinstance(items, list) else []
+        except Exception:
+            return []
+
+    async def list_hotspot_servers(self):
+        try:
+            items = await self._async_req("GET", "ip/hotspot")
+            return items if isinstance(items, list) else []
+        except Exception:
+            return []
+
+
+
 
 # ═══════════════════════════════════════════════════════════
 # RouterOS 6.x+ MikroTik API Protocol (port 8728/8729)
