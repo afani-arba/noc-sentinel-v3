@@ -2,6 +2,7 @@
 # =============================================================================
 # NOC Sentinel v3 — Update Script
 # Jalankan di server: sudo bash update.sh
+# Versi: 2.0 (update untuk mendukung JWT_SECRET, bug fixes 2026-03)
 # =============================================================================
 set -e
 
@@ -20,12 +21,46 @@ SERVICE="nocsentinel"
 
 echo -e "${BOLD}"
 echo "╔══════════════════════════════════════════════════════╗"
-echo "║      NOC Sentinel v3 — Update Script                 ║"
+echo "║      NOC Sentinel v3 — Update Script v2.0           ║"
 echo "╚══════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
+# ── 0. Cek & perbaiki JWT_SECRET di .env ─────────────────────────────────────
+# (diperlukan setelah update bug#17 — app tidak bisa start tanpa JWT_SECRET)
+print_step "0/7 Memeriksa konfigurasi .env"
+ENV_FILE="$APP_DIR/backend/.env"
+
+if [[ ! -f "$ENV_FILE" ]]; then
+    print_warn ".env tidak ditemukan — menyalin dari .env.example"
+    cp "$APP_DIR/backend/.env.example" "$ENV_FILE"
+    print_warn "PERHATIAN: Edit $ENV_FILE sebelum melanjutkan!"
+    print_warn "  Minimal set: JWT_SECRET, MONGO_URI, CORS_ORIGINS"
+    read -p "Tekan ENTER setelah selesai edit .env ..."
+fi
+
+# Cek JWT_SECRET ada atau tidak
+JWT_CHECK=$(grep -E "^(JWT_SECRET|SECRET_KEY)=.+[^=]" "$ENV_FILE" 2>/dev/null | head -1 || true)
+if [[ -z "$JWT_CHECK" ]]; then
+    print_warn "JWT_SECRET tidak ditemukan atau belum diisi di .env!"
+    echo ""
+    echo "  Generating JWT_SECRET otomatis..."
+    NEW_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+    echo "" >> "$ENV_FILE"
+    echo "# Auto-generated saat update $(date +%Y-%m-%d)" >> "$ENV_FILE"
+    echo "JWT_SECRET=$NEW_SECRET" >> "$ENV_FILE"
+    print_ok "JWT_SECRET berhasil di-generate dan disimpan ke .env"
+else
+    print_ok "JWT_SECRET sudah dikonfigurasi ✓"
+fi
+
+# Cek CORS_ORIGINS
+CORS_CHECK=$(grep -E "^CORS_ORIGINS=\*" "$ENV_FILE" 2>/dev/null || true)
+if [[ -n "$CORS_CHECK" ]]; then
+    print_warn "CORS_ORIGINS=* tidak aman! Ubah ke IP/domain server Anda di $ENV_FILE"
+fi
+
 # ── 1. Pull dari GitHub ───────────────────────────────────────────────────────
-print_step "1/6 Pull update terbaru dari GitHub"
+print_step "1/7 Pull update terbaru dari GitHub"
 cd "$APP_DIR"
 git fetch origin
 LOCAL=$(git rev-parse HEAD)
@@ -38,7 +73,7 @@ else
 fi
 
 # ── 2. Update Python dependencies ────────────────────────────────────────────
-print_step "2/6 Update Python dependencies"
+print_step "2/7 Update Python dependencies"
 source "$APP_DIR/backend/venv/bin/activate"
 
 # Hapus paket SNMP lama jika masih terinstall (one-time cleanup)
@@ -53,7 +88,7 @@ deactivate
 print_ok "Python packages updated"
 
 # ── 3. Build frontend ─────────────────────────────────────────────────────────
-print_step "3/6 Build frontend (npm)"
+print_step "3/7 Build frontend (npm)"
 cd "$APP_DIR/frontend"
 npm install --silent
 npm run build
@@ -61,7 +96,7 @@ npm run build
 print_ok "Frontend berhasil di-build"
 
 # ── 4. Setup/verifikasi systemd service ──────────────────────────────────────
-print_step "4/6 Setup systemd service (auto-start)"
+print_step "4/7 Setup systemd service (auto-start)"
 
 cat > "/etc/systemd/system/${SERVICE}.service" <<SVCEOF
 [Unit]
@@ -98,15 +133,17 @@ systemctl enable nginx  --quiet 2>/dev/null || true
 print_ok "MongoDB + Nginx dikonfigurasi untuk auto-start"
 
 # ── 5. Restart service ────────────────────────────────────────────────────────
-print_step "5/6 Restart layanan"
+print_step "5/7 Restart layanan"
 systemctl restart "$SERVICE"
 sleep 3
 
 if systemctl is-active --quiet "$SERVICE"; then
     print_ok "Backend '${SERVICE}': RUNNING ✓"
 else
-    echo -e "${RED}✗ Backend gagal start! Cek log:${NC}"
+    echo -e "${RED}✗ Backend gagal start! Log error:${NC}"
     journalctl -u "$SERVICE" -n 30 --no-pager
+    echo ""
+    print_warn "Tips: pastikan JWT_SECRET dan MONGO_URI sudah benar di $ENV_FILE"
     exit 1
 fi
 
@@ -114,21 +151,24 @@ fi
 systemctl reload nginx 2>/dev/null && print_ok "Nginx di-reload" || true
 
 # ── 6. Verifikasi kesehatan API ───────────────────────────────────────────────
-print_step "6/6 Verifikasi health endpoint"
+print_step "6/7 Verifikasi health endpoint"
 sleep 2
-if curl -sf http://localhost:8000/api/health | grep -q "ok"; then
+if curl -sf http://localhost:8000/api/health 2>/dev/null | grep -q "ok"; then
     print_ok "API health check: OK"
 else
     print_warn "API health check tidak merespon — cek log: journalctl -u $SERVICE -n 50"
 fi
 
+# ── 7. Tampilkan ringkasan ────────────────────────────────────────────────────
+print_step "7/7 Ringkasan Update"
 echo ""
 echo -e "${BOLD}${GREEN}╔══════════════════════════════════════════════════════╗"
-echo    "║          ✅ UPDATE SELESAI!                           ║"
+echo    "║          ✅ UPDATE SELESAI!                          ║"
 echo -e "╚══════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "  ${BOLD}Commit aktif  :${NC}  $(git -C $APP_DIR rev-parse --short HEAD) — $(git -C $APP_DIR log -1 --format='%s')"
+echo -e "  ${BOLD}Commit aktif   :${NC}  $(git -C $APP_DIR rev-parse --short HEAD) — $(git -C $APP_DIR log -1 --format='%s')"
 echo -e "  ${BOLD}Backend status :${NC} $(systemctl is-active $SERVICE)"
+echo -e "  ${BOLD}Nginx status   :${NC} $(systemctl is-active nginx 2>/dev/null || echo 'n/a')"
 echo ""
-echo -e "  Buka browser → ${BOLD}Ctrl+Shift+R${NC} (hard refresh) untuk melihat perubahan"
+echo -e "  ${BOLD}Buka browser → Ctrl+Shift+R${NC} (hard refresh) untuk melihat perubahan"
 echo ""
