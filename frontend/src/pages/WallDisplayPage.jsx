@@ -31,28 +31,9 @@ function getGlowStyle(level, status) {
 }
 
 function StatusBadge({ status }) {
-  if (status === "online") {
-    return (
-      <span className="flex items-center gap-1 text-green-400 text-xs font-semibold">
-        <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-        ONLINE
-      </span>
-    );
-  }
-  if (status === "offline") {
-    return (
-      <span className="flex items-center gap-1 text-red-400 text-xs font-semibold">
-        <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
-        OFFLINE
-      </span>
-    );
-  }
-  return (
-    <span className="flex items-center gap-1 text-gray-400 text-xs font-semibold">
-      <span className="w-2 h-2 rounded-full bg-gray-400" />
-      UNKNOWN
-    </span>
-  );
+  if (status === "online")  return <span className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse flex-shrink-0" title="Online" />;
+  if (status === "offline") return <span className="w-2.5 h-2.5 rounded-full bg-red-400 animate-pulse flex-shrink-0" title="Offline" />;
+  return <span className="w-2.5 h-2.5 rounded-full bg-gray-500 flex-shrink-0" title="Unknown" />;
 }
 
 function MetricBar({ value, max = 100, color }) {
@@ -425,29 +406,21 @@ export default function WallDisplayPage() {
           background: "linear-gradient(90deg, rgba(14,165,233,0.08) 0%, rgba(0,0,0,0) 50%, rgba(14,165,233,0.08) 100%)",
         }}
       >
-        <div className="flex items-center justify-between sm:justify-start gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-7 h-7 sm:w-8 sm:h-8 bg-blue-500/20 border border-blue-500/40 rounded-lg flex items-center justify-center">
-              <Monitor className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" />
-            </div>
-            <div>
-              <h1 className="text-base sm:text-lg font-['Rajdhani'] font-bold text-white tracking-wider">
-                NOC SENTINEL <span className="text-blue-400">v3</span>
-              </h1>
-              <p className="text-[9px] sm:text-[10px] text-slate-400 tracking-widest uppercase hidden sm:block">ARBA MONITORING · WALL DISPLAY</p>
-            </div>
+        {/* Logo + Title */}
+        <div className="flex items-center gap-3">
+          <div className="w-7 h-7 sm:w-8 sm:h-8 bg-blue-500/20 border border-blue-500/40 rounded-lg flex items-center justify-center">
+            <Monitor className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" />
           </div>
-          {/* Clock on mobile beside logo */}
-          <div className="text-right sm:hidden">
-            <p className="text-lg font-mono font-bold text-white">
-              {time.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-            </p>
-            <p className="text-[9px] text-slate-400">{time.toLocaleDateString("id-ID", { weekday: "short", day: "2-digit", month: "short" })}</p>
+          <div>
+            <h1 className="text-base sm:text-lg font-['Rajdhani'] font-bold text-white tracking-wider">
+              NOC SENTINEL <span className="text-blue-400">v3</span>
+            </h1>
+            <p className="text-[9px] sm:text-[10px] text-slate-400 tracking-widest uppercase hidden sm:block">ARBA MONITORING · WALL DISPLAY</p>
           </div>
         </div>
 
         {/* Stats Counter */}
-        <div className="flex items-center gap-2 sm:gap-6 flex-wrap">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
           <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg bg-green-500/10 border border-green-500/30">
             <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-green-400" />
             <span className="text-green-400 font-bold font-['Rajdhani'] text-lg sm:text-xl">{summary.online}</span>
@@ -466,27 +439,15 @@ export default function WallDisplayPage() {
 
           {/* Total Bandwidth — semua device ISP accumulated */}
           {devices.length > 0 && (
-            <div className="flex items-center gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/25">
-              <div className="flex items-center gap-1 text-blue-300">
-                <TrendingDown className="w-3.5 h-3.5" />
-                <span className="font-bold font-mono text-sm sm:text-base">{formatBwHeader(total_dl)}</span>
-              </div>
+            <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/25">
+              <TrendingDown className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-400" />
+              <span className="text-blue-300 font-bold font-['Rajdhani'] text-lg sm:text-xl">{formatBwHeader(total_dl)}</span>
               <span className="text-slate-600 text-xs">/</span>
-              <div className="flex items-center gap-1 text-green-300">
-                <TrendingUp className="w-3.5 h-3.5" />
-                <span className="font-bold font-mono text-sm sm:text-base">{formatBwHeader(total_ul)}</span>
-              </div>
-              <span className="text-cyan-400/50 text-[10px] hidden sm:inline">total ISP</span>
+              <TrendingUp className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-green-400" />
+              <span className="text-green-300 font-bold font-['Rajdhani'] text-lg sm:text-xl">{formatBwHeader(total_ul)}</span>
+              <span className="text-cyan-400/60 text-[10px] sm:text-xs hidden sm:inline">ISP</span>
             </div>
           )}
-
-          {/* Clock on desktop */}
-          <div className="text-right hidden sm:block">
-            <p className="text-2xl font-mono font-bold text-white">
-              {time.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-            </p>
-            <p className="text-[10px] text-slate-400">{time.toLocaleDateString("id-ID", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })}</p>
-          </div>
         </div>
       </div>
 
