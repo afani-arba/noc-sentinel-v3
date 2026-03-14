@@ -723,7 +723,8 @@ class MikroTikRouterAPI(MikroTikBase):
     # Socket timeout untuk koneksi RouterOS API Protocol.
     # Tanpa timeout, koneksi TCP yang gagal bisa hang 120+ detik (OS default),
     # mengexhaust asyncio thread-pool dan memblok semua fetch paralel.
-    _SOCKET_TIMEOUT = 15   # detik
+    # 30 detik: cukup untuk device lambat via NAT, jauh lebih baik dari OS default.
+    _SOCKET_TIMEOUT = 30   # detik
 
     def _get_connection(self):
         """Create a new connection to the router with explicit socket timeout."""
