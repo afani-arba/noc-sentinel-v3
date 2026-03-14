@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import {
   RefreshCw, Download, CheckCircle2, AlertTriangle,
   GitBranch, Clock, Terminal, Zap, CloudOff, Package,
-  Info, ArrowUpCircle, Loader2
+  Info, ArrowUpCircle, Loader2, History, Wifi, Users
 } from "lucide-react";
 
 // ── Komponen helper ────────────────────────────────────────────────────────────
@@ -420,6 +420,93 @@ export default function UpdatePage() {
             <p>• Aplikasi tidak akan offline sepenuhnya selama update — hanya restart service (+30 detik).</p>
             <p>• Atau update manual via terminal: <code className="bg-black/40 px-1 rounded">cd /opt/noc-sentinel-v3 &amp;&amp; git pull &amp;&amp; sudo bash update.sh</code></p>
           </div>
+        </div>
+      </Card>
+
+      {/* ── Changelog ── */}
+      <Card>
+        <div className="flex items-center gap-2 mb-4">
+          <History className="w-4 h-4 text-purple-400" />
+          <h2 className="text-sm font-semibold text-white">Changelog</h2>
+          <span className="text-[10px] text-slate-500">Riwayat perubahan fitur &amp; bugfix</span>
+        </div>
+        <div className="space-y-4">
+
+          {/* v3.3.0 */}
+          <div className="rounded-lg border border-purple-500/20 bg-purple-500/[0.04] p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold font-mono text-purple-300 bg-purple-500/15 px-2 py-0.5 rounded">v3.3.0</span>
+                <span className="text-[11px] font-semibold text-white">PPPoE &amp; Hotspot Active Badges</span>
+              </div>
+              <span className="text-[10px] text-slate-500">Mar 2026</span>
+            </div>
+            <ul className="space-y-1 text-[11px] text-slate-400">
+              <li className="flex items-start gap-1.5">
+                <Users className="w-3 h-3 text-cyan-400 mt-0.5 flex-shrink-0" />
+                <span>Wall Display: badge <span className="text-cyan-300 font-mono">PPPoE Active</span> dan <span className="text-orange-300 font-mono">Hotspot Active</span> di setiap device card</span>
+              </li>
+              <li className="flex items-start gap-1.5">
+                <Users className="w-3 h-3 text-cyan-400 mt-0.5 flex-shrink-0" />
+                <span>Header Wall Display: badge akumulasi total PPPoE + Hotspot dari semua device online</span>
+              </li>
+              <li className="flex items-start gap-1.5">
+                <CheckCircle2 className="w-3 h-3 text-green-400 mt-0.5 flex-shrink-0" />
+                <span>Data diambil dari <span className="font-mono text-slate-300">ppp/active</span> dan <span className="font-mono text-slate-300">ip/hotspot/active</span> via REST API MikroTik secara paralel saat polling</span>
+              </li>
+            </ul>
+          </div>
+
+          {/* v3.2.0 */}
+          <div className="rounded-lg border border-blue-500/20 bg-blue-500/[0.04] p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold font-mono text-blue-300 bg-blue-500/15 px-2 py-0.5 rounded">v3.2.0</span>
+                <span className="text-[11px] font-semibold text-white">Fix: SFP Interface &amp; Winbox Mobile</span>
+              </div>
+              <span className="text-[10px] text-slate-500">Mar 2026</span>
+            </div>
+            <ul className="space-y-1 text-[11px] text-slate-400">
+              <li className="flex items-start gap-1.5">
+                <CheckCircle2 className="w-3 h-3 text-green-400 mt-0.5 flex-shrink-0" />
+                <span><span className="text-green-300 font-semibold">[Bug Fix]</span> SFP interface (CCR2004-16G-2S+) tidak ada data bandwidth di Wall Display — limit polling dinaikkan dari 16 → 64 interface dengan prioritas ISP &gt; SFP &gt; ether</span>
+              </li>
+              <li className="flex items-start gap-1.5">
+                <CheckCircle2 className="w-3 h-3 text-green-400 mt-0.5 flex-shrink-0" />
+                <span><span className="text-green-300 font-semibold">[Bug Fix]</span> Winbox Mobile error HTTPS — URL format diubah ke <span className="font-mono text-slate-300">winbox://address/user/pass</span> untuk kompatibilitas Winbox App Android/iOS</span>
+              </li>
+              <li className="flex items-start gap-1.5">
+                <CheckCircle2 className="w-3 h-3 text-green-400 mt-0.5 flex-shrink-0" />
+                <span>Endpoint <span className="font-mono text-slate-300">/winbox-url</span> kini dapat diakses semua user (bukan hanya admin)</span>
+              </li>
+            </ul>
+          </div>
+
+          {/* v3.1.0 */}
+          <div className="rounded-lg border border-white/10 bg-white/[0.02] p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold font-mono text-slate-400 bg-white/10 px-2 py-0.5 rounded">v3.1.0</span>
+                <span className="text-[11px] font-semibold text-white">Wall Display Refactor &amp; Sparkline</span>
+              </div>
+              <span className="text-[10px] text-slate-500">Feb 2026</span>
+            </div>
+            <ul className="space-y-1 text-[11px] text-slate-400">
+              <li className="flex items-start gap-1.5">
+                <Wifi className="w-3 h-3 text-blue-400 mt-0.5 flex-shrink-0" />
+                <span>Wall Display: sparkline chart per device card (live 20-point bandwidth history)</span>
+              </li>
+              <li className="flex items-start gap-1.5">
+                <Wifi className="w-3 h-3 text-blue-400 mt-0.5 flex-shrink-0" />
+                <span>Header: total bandwidth ISP accumulated, clock real-time, event ticker</span>
+              </li>
+              <li className="flex items-start gap-1.5">
+                <CheckCircle2 className="w-3 h-3 text-green-400 mt-0.5 flex-shrink-0" />
+                <span>Halaman Update dengan one-click update dari GitHub</span>
+              </li>
+            </ul>
+          </div>
+
         </div>
       </Card>
     </div>

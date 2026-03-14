@@ -73,6 +73,8 @@ async def poll_via_api(device: dict) -> dict:
         "traffic":        {},
         "health":         {"cpu_temp": 0, "board_temp": 0, "voltage": 0, "power": 0},
         "bw_precomputed": {},
+        "pppoe_active":   0,
+        "hotspot_active": 0,
     }
 
     try:
@@ -318,6 +320,30 @@ async def poll_via_api(device: dict) -> dict:
                 except Exception as e:
                     logger.warning(f"ROS6 get_all_interface_stats gagal untuk {device.get('name','?')}: {e}")
 
+        # ── PPPoE Active & Hotspot Active Count ──────────────────────────────
+        # Ambil jumlah session aktif secara paralel, hanya untuk REST mode.
+        # Fallback ke 0 jika endpoint tidak ada / akses ditolak (ROS 6 atau router tanpa fitur)
+        pppoe_active   = 0
+        hotspot_active = 0
+        if api_mode == "rest" and hasattr(mt, "_async_req"):
+            async def _count_endpoint(endpoint: str) -> int:
+                try:
+                    r = await mt._async_req("GET", endpoint, timeout=8)
+                    if isinstance(r, list):
+                        return len(r)
+                    return 0
+                except Exception:
+                    return 0
+
+            pppoe_active, hotspot_active = await asyncio.gather(
+                _count_endpoint("ppp/active"),
+                _count_endpoint("ip/hotspot/active"),
+            )
+            logger.info(
+                f"Sessions [{device.get('name','?')}]: "
+                f"pppoe={pppoe_active} hotspot={hotspot_active}"
+            )
+
         mode_label = "rest_api" if api_mode == "rest" else "api_protocol"
         logger.info(
             f"Poll OK [{mode_label}]: {device.get('name', '?')} "
@@ -336,9 +362,11 @@ async def poll_via_api(device: dict) -> dict:
             "traffic":         {},
             "health":          health,
             "bw_precomputed":  bw_precomputed,
-            "iface_stats_raw": {},   # kosong untuk mode REST
+            "iface_stats_raw": {},
             "running_ifaces":  running_ifaces,
-            "isp_detected":    isp_detected,   # ISP interfaces dari comment detection
+            "isp_detected":    isp_detected,
+            "pppoe_active":    pppoe_active,
+            "hotspot_active":  hotspot_active,
         }
 
     except Exception as e:
@@ -400,19 +428,22 @@ async def poll_single_device(device: dict) -> dict:
         s      = result["system"]
         health = result.get("health", {})
         update.update({
-            "model":        s.get("board_name", ""),
-            "sys_name":     s.get("sys_name", ""),
-            "identity":     s.get("identity", s.get("sys_name", "")),
-            "architecture": s.get("architecture", ""),
-            "ros_version":  s.get("ros_version", ""),
-            "uptime":       s.get("uptime_formatted", ""),
-            "serial":       s.get("serial", ""),
-            "cpu_load":     result.get("cpu", 0),
-            "memory_usage": result.get("memory", {}).get("percent", 0),
-            "cpu_temp":     health.get("cpu_temp",   0),
-            "board_temp":   health.get("board_temp", 0),
-            "voltage":      health.get("voltage",    0),
-            "power":        health.get("power",      0),
+            "model":          s.get("board_name", ""),
+            "sys_name":       s.get("sys_name", ""),
+            "identity":       s.get("identity", s.get("sys_name", "")),
+            "architecture":   s.get("architecture", ""),
+            "ros_version":    s.get("ros_version", ""),
+            "uptime":         s.get("uptime_formatted", ""),
+            "serial":         s.get("serial", ""),
+            "cpu_load":       result.get("cpu", 0),
+            "memory_usage":   result.get("memory", {}).get("percent", 0),
+            "cpu_temp":       health.get("cpu_temp",   0),
+            "board_temp":     health.get("board_temp", 0),
+            "voltage":        health.get("voltage",    0),
+            "power":          health.get("power",      0),
+            # Session counters (diupdate setiap polling cycle)
+            "pppoe_active":   result.get("pppoe_active",   0),
+            "hotspot_active": result.get("hotspot_active", 0),
         })
 
     # -- SLA Event: catat transisi status online/offline -----------------------

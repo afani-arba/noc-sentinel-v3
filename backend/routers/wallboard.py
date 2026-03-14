@@ -119,8 +119,11 @@ async def wallboard_status(user=Depends(get_current_user)):
             "download_mbps": round(download_bps / 1_000_000, 2),
             "upload_mbps": round(upload_bps / 1_000_000, 2),
             "last_poll": d.get("last_poll", ""),
-            "alert_level": alert_level,  # normal | warning | critical
-            "isp_interfaces": d.get("isp_interfaces", []),  # comment-detected ISP interface names
+            "alert_level": alert_level,
+            "isp_interfaces": d.get("isp_interfaces", []),
+            # Session counters — diambil dari DB (diupdate setiap polling cycle ~30 detik)
+            "pppoe_active":   d.get("pppoe_active",   0),
+            "hotspot_active": d.get("hotspot_active", 0),
         })
 
 
@@ -133,6 +136,9 @@ async def wallboard_status(user=Depends(get_current_user)):
     online = sum(1 for d in enriched if d["status"] == "online")
     offline = sum(1 for d in enriched if d["status"] == "offline")
     warning = sum(1 for d in enriched if d["alert_level"] == "warning")
+    # Akumulasi session counters dari semua device online
+    total_pppoe   = sum(d["pppoe_active"]   for d in enriched if d["status"] == "online")
+    total_hotspot = sum(d["hotspot_active"] for d in enriched if d["status"] == "online")
 
     return {
         "devices": enriched,
@@ -141,6 +147,8 @@ async def wallboard_status(user=Depends(get_current_user)):
             "online": online,
             "offline": offline,
             "warning": warning,
+            "total_pppoe":   total_pppoe,
+            "total_hotspot": total_hotspot,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     }

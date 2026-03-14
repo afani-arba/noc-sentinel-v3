@@ -381,7 +381,7 @@ export default function WallDisplayPage() {
     return () => { clearInterval(interval); clearInterval(clockInterval); };
   }, []);
 
-  const summary = data?.summary || { total: 0, online: 0, offline: 0, warning: 0 };
+  const summary = data?.summary || { total: 0, online: 0, offline: 0, warning: 0, total_pppoe: 0, total_hotspot: 0 };
   const devices = data?.devices || [];
 
   // Hitung total bandwidth semua device (ISP accumulated)
@@ -451,7 +451,30 @@ export default function WallDisplayPage() {
               <span className="text-cyan-400/60 text-[10px] sm:text-xs hidden sm:inline">ISP</span>
             </div>
           )}
+
+          {/* PPPoE & Hotspot Total Badges — accumulation from all online devices */}
+          {summary.total_pppoe > 0 && (
+            <div className="flex items-center gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border"
+              style={{ background: "rgba(0,212,255,0.07)", borderColor: "rgba(0,212,255,0.3)" }}>
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="#00d4ff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M8 12h.01M12 12h.01M16 12h.01" /><rect x="2" y="4" width="20" height="16" rx="2" />
+              </svg>
+              <span className="font-bold font-['Rajdhani'] text-lg sm:text-xl" style={{ color: "#00d4ff" }}>{summary.total_pppoe.toLocaleString()}</span>
+              <span className="text-[10px] sm:text-xs hidden sm:inline" style={{ color: "rgba(0,212,255,0.7)" }}>PPPoE</span>
+            </div>
+          )}
+          {summary.total_hotspot > 0 && (
+            <div className="flex items-center gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border"
+              style={{ background: "rgba(255,140,0,0.07)", borderColor: "rgba(255,140,0,0.35)" }}>
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="#ff8c00" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 12.55a11 11 0 0 1 14.08 0" /><path d="M1.42 9a16 16 0 0 1 21.16 0" /><path d="M8.53 16.11a6 6 0 0 1 6.95 0" /><circle cx="12" cy="20" r="1" fill="#ff8c00" />
+              </svg>
+              <span className="font-bold font-['Rajdhani'] text-lg sm:text-xl" style={{ color: "#ff8c00" }}>{summary.total_hotspot.toLocaleString()}</span>
+              <span className="text-[10px] sm:text-xs hidden sm:inline" style={{ color: "rgba(255,140,0,0.7)" }}>Hotspot</span>
+            </div>
+          )}
         </div>
+
       </div>
 
       {/* ── MAIN CONTENT ────────────────────────────────────────────── */}
@@ -544,6 +567,26 @@ export default function WallDisplayPage() {
                             <p className="text-[11px] font-mono font-bold text-green-400">{formatBw(latest.ul)}</p>
                           </div>
                         </div>
+
+                        {/* PPPoE & Hotspot Active Badges */}
+                        {(d.pppoe_active > 0 || d.hotspot_active > 0) && (
+                          <div className="flex items-center gap-1.5 pt-1 border-t border-white/[0.06]">
+                            {d.pppoe_active > 0 && (
+                              <div className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold font-mono"
+                                style={{ background: "rgba(0,212,255,0.08)", border: "1px solid rgba(0,212,255,0.25)", color: "#00d4ff" }}>
+                                <span>PPPoE</span>
+                                <span className="font-bold">{d.pppoe_active.toLocaleString()}</span>
+                              </div>
+                            )}
+                            {d.hotspot_active > 0 && (
+                              <div className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold font-mono"
+                                style={{ background: "rgba(255,140,0,0.08)", border: "1px solid rgba(255,140,0,0.3)", color: "#ff8c00" }}>
+                                <span>Hotspot</span>
+                                <span className="font-bold">{d.hotspot_active.toLocaleString()}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                         {/* Embedded interface sparkline graph */}
                         {hist.length > 1 && (
