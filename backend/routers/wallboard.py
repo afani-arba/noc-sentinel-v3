@@ -16,11 +16,20 @@ logger = logging.getLogger(__name__)
 @router.get("/status")
 async def wallboard_status(user=Depends(get_current_user)):
     """
-    Return all devices with full real-time metrics for wall display grid.
-    Includes: status, CPU, memory, ping, uptime, last bandwidth.
+    Return devices with full real-time metrics for wall display grid.
+    - administrator / viewer: melihat SEMUA device
+    - user: hanya melihat device yang di-tag di allowed_devices
     """
     db = get_db()
-    devices = await db.devices.find({}, {"_id": 0, "snmp_community": 0, "api_password": 0}).to_list(200)
+    devices_all = await db.devices.find({}, {"_id": 0, "snmp_community": 0, "api_password": 0}).to_list(200)
+
+    # Filter berdasarkan role
+    role = user.get("role", "user")
+    if role == "user":
+        allowed = set(user.get("allowed_devices") or [])
+        devices = [d for d in devices_all if d["id"] in allowed]
+    else:
+        devices = devices_all
 
     enriched = []
     for d in devices:
