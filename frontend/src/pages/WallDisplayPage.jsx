@@ -83,7 +83,7 @@ function DeviceActionModal({ device, onClose }) {
     if (!device?.id || device.status === "offline") return;
     api.get(`/devices/${device.id}/connection-info`)
       .then(r => setConnInfo(r.data))
-      .catch(() => {});
+      .catch(() => { });
   }, [device?.id]);
 
   const handleWinbox = async () => {
@@ -134,7 +134,7 @@ function DeviceActionModal({ device, onClose }) {
 
   // Alamat Winbox: pakai remote address jika diset, fallback ke ip_address
   const winboxAddr = connInfo?.winbox_address || device.ip_address;
-  const hasRemote  = !!(connInfo?.winbox_address);
+  const hasRemote = !!(connInfo?.winbox_address);
 
   return (
     <div
@@ -163,9 +163,8 @@ function DeviceActionModal({ device, onClose }) {
         {/* Header */}
         <div className="flex items-start gap-3">
           <div
-            className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-              isOffline ? "bg-red-500/15 border border-red-500/30" : "bg-green-500/15 border border-green-500/30"
-            }`}
+            className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${isOffline ? "bg-red-500/15 border border-red-500/30" : "bg-green-500/15 border border-green-500/30"
+              }`}
           >
             <Server className={`w-5 h-5 ${isOffline ? "text-red-400" : "text-green-400"}`} />
           </div>
@@ -217,11 +216,10 @@ function DeviceActionModal({ device, onClose }) {
               </div>
               <div className="flex items-center gap-2">
                 {/* Address — remote jika ada, fallback IP lokal */}
-                <div className={`flex-1 rounded-lg px-2 py-1.5 border ${
-                  hasRemote
+                <div className={`flex-1 rounded-lg px-2 py-1.5 border ${hasRemote
                     ? "bg-amber-500/10 border-amber-500/25"
                     : "bg-blue-500/10 border-blue-500/20"
-                }`}>
+                  }`}>
                   <p className={`text-[9px] ${hasRemote ? "text-amber-400/70" : "text-blue-400/70"}`}>
                     {hasRemote ? "Remote" : "Address"}
                   </p>
@@ -254,13 +252,12 @@ function DeviceActionModal({ device, onClose }) {
           <button
             onClick={handleReboot}
             disabled={rebooting || rebooted || isOffline}
-            className={`w-full flex items-center justify-center gap-2.5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${
-              rebooted
+            className={`w-full flex items-center justify-center gap-2.5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${rebooted
                 ? "bg-green-500/20 border border-green-500/40 text-green-400 cursor-default"
                 : isOffline
                   ? "bg-white/5 border border-white/10 text-slate-600 cursor-not-allowed"
                   : "bg-red-500/15 border border-red-500/30 text-red-400 hover:bg-red-500/25 hover:border-red-500/50 active:scale-95"
-            }`}
+              }`}
           >
             {rebooting ? (
               <><Loader2 className="w-4 h-4 animate-spin" /> Mengirim perintah reboot...</>
@@ -275,11 +272,10 @@ function DeviceActionModal({ device, onClose }) {
           <button
             onClick={handleWinbox}
             disabled={isOffline || winboxLoading}
-            className={`w-full flex flex-col items-center justify-center gap-0.5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${
-              isOffline
+            className={`w-full flex flex-col items-center justify-center gap-0.5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${isOffline
                 ? "bg-white/5 border border-white/10 text-slate-600 cursor-not-allowed"
                 : "bg-blue-500/15 border border-blue-500/30 text-blue-400 hover:bg-blue-500/25 hover:border-blue-500/50 active:scale-95"
-            }`}
+              }`}
           >
             <span className="flex items-center gap-2">
               {winboxLoading
@@ -299,11 +295,10 @@ function DeviceActionModal({ device, onClose }) {
           <button
             onClick={handleWebFig}
             disabled={isOffline}
-            className={`w-full flex items-center justify-center gap-2.5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${
-              isOffline
+            className={`w-full flex items-center justify-center gap-2.5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${isOffline
                 ? "bg-white/5 border border-white/10 text-slate-600 cursor-not-allowed"
                 : "bg-cyan-500/15 border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/25 hover:border-cyan-500/50 active:scale-95"
-            }`}
+              }`}
           >
             <Wifi className="w-4 h-4" />
             Buka WebFig (Browser)
@@ -405,6 +400,15 @@ export default function WallDisplayPage() {
   const summary = data?.summary || { total: 0, online: 0, offline: 0, warning: 0 };
   const devices = data?.devices || [];
 
+  // Hitung total bandwidth semua device (ISP accumulated)
+  const formatBwHeader = (mbps) => {
+    if (mbps >= 1000) return `${(mbps / 1000).toFixed(2)} Gbps`;
+    if (mbps >= 1) return `${mbps.toFixed(1)} Mbps`;
+    return `${(mbps * 1000).toFixed(0)} Kbps`;
+  };
+  const total_dl = devices.reduce((s, d) => s + (d.download_mbps || 0), 0);
+  const total_ul = devices.reduce((s, d) => s + (d.upload_mbps || 0), 0);
+
   return (
     <div
       className="min-h-screen flex flex-col"
@@ -459,6 +463,23 @@ export default function WallDisplayPage() {
             <span className="text-yellow-400 font-bold font-['Rajdhani'] text-lg sm:text-xl">{summary.warning}</span>
             <span className="text-yellow-400/70 text-[10px] sm:text-xs">warning</span>
           </div>
+
+          {/* Total Bandwidth — semua device ISP accumulated */}
+          {devices.length > 0 && (
+            <div className="flex items-center gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/25">
+              <div className="flex items-center gap-1 text-blue-300">
+                <TrendingDown className="w-3.5 h-3.5" />
+                <span className="font-bold font-mono text-sm sm:text-base">{formatBwHeader(total_dl)}</span>
+              </div>
+              <span className="text-slate-600 text-xs">/</span>
+              <div className="flex items-center gap-1 text-green-300">
+                <TrendingUp className="w-3.5 h-3.5" />
+                <span className="font-bold font-mono text-sm sm:text-base">{formatBwHeader(total_ul)}</span>
+              </div>
+              <span className="text-cyan-400/50 text-[10px] hidden sm:inline">total ISP</span>
+            </div>
+          )}
+
           {/* Clock on desktop */}
           <div className="text-right hidden sm:block">
             <p className="text-2xl font-mono font-bold text-white">
@@ -490,11 +511,11 @@ export default function WallDisplayPage() {
                 const latest = hist[hist.length - 1] || { dl: d.download_mbps || 0, ul: d.upload_mbps || 0 };
                 const formatBw = (v) => {
                   if (!v) return "0";
-                  if (v >= 1000) return `${(v/1000).toFixed(1)}G`;
+                  if (v >= 1000) return `${(v / 1000).toFixed(1)}G`;
                   if (v >= 1) return `${v.toFixed(1)}M`;
-                  return `${(v*1000).toFixed(0)}K`;
+                  return `${(v * 1000).toFixed(0)}K`;
                 };
-                const isp = d.isp_interfaces?.join(", ") || "";
+                const isp = d.isp_interfaces?.join(", ") || ""; // eslint-disable-line no-unused-vars
 
                 return (
                   <div
@@ -507,7 +528,7 @@ export default function WallDisplayPage() {
                       ...glowStyle,
                     }}
                   >
-                    {/* Header: name + status */}
+                    {/* Header: name + status dot */}
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-bold text-white truncate leading-tight">{d.identity || d.name}</p>
@@ -516,15 +537,10 @@ export default function WallDisplayPage() {
                       <StatusBadge status={d.status} />
                     </div>
 
-                    {/* Model + ISP interface names */}
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {d.model && <p className="text-[10px] text-slate-500 truncate">{d.model}{d.ros_version ? ` · v${d.ros_version}` : ""}</p>}
-                      {isp && (
-                        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-500/15 border border-blue-500/25 text-blue-400 font-mono shrink-0">
-                          ISP: {isp}
-                        </span>
-                      )}
-                    </div>
+                    {/* Model + ROS version only */}
+                    {d.model && (
+                      <p className="text-[10px] text-slate-500 truncate">{d.model}{d.ros_version ? ` · v${d.ros_version}` : ""}</p>
+                    )}
 
                     {!isOffline ? (
                       <>
@@ -533,18 +549,16 @@ export default function WallDisplayPage() {
                           <div>
                             <div className="flex justify-between text-[10px] mb-0.5">
                               <span className="text-slate-400 flex items-center gap-1"><Cpu className="w-3 h-3" /> CPU</span>
-                              <span className={`font-mono font-semibold ${
-                                d.cpu_load > 80 ? "text-red-400" : d.cpu_load > 60 ? "text-yellow-400" : "text-green-400"
-                              }`}>{d.cpu_load}%</span>
+                              <span className={`font-mono font-semibold ${d.cpu_load > 80 ? "text-red-400" : d.cpu_load > 60 ? "text-yellow-400" : "text-green-400"
+                                }`}>{d.cpu_load}%</span>
                             </div>
                             <MetricBar value={d.cpu_load} color="#22c55e" />
                           </div>
                           <div>
                             <div className="flex justify-between text-[10px] mb-0.5">
                               <span className="text-slate-400 flex items-center gap-1"><HardDrive className="w-3 h-3" /> MEM</span>
-                              <span className={`font-mono font-semibold ${
-                                d.memory_usage > 80 ? "text-red-400" : d.memory_usage > 60 ? "text-yellow-400" : "text-blue-400"
-                              }`}>{d.memory_usage}%</span>
+                              <span className={`font-mono font-semibold ${d.memory_usage > 80 ? "text-red-400" : d.memory_usage > 60 ? "text-yellow-400" : "text-blue-400"
+                                }`}>{d.memory_usage}%</span>
                             </div>
                             <MetricBar value={d.memory_usage} color="#3b82f6" />
                           </div>
@@ -554,9 +568,8 @@ export default function WallDisplayPage() {
                         <div className="grid grid-cols-3 gap-1 pt-1.5 border-t border-white/10">
                           <div className="text-center">
                             <p className="text-[9px] text-slate-500 uppercase">Ping</p>
-                            <p className={`text-[11px] font-mono font-bold ${
-                              d.ping_ms > 100 ? "text-red-400" : d.ping_ms > 50 ? "text-yellow-400" : "text-cyan-400"
-                            }`}>{d.ping_ms > 0 ? `${d.ping_ms}ms` : "—"}</p>
+                            <p className={`text-[11px] font-mono font-bold ${d.ping_ms > 100 ? "text-red-400" : d.ping_ms > 50 ? "text-yellow-400" : "text-cyan-400"
+                              }`}>{d.ping_ms > 0 ? `${d.ping_ms}ms` : "—"}</p>
                           </div>
                           <div className="text-center">
                             <p className="text-[9px] text-slate-500 flex items-center justify-center gap-0.5"><TrendingDown className="w-2.5 h-2.5" />DL</p>
@@ -634,9 +647,8 @@ export default function WallDisplayPage() {
                 devices
                   .filter(d => d.alert_level !== "normal")
                   .map(d => (
-                    <div key={d.id} className={`flex items-start gap-2 p-2 rounded-lg text-xs ${
-                      d.alert_level === "critical" ? "bg-red-500/10 border border-red-500/20" : "bg-yellow-500/10 border border-yellow-500/20"
-                    }`}>
+                    <div key={d.id} className={`flex items-start gap-2 p-2 rounded-lg text-xs ${d.alert_level === "critical" ? "bg-red-500/10 border border-red-500/20" : "bg-yellow-500/10 border border-yellow-500/20"
+                      }`}>
                       {d.alert_level === "critical"
                         ? <WifiOff className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
                         : <AlertTriangle className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0 mt-0.5" />
