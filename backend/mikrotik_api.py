@@ -139,14 +139,15 @@ class MikroTikRestAPI(MikroTikBase):
         self.verify = False
         self.timeout = 30
 
-    def _request(self, method, path, data=None):
+    def _request(self, method, path, data=None, timeout=None):
         url = f"{self.base_url}/{path}"
-        logger.info(f"REST API request: {method} {url}")
+        req_timeout = timeout if timeout is not None else self.timeout
+        logger.info(f"REST API request: {method} {url} (timeout={req_timeout}s)")
         try:
             # Use custom session with MikroTik-compatible SSL ciphers
             session = _make_session()
             resp = session.request(method, url, auth=self.auth, json=data,
-                                   verify=False, timeout=self.timeout)
+                                   verify=False, timeout=req_timeout)
             logger.info(f"REST API response: {resp.status_code}")
             if resp.status_code == 401:
                 raise Exception("Authentication failed - check API username/password")
@@ -179,8 +180,8 @@ class MikroTikRestAPI(MikroTikBase):
                 raise
             raise Exception(f"REST API error: {e}")
 
-    async def _async_req(self, method, path, data=None):
-        return await asyncio.to_thread(self._request, method, path, data)
+    async def _async_req(self, method, path, data=None, timeout=None):
+        return await asyncio.to_thread(self._request, method, path, data, timeout)
 
     async def test_connection(self):
         """

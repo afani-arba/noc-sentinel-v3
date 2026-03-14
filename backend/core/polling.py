@@ -239,12 +239,12 @@ async def poll_via_api(device: dict) -> dict:
                 # ── ROS 7.x: REST API monitor-traffic ────────────────────────
                 async def get_iface_bw_rest(iface_name):
                     try:
-                        r = await asyncio.wait_for(
-                            mt._async_req(
-                                "POST", "interface/monitor-traffic",
-                                {"interface": iface_name, "once": True}  # True (bool) wajib di ROS 7.16+
-                            ),
-                            timeout=8.0  # per-interface timeout, cegah hanging
+                        # CATATAN: asyncio.wait_for TIDAK BISA membatalkan thread sync.
+                        # Gunakan timeout langsung di dalam _request melalui session khusus.
+                        r = await mt._async_req(
+                            "POST", "interface/monitor-traffic",
+                            {"interface": iface_name, "once": True},
+                            timeout=10  # timeout langsung di requests, bukan asyncio
                         )
                         if isinstance(r, list) and r:
                             r = r[0]
@@ -256,8 +256,6 @@ async def poll_via_api(device: dict) -> dict:
                                 "upload_bps":   tx_bps,
                                 "status":       "up",
                             })
-                    except asyncio.TimeoutError:
-                        logger.debug(f"monitor-traffic timeout (8s) untuk {iface_name}")
                     except Exception as e:
                         logger.debug(f"REST monitor-traffic gagal untuk {iface_name}: {e}")
                     return None
