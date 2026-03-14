@@ -101,61 +101,95 @@ export default function UpdatePage() {
       return;
     }
 
-    // Poll status setiap 2 detik
+    // Catat waktu mulai di sisi frontend (independen dari server)
+    const localStartTime = Date.now();
     let errCount = 0;
-    const MAX_ERR = 8; // 16 detik error berturut-turut → backend restart = update sukses
+    let lastLogLength = 0;       // deteksi state reset
+    let restartMsgShown = false; // cegah pesan restart duplikat
+    const MAX_ERR = 6;           // 12 detik error jaringan = server restart
+
+    const doSuccess = () => {
+      clearInterval(pollRef.current);
+      setStatus("success");
+      toast.success("✅ Update berhasil! Halaman akan di-reload dalam 5 detik.", { duration: 8000 });
+      setTimeout(fetchAppInfo, 1500);
+      setTimeout(checkUpdate, 2500);
+      let cd = 5;
+      setReloadCountdown(cd);
+      cdRef.current = setInterval(() => {
+        cd -= 1;
+        setReloadCountdown(cd);
+        if (cd <= 0) { clearInterval(cdRef.current); window.location.reload(); }
+      }, 1000);
+    };
+
+    const doFailed = (msg = "") => {
+      clearInterval(pollRef.current);
+      setStatus("failed");
+      if (msg) setLog(prev => [...prev, msg]);
+      toast.error("❌ Update gagal! Periksa log untuk detail.", { duration: 10000 });
+    };
 
     pollRef.current = setInterval(async () => {
+      const localElapsed = Math.round((Date.now() - localStartTime) / 1000);
+      setElapsed(localElapsed);
+
       try {
         const r = await api.get("/system/update-status");
         const d = r.data;
-        errCount = 0; // reset counter jika berhasil
-        setLog(d.log || []);
-        setElapsed(d.elapsed || 0);
-        if (d.done) {
-          clearInterval(pollRef.current);
-          const isSuccess = d.success;
-          setStatus(isSuccess ? "success" : "failed");
+        errCount = 0; // reset error counter — server masih up
 
-          if (isSuccess) {
-            toast.success("✅ Update berhasil! Halaman akan di-reload dalam 5 detik.", { duration: 8000 });
-            setTimeout(fetchAppInfo, 2000);
-            setTimeout(checkUpdate,  3000);
-            let cd = 5;
-            setReloadCountdown(cd);
-            cdRef.current = setInterval(() => {
-              cd -= 1;
-              setReloadCountdown(cd);
-              if (cd <= 0) { clearInterval(cdRef.current); window.location.reload(); }
-            }, 1000);
-          } else {
-            toast.error("❌ Update gagal! Periksa log untuk detail.", { duration: 10000 });
-          }
+        // ── Skenario 3: State reset setelah service restart ──────────────
+        // Backend restart → _update_state kembali ke awal (running=F, done=F, log=[], elapsed≈0)
+        // Deteksi: server elapsed sangat kecil tapi kita sudah jalan > 30 detik lokal
+        const serverElapsed = d.elapsed || 0;
+        if (
+          !d.running && !d.done &&
+          serverElapsed < 5 &&         // server baru saja restart (elapsed reset)
+          localElapsed > 30 &&         // kita sudah jalan cukup lama
+          d.log?.length === 0          // log kosong = state fresh
+        ) {
+          setLog(prev => [...prev, "✅ Server berhasil di-restart! Update selesai."]);
+          doSuccess();
+          return;
         }
+
+        // Update log dari server jika ada data baru
+        if (Array.isArray(d.log) && d.log.length > 0) {
+          setLog(d.log);
+          lastLogLength = d.log.length;
+        }
+
+        // ── Skenario 1: Update selesai normal ────────────────────────────
+        if (d.done) {
+          if (d.success) {
+            setLog(prev => [...prev, "✅ Update selesai!"]);
+            doSuccess();
+          } else {
+            doFailed(`❌ Update gagal: ${d.error || "Lihat log di atas"}`);
+          }
+          return;
+        }
+
+        // Masih running — update elapsed dari server jika lebih akurat
+        if (serverElapsed > 0) setElapsed(serverElapsed);
+
       } catch {
-        // Polling error = server sedang restart (wajar setelah systemctl restart)
+        // ── Skenario 2: Server mati/restart (network error) ──────────────
         errCount += 1;
-        if (errCount === 2) {
-          // Tampilkan pesan di log bahwa server sedang restart
+
+        if (errCount === 2 && !restartMsgShown) {
+          restartMsgShown = true;
           setLog(prev => {
             const last = prev[prev.length - 1] || "";
             if (last.includes("Menunggu")) return prev;
-            return [...prev, "⏳ Menunggu server restart... (proses normal)"];
+            return [...prev, "⏳ Menunggu server restart... (ini normal)"];
           });
         }
+
         if (errCount >= MAX_ERR) {
-          // Server berhasil restart, update dianggap sukses
-          clearInterval(pollRef.current);
-          setStatus("success");
           setLog(prev => [...prev, "✅ Server berhasil di-restart! Update selesai."]);
-          toast.success("✅ Update berhasil! Server sudah di-restart. Halaman akan di-reload dalam 5 detik.", { duration: 8000 });
-          let cd = 5;
-          setReloadCountdown(cd);
-          cdRef.current = setInterval(() => {
-            cd -= 1;
-            setReloadCountdown(cd);
-            if (cd <= 0) { clearInterval(cdRef.current); window.location.reload(); }
-          }, 1000);
+          doSuccess();
         }
       }
     }, 2000);
