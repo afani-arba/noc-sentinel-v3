@@ -321,28 +321,26 @@ async def poll_via_api(device: dict) -> dict:
                     logger.warning(f"ROS6 get_all_interface_stats gagal untuk {device.get('name','?')}: {e}")
 
         # ── PPPoE Active & Hotspot Active Count ──────────────────────────────
-        # Ambil jumlah session aktif secara paralel, hanya untuk REST mode.
-        # Fallback ke 0 jika endpoint tidak ada / akses ditolak (ROS 6 atau router tanpa fitur)
+        # Gunakan method list_pppoe_active() / list_hotspot_active() yang sudah
+        # terimplementasi di KEDUA class (MikroTikRestAPI dan MikroTikAPIProtocol).
+        # Tidak perlu cek api_mode — setiap class sudah handle fallback/error sendiri.
         pppoe_active   = 0
         hotspot_active = 0
-        if api_mode == "rest" and hasattr(mt, "_async_req"):
-            async def _count_endpoint(endpoint: str) -> int:
-                try:
-                    r = await mt._async_req("GET", endpoint, timeout=8)
-                    if isinstance(r, list):
-                        return len(r)
-                    return 0
-                except Exception:
-                    return 0
-
-            pppoe_active, hotspot_active = await asyncio.gather(
-                _count_endpoint("ppp/active"),
-                _count_endpoint("ip/hotspot/active"),
+        try:
+            pppoe_list, hotspot_list = await asyncio.gather(
+                mt.list_pppoe_active(),
+                mt.list_hotspot_active(),
+                return_exceptions=True,
             )
+            pppoe_active   = len(pppoe_list)   if isinstance(pppoe_list,   list) else 0
+            hotspot_active = len(hotspot_list) if isinstance(hotspot_list, list) else 0
             logger.info(
                 f"Sessions [{device.get('name','?')}]: "
                 f"pppoe={pppoe_active} hotspot={hotspot_active}"
             )
+        except Exception as sess_err:
+            logger.debug(f"Session count gagal [{device.get('name','?')}]: {sess_err}")
+
 
         mode_label = "rest_api" if api_mode == "rest" else "api_protocol"
         logger.info(
