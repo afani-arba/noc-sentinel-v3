@@ -301,8 +301,34 @@ async def poll_via_api(device: dict) -> dict:
                     # bw_precomputed akan diisi di sana setelah delta dihitung
                     if cur_stats:
                         logger.debug(f"ROS6 raw stats: {device.get('name','?')} {len(cur_stats)} interfaces")
-                    # Simpan cur_stats ke return value via bw_precomputed sementara
-                    # (akan diproses oleh poll_single_device)
+
+                    # ── PPPoE & Hotspot Active Count untuk ROS6 ──────────────────
+                    # PENTING: fetch SEBELUM return agar data tersimpan ke DB!
+                    # ROS6 punya early return di blok ini — jika tidak di-fetch di sini,
+                    # blok PPPoE di bawah (untuk ROS7) tidak akan pernah dicapai.
+                    pppoe_active_ros6   = 0
+                    hotspot_active_ros6 = 0
+                    try:
+                        pppoe_list_ros6 = await asyncio.to_thread(
+                            mt._list_resource, "/ppp/active"
+                        )
+                        pppoe_active_ros6 = len(pppoe_list_ros6) if isinstance(pppoe_list_ros6, list) else 0
+                    except Exception as e:
+                        logger.debug(f"PPPoE fetch ROS6 gagal [{device.get('name','?')}]: {e}")
+
+                    try:
+                        hs_list_ros6 = await asyncio.to_thread(
+                            mt._list_resource, "/ip/hotspot/active"
+                        )
+                        hotspot_active_ros6 = len(hs_list_ros6) if isinstance(hs_list_ros6, list) else 0
+                    except Exception as e:
+                        logger.debug(f"Hotspot fetch ROS6 gagal [{device.get('name','?')}]: {e}")
+
+                    logger.info(
+                        f"Sessions ROS6 [{device.get('name','?')}]: "
+                        f"pppoe={pppoe_active_ros6} hotspot={hotspot_active_ros6}"
+                    )
+
                     return {
                         "reachable":       True,
                         "poll_mode":       "api_protocol",
@@ -316,14 +342,14 @@ async def poll_via_api(device: dict) -> dict:
                         "bw_precomputed":  {},           # akan diisi poll_single_device
                         "iface_stats_raw": cur_stats,   # raw bytes untuk delta calc
                         "running_ifaces":  running_ifaces,
+                        "pppoe_active":    pppoe_active_ros6,
+                        "hotspot_active":  hotspot_active_ros6,
                     }
                 except Exception as e:
                     logger.warning(f"ROS6 get_all_interface_stats gagal untuk {device.get('name','?')}: {e}")
 
-        # ── PPPoE Active & Hotspot Active Count ──────────────────────────────
-        # Gunakan method list_pppoe_active() / list_hotspot_active() yang sudah
-        # terimplementasi di KEDUA class (MikroTikRestAPI dan MikroTikAPIProtocol).
-        # Tidak perlu cek api_mode — setiap class sudah handle fallback/error sendiri.
+        # ── PPPoE Active & Hotspot Active Count (ROS7 REST API) ────────────────
+        # Hanya dicapai oleh ROS7 — ROS6 sudah return lebih atas dengan datanya.
         pppoe_active   = 0
         hotspot_active = 0
         try:
@@ -335,7 +361,7 @@ async def poll_via_api(device: dict) -> dict:
             pppoe_active   = len(pppoe_list)   if isinstance(pppoe_list,   list) else 0
             hotspot_active = len(hotspot_list) if isinstance(hotspot_list, list) else 0
             logger.info(
-                f"Sessions [{device.get('name','?')}]: "
+                f"Sessions ROS7 [{device.get('name','?')}]: "
                 f"pppoe={pppoe_active} hotspot={hotspot_active}"
             )
         except Exception as sess_err:
