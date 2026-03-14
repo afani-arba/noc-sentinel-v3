@@ -1,13 +1,13 @@
 """
 Session Cache Service — PPPoE & Hotspot Active Count Background Fetcher.
 
-Mengambil jumlah session aktif (PPPoE + Hotspot) dari semua device online
-secara paralel (dibatasi 10 concurrent), menyimpan ke field pppoe_active /
-hotspot_active di koleksi devices.
+Strategi:
+- ROS7 (api_mode="rest"): fetch langsung via REST API — non-blocking, cepat
+- ROS6 (api_mode="api"): SKIP — data sudah diupdate oleh polling.py setiap 30 detik
+  menggunakan routeros_api (synchronous/threading). Session_cache tidak perlu re-fetch
+  karena polling sudah menyimpan pppoe_active/hotspot_active ke DB.
 
-Wallboard membaca nilai ini dari DB (tidak live fetch per request)
-→ tidak ada flicker/hilang-timbul.
-
+Wallboard membaca nilai ini dari DB → tidak ada flicker/hilang-timbul.
 Interval default: 300 detik (5 menit). Ubah via env SESSION_CACHE_INTERVAL.
 """
 import asyncio
@@ -20,25 +20,19 @@ from mikrotik_api import get_api_client
 
 logger = logging.getLogger(__name__)
 
-# Interval update dalam detik (default 5 menit = 300)
 SESSION_CACHE_INTERVAL = int(os.environ.get("SESSION_CACHE_INTERVAL", "300"))
-
-# Timeout per device — ROS6 API Protocol lebih lambat dari REST API
-SESSION_FETCH_TIMEOUT = 25   # detik
-
-# Concurrency limit — cegah overload server dengan terlalu banyak koneksi paralel
-SESSION_MAX_CONCURRENT = 10
+SESSION_FETCH_TIMEOUT  = 20   # detik — untuk REST API ROS7
+SESSION_MAX_CONCURRENT = 15   # concurrent untuk ROS7 (REST - lebih ringan)
 
 
-async def _fetch_one(device: dict) -> tuple[str, int, int]:
+async def _fetch_rest_device(device: dict) -> tuple[str, int, int]:
     """
-    Fetch PPPoE + Hotspot active count untuk satu device.
+    Fetch PPPoE + Hotspot count via REST API untuk device ROS7.
     Returns (device_id, pppoe_count, hotspot_count).
-    -1 berarti gagal → pertahankan nilai lama di DB.
+    -1 = gagal → pertahankan nilai DB lama.
     """
     dev_id   = device.get("id", "")
     dev_name = device.get("name", dev_id)
-    api_mode = device.get("api_mode", "rest")
 
     try:
         mt = get_api_client(device)
@@ -46,74 +40,77 @@ async def _fetch_one(device: dict) -> tuple[str, int, int]:
         pppoe_count   = 0
         hotspot_count = 0
 
-        # Fetch PPPoE active — error individual tidak batalkan hotspot fetch
         try:
             pppoe_list = await asyncio.wait_for(
                 mt.list_pppoe_active(), timeout=SESSION_FETCH_TIMEOUT
             )
             pppoe_count = len(pppoe_list) if isinstance(pppoe_list, list) else 0
         except asyncio.TimeoutError:
-            logger.warning(f"[session_cache] Timeout PPPoE {dev_name} (mode={api_mode})")
+            logger.warning(f"[session_cache] Timeout PPPoE {dev_name}")
             pppoe_count = -1
         except NotImplementedError:
             pass
         except Exception as e:
-            logger.debug(f"[session_cache] PPPoE gagal {dev_name}: {type(e).__name__}: {e}")
+            logger.debug(f"[session_cache] PPPoE gagal {dev_name}: {e}")
 
-        # Fetch Hotspot active
         try:
             hs_list = await asyncio.wait_for(
                 mt.list_hotspot_active(), timeout=SESSION_FETCH_TIMEOUT
             )
             hotspot_count = len(hs_list) if isinstance(hs_list, list) else 0
         except asyncio.TimeoutError:
-            logger.warning(f"[session_cache] Timeout Hotspot {dev_name} (mode={api_mode})")
+            logger.warning(f"[session_cache] Timeout Hotspot {dev_name}")
             hotspot_count = -1
         except NotImplementedError:
             pass
         except Exception as e:
-            logger.debug(f"[session_cache] Hotspot gagal {dev_name}: {type(e).__name__}: {e}")
+            logger.debug(f"[session_cache] Hotspot gagal {dev_name}: {e}")
 
-        logger.info(
-            f"[session_cache] {dev_name} ({api_mode}): "
-            f"pppoe={pppoe_count} hotspot={hotspot_count}"
-        )
+        logger.info(f"[session_cache] {dev_name}: pppoe={pppoe_count} hs={hotspot_count}")
         return dev_id, pppoe_count, hotspot_count
 
     except Exception as e:
-        logger.warning(f"[session_cache] Gagal koneksi {dev_name}: {type(e).__name__}: {e}")
+        logger.warning(f"[session_cache] Error {dev_name}: {e}")
         return dev_id, -1, -1
 
 
 async def refresh_session_cache():
     """
-    Fetch session counts dari SEMUA device online secara paralel terbatas,
-    lalu update field pppoe_active / hotspot_active di DB.
+    Fetch session counts dari device ROS7 (REST API) online secara paralel.
+    ROS6 device di-skip — polling.py sudah handle mereka setiap 30 detik.
     """
     db = get_db()
-    devices = await db.devices.find(
+    # Hanya ambil device online dengan api_mode REST (ROS7)
+    # ROS6 (api_mode="api") tidak di-fetch — sudah dihandle polling.py
+    all_online = await db.devices.find(
         {"status": "online"},
-        {"_id": 0}   # include api_password untuk auth
+        {"_id": 0}
     ).to_list(500)
 
-    if not devices:
+    # Filter: hanya REST API devices
+    rest_devices = [d for d in all_online if d.get("api_mode", "rest") != "api"]
+    ros6_devices = [d for d in all_online if d.get("api_mode", "rest") == "api"]
+
+    if not all_online:
         logger.info("[session_cache] Tidak ada device online.")
         return
 
     logger.info(
-        f"[session_cache] Refresh {len(devices)} device "
-        f"(concurrent={SESSION_MAX_CONCURRENT}, timeout={SESSION_FETCH_TIMEOUT}s)..."
+        f"[session_cache] Refresh: {len(rest_devices)} REST (akan di-fetch), "
+        f"{len(ros6_devices)} ROS6 (skip - dihandle polling.py)"
     )
 
-    # Semaphore batasi concurrent connections
+    if not rest_devices:
+        return
+
     sem = asyncio.Semaphore(SESSION_MAX_CONCURRENT)
 
     async def throttled(device):
         async with sem:
-            return await _fetch_one(device)
+            return await _fetch_rest_device(device)
 
     results = await asyncio.gather(
-        *[throttled(d) for d in devices],
+        *[throttled(d) for d in rest_devices],
         return_exceptions=True,
     )
 
@@ -131,7 +128,6 @@ async def refresh_session_cache():
             skipped += 1
             continue
 
-        # Build $set — hanya update field yang berhasil di-fetch (bukan -1)
         set_fields: dict = {"session_cache_at": now}
         if pppoe >= 0:
             set_fields["pppoe_active"] = pppoe
@@ -139,7 +135,6 @@ async def refresh_session_cache():
             set_fields["hotspot_active"] = hotspot
 
         if len(set_fields) <= 1:
-            # Hanya timestamp — keduanya gagal
             skipped += 1
             continue
 
@@ -147,26 +142,20 @@ async def refresh_session_cache():
         updated += 1
 
     logger.info(
-        f"[session_cache] Selesai: {updated} diupdate, {skipped} skip. "
+        f"[session_cache] Selesai: {updated} REST diupdate, {skipped} skip. "
         f"Interval berikutnya {SESSION_CACHE_INTERVAL}s."
     )
 
 
 async def session_cache_loop():
-    """
-    Background loop: refresh_session_cache() setiap SESSION_CACHE_INTERVAL detik.
-    Fetch PERTAMA dijalankan LANGSUNG saat server start (tidak ada delay).
-    """
+    """Background loop: refresh setiap SESSION_CACHE_INTERVAL detik."""
     logger.info(
-        f"[session_cache] Service dimulai. "
-        f"Interval: {SESSION_CACHE_INTERVAL}s ({SESSION_CACHE_INTERVAL // 60} menit). "
-        f"Fetch pertama dimulai sekarang..."
+        f"[session_cache] Service dimulai (REST-only). "
+        f"Interval: {SESSION_CACHE_INTERVAL}s. ROS6 dihandle polling.py."
     )
-
     while True:
         try:
             await refresh_session_cache()
         except Exception as e:
             logger.error(f"[session_cache] Error: {e}")
-
         await asyncio.sleep(SESSION_CACHE_INTERVAL)
