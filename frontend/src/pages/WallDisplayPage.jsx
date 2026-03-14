@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import api from "@/lib/api";
 import {
-  Server, Cpu, HardDrive, Activity, Wifi, WifiOff, AlertTriangle,
+  Server, Cpu, HardDrive, Wifi, WifiOff, AlertTriangle,
   CheckCircle2, RefreshCw, Monitor, ZapOff, TrendingUp, TrendingDown,
   Power, ExternalLink, X, Loader2, Info, Clock
 } from "lucide-react";
@@ -318,85 +318,6 @@ function DeviceActionModal({ device, onClose }) {
   );
 }
 
-function DeviceCard({ device, onSelect }) {
-  const glowStyle = getGlowStyle(device.alert_level, device.status);
-  const isOffline = device.status === "offline";
-
-  return (
-    <div
-      onClick={() => onSelect(device)}
-      className="relative rounded-xl border p-4 flex flex-col gap-2 transition-all duration-500 cursor-pointer hover:scale-[1.02] hover:brightness-110 select-none"
-      style={{
-        background: "linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)",
-        backdropFilter: "blur(12px)",
-        ...glowStyle,
-      }}
-    >
-      {/* Header */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold text-white truncate leading-tight">
-            {device.identity || device.name}
-          </p>
-          <p className="text-[10px] text-slate-400 font-mono">{device.ip_address}</p>
-        </div>
-        <StatusBadge status={device.status} />
-      </div>
-
-      {/* Model + Uptime */}
-      {device.model && (
-        <p className="text-[10px] text-slate-500 truncate">{device.model} {device.ros_version ? `· v${device.ros_version}` : ""}</p>
-      )}
-
-      {/* Metrics */}
-      {!isOffline ? (
-        <div className="space-y-2 mt-1">
-          <div>
-            <div className="flex justify-between text-[10px] mb-0.5">
-              <span className="text-slate-400 flex items-center gap-1"><Cpu className="w-3 h-3" /> CPU</span>
-              <span className={`font-mono font-semibold ${device.cpu_load > 80 ? "text-red-400" : device.cpu_load > 60 ? "text-yellow-400" : "text-green-400"}`}>{device.cpu_load}%</span>
-            </div>
-            <MetricBar value={device.cpu_load} color="#22c55e" />
-          </div>
-          <div>
-            <div className="flex justify-between text-[10px] mb-0.5">
-              <span className="text-slate-400 flex items-center gap-1"><HardDrive className="w-3 h-3" /> MEM</span>
-              <span className={`font-mono font-semibold ${device.memory_usage > 80 ? "text-red-400" : device.memory_usage > 60 ? "text-yellow-400" : "text-blue-400"}`}>{device.memory_usage}%</span>
-            </div>
-            <MetricBar value={device.memory_usage} color="#3b82f6" />
-          </div>
-        </div>
-      ) : (
-        <div className="flex items-center justify-center py-3">
-          <WifiOff className="w-8 h-8 text-red-500/60" />
-        </div>
-      )}
-
-      {/* Footer stats */}
-      <div className="grid grid-cols-3 gap-1 mt-1 pt-2 border-t border-white/10">
-        <div className="text-center">
-          <p className="text-[9px] text-slate-500 uppercase">Ping</p>
-          <p className={`text-[11px] font-mono font-bold ${
-            !isOffline && device.ping_ms > 100 ? "text-red-400" :
-            !isOffline && device.ping_ms > 50  ? "text-yellow-400" :
-            !isOffline && device.ping_ms > 10  ? "text-green-400" :
-            "text-cyan-400"
-          }`}>
-            {isOffline ? "—" : device.ping_ms > 0 ? `${device.ping_ms}ms` : "—"}
-          </p>
-        </div>
-        <div className="text-center">
-          <p className="text-[9px] text-slate-500 flex items-center justify-center gap-0.5"><TrendingDown className="w-2.5 h-2.5" />DL</p>
-          <p className="text-[11px] font-mono font-bold text-blue-400">{isOffline ? "—" : `${device.download_mbps}M`}</p>
-        </div>
-        <div className="text-center">
-          <p className="text-[9px] text-slate-500 flex items-center justify-center gap-0.5"><TrendingUp className="w-2.5 h-2.5" />UL</p>
-          <p className="text-[11px] font-mono font-bold text-green-400">{isOffline ? "—" : `${device.upload_mbps}M`}</p>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function EventTicker({ events }) {
   const ref = useRef(null);
@@ -443,7 +364,6 @@ export default function WallDisplayPage() {
   const [data, setData] = useState(null);
   const [events, setEvents] = useState([]);
   const [time, setTime] = useState(new Date());
-  const [bwHistory, setBwHistory] = useState([]);
   const [deviceBwHistory, setDeviceBwHistory] = useState({});
   const [selectedDevice, setSelectedDevice] = useState(null); // untuk modal aksi
 
@@ -457,14 +377,6 @@ export default function WallDisplayPage() {
       setEvents(eventsRes.data.events || []);
 
       const devs = statusRes.data.devices || [];
-
-      // Track aggregated BW history
-      const total_dl = devs.reduce((s, d) => s + (d.download_mbps || 0), 0);
-      const total_ul = devs.reduce((s, d) => s + (d.upload_mbps || 0), 0);
-      setBwHistory(prev => {
-        const next = [...prev, { download: parseFloat(total_dl.toFixed(2)), upload: parseFloat(total_ul.toFixed(2)) }];
-        return next.slice(-30);
-      });
 
       // Track per-device BW history
       setDeviceBwHistory(prev => {
@@ -559,7 +471,8 @@ export default function WallDisplayPage() {
 
       {/* ── MAIN CONTENT ────────────────────────────────────────────── */}
       <div className="flex flex-col lg:flex-row flex-1 gap-3 p-3 sm:p-4 min-h-0 overflow-hidden">
-        {/* Device Grid — scrolls independently */}
+
+        {/* ── Main Area: Per-Device ISP Bandwidth Cards ── */}
         <div className="flex-1 min-h-0 overflow-y-auto">
           {devices.length === 0 ? (
             <div className="flex items-center justify-center h-full min-h-[200px]">
@@ -569,149 +482,141 @@ export default function WallDisplayPage() {
               </div>
             </div>
           ) : (
-          <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))" }}>
-              {devices.map(d => <DeviceCard key={d.id} device={d} onSelect={setSelectedDevice} />)}
-            </div>
-          )}
-        </div>
-
-        {/* Right Panel — full height, scrollable */}
-        <div className="w-full lg:w-72 flex-shrink-0 flex flex-col sm:flex-row lg:flex-col gap-3 lg:overflow-y-auto lg:h-full">
-          <div
-            className="rounded-xl border p-4 flex flex-col flex-1"
-            style={{
-              background: "rgba(255,255,255,0.03)",
-              borderColor: "rgba(99,179,237,0.2)",
-            }}
-          >
-            <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-widest mb-3 flex items-center gap-2">
-              <Activity className="w-3.5 h-3.5 text-blue-400" /> Bandwidth Real-time (ISP)
-            </h3>
-
-            {/* ── Total Bandwidth Numbers ── */}
-            {bwHistory.length > 0 && (() => {
-              const latest = bwHistory[bwHistory.length - 1];
-              const formatBw = (mbps) => {
-                if (mbps >= 1000) return `${(mbps / 1000).toFixed(2)} Gbps`;
-                if (mbps >= 1) return `${mbps.toFixed(1)} Mbps`;
-                return `${(mbps * 1000).toFixed(0)} Kbps`;
-              };
-              return (
-                <div className="grid grid-cols-2 gap-2 mb-3">
-                  <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 p-2 text-center">
-                    <p className="text-[9px] text-blue-400/70 uppercase tracking-widest flex items-center justify-center gap-1 mb-0.5">
-                      <TrendingDown className="w-2.5 h-2.5" /> Download
-                    </p>
-                    <p className="text-lg font-bold font-mono text-blue-300 leading-tight">{formatBw(latest.download)}</p>
-                    <p className="text-[9px] text-blue-500/60">total ISP all devices</p>
-                  </div>
-                  <div className="rounded-lg bg-green-500/10 border border-green-500/20 p-2 text-center">
-                    <p className="text-[9px] text-green-400/70 uppercase tracking-widest flex items-center justify-center gap-1 mb-0.5">
-                      <TrendingUp className="w-2.5 h-2.5" /> Upload
-                    </p>
-                    <p className="text-lg font-bold font-mono text-green-300 leading-tight">{formatBw(latest.upload)}</p>
-                    <p className="text-[9px] text-green-500/60">total ISP all devices</p>
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Aggregated chart */}
-            <div className="h-24">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={bwHistory}>
-                  <defs>
-                    <linearGradient id="wdl" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="wul" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <Tooltip
-                    contentStyle={{ background: "#0f172a", border: "1px solid #1e3a5f", borderRadius: "8px", fontSize: "11px" }}
-                    labelStyle={{ color: "#94a3b8" }}
-                    formatter={(v) => [`${v} Mbps`]}
-                  />
-                  <Area type="monotone" dataKey="download" stroke="#3b82f6" fill="url(#wdl)" strokeWidth={2} name="DL" dot={false} />
-                  <Area type="monotone" dataKey="upload" stroke="#22c55e" fill="url(#wul)" strokeWidth={2} name="UL" dot={false} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="flex gap-4 mt-1 mb-3 text-[10px] text-slate-500">
-              <span className="flex items-center gap-1"><span className="w-2 h-[2px] bg-blue-500 inline-block" /> DL</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-[2px] bg-green-500 inline-block" /> UL</span>
-              <span className="ml-auto text-slate-600">{bwHistory.length} pts</span>
-            </div>
-
-            {/* ── Per-device ISP interface bandwidth ── */}
-            <div className="border-t border-white/10 pt-3 mt-1">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-[9px] text-slate-500 uppercase tracking-widest">Per-Device ISP Bandwidth</p>
-                <span className="text-[9px] text-slate-600 font-mono">
-                  {devices.filter(d => d.status === "online").length} online
-                </span>
-              </div>
-              {/* max-height for ~6 items (~72px each) */}
-              <div className="overflow-y-auto space-y-2 pr-0.5" style={{ maxHeight: "432px" }}>
-              {devices.filter(d => d.status === "online").map(d => {
+            <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
+              {devices.map(d => {
+                const glowStyle = getGlowStyle(d.alert_level, d.status);
+                const isOffline = d.status === "offline";
                 const hist = deviceBwHistory[d.id] || [];
                 const latest = hist[hist.length - 1] || { dl: d.download_mbps || 0, ul: d.upload_mbps || 0 };
                 const formatBw = (v) => {
-                  if (!v) return "0"; 
+                  if (!v) return "0";
                   if (v >= 1000) return `${(v/1000).toFixed(1)}G`;
                   if (v >= 1) return `${v.toFixed(1)}M`;
                   return `${(v*1000).toFixed(0)}K`;
                 };
                 const isp = d.isp_interfaces?.join(", ") || "";
+
                 return (
-                  <div key={d.id} className="rounded-lg bg-white/[0.03] border border-white/[0.07] p-2">
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[10px] font-semibold text-white truncate">{d.identity || d.name}</p>
-                        {isp && <p className="text-[9px] text-blue-400/70 font-mono truncate">{isp}</p>}
+                  <div
+                    key={d.id}
+                    onClick={() => setSelectedDevice(d)}
+                    className="relative rounded-xl border p-3 flex flex-col gap-2 transition-all duration-500 cursor-pointer hover:brightness-110 select-none"
+                    style={{
+                      background: "linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)",
+                      backdropFilter: "blur(12px)",
+                      ...glowStyle,
+                    }}
+                  >
+                    {/* Header: name + status */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-white truncate leading-tight">{d.identity || d.name}</p>
+                        <p className="text-[10px] text-slate-400 font-mono">{d.ip_address}</p>
                       </div>
-                      <div className="flex gap-2 text-[10px] font-mono ml-2 flex-shrink-0">
-                        <span className="text-blue-300"><TrendingDown className="w-2.5 h-2.5 inline" /> {formatBw(latest.dl)}</span>
-                        <span className="text-green-300"><TrendingUp className="w-2.5 h-2.5 inline" /> {formatBw(latest.ul)}</span>
-                      </div>
+                      <StatusBadge status={d.status} />
                     </div>
-                    {/* Tiny sparkline charts */}
-                    {hist.length > 1 && (
-                      <div className="h-8">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <AreaChart data={hist} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
-                            <defs>
-                              <linearGradient id={`dl_${d.id}`} x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.5} />
-                                <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                              </linearGradient>
-                              <linearGradient id={`ul_${d.id}`} x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#22c55e" stopOpacity={0.5} />
-                                <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
-                              </linearGradient>
-                            </defs>
-                            <Area type="monotone" dataKey="dl" stroke="#3b82f6" fill={`url(#dl_${d.id})`} strokeWidth={1.5} dot={false} />
-                            <Area type="monotone" dataKey="ul" stroke="#22c55e" fill={`url(#ul_${d.id})`} strokeWidth={1.5} dot={false} />
-                          </AreaChart>
-                        </ResponsiveContainer>
+
+                    {/* Model + ISP interface names */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {d.model && <p className="text-[10px] text-slate-500 truncate">{d.model}{d.ros_version ? ` · v${d.ros_version}` : ""}</p>}
+                      {isp && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-500/15 border border-blue-500/25 text-blue-400 font-mono shrink-0">
+                          ISP: {isp}
+                        </span>
+                      )}
+                    </div>
+
+                    {!isOffline ? (
+                      <>
+                        {/* Metrics: CPU + MEM */}
+                        <div className="space-y-1.5">
+                          <div>
+                            <div className="flex justify-between text-[10px] mb-0.5">
+                              <span className="text-slate-400 flex items-center gap-1"><Cpu className="w-3 h-3" /> CPU</span>
+                              <span className={`font-mono font-semibold ${
+                                d.cpu_load > 80 ? "text-red-400" : d.cpu_load > 60 ? "text-yellow-400" : "text-green-400"
+                              }`}>{d.cpu_load}%</span>
+                            </div>
+                            <MetricBar value={d.cpu_load} color="#22c55e" />
+                          </div>
+                          <div>
+                            <div className="flex justify-between text-[10px] mb-0.5">
+                              <span className="text-slate-400 flex items-center gap-1"><HardDrive className="w-3 h-3" /> MEM</span>
+                              <span className={`font-mono font-semibold ${
+                                d.memory_usage > 80 ? "text-red-400" : d.memory_usage > 60 ? "text-yellow-400" : "text-blue-400"
+                              }`}>{d.memory_usage}%</span>
+                            </div>
+                            <MetricBar value={d.memory_usage} color="#3b82f6" />
+                          </div>
+                        </div>
+
+                        {/* Footer: ping + DL + UL values */}
+                        <div className="grid grid-cols-3 gap-1 pt-1.5 border-t border-white/10">
+                          <div className="text-center">
+                            <p className="text-[9px] text-slate-500 uppercase">Ping</p>
+                            <p className={`text-[11px] font-mono font-bold ${
+                              d.ping_ms > 100 ? "text-red-400" : d.ping_ms > 50 ? "text-yellow-400" : "text-cyan-400"
+                            }`}>{d.ping_ms > 0 ? `${d.ping_ms}ms` : "—"}</p>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-[9px] text-slate-500 flex items-center justify-center gap-0.5"><TrendingDown className="w-2.5 h-2.5" />DL</p>
+                            <p className="text-[11px] font-mono font-bold text-blue-400">{formatBw(latest.dl)}</p>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-[9px] text-slate-500 flex items-center justify-center gap-0.5"><TrendingUp className="w-2.5 h-2.5" />UL</p>
+                            <p className="text-[11px] font-mono font-bold text-green-400">{formatBw(latest.ul)}</p>
+                          </div>
+                        </div>
+
+                        {/* Embedded interface sparkline graph */}
+                        {hist.length > 1 && (
+                          <div className="h-16">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <AreaChart data={hist} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
+                                <defs>
+                                  <linearGradient id={`dl_${d.id}`} x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.5} />
+                                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                                  </linearGradient>
+                                  <linearGradient id={`ul_${d.id}`} x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.5} />
+                                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                                  </linearGradient>
+                                </defs>
+                                <Tooltip
+                                  contentStyle={{ background: "#0f172a", border: "1px solid #1e3a5f", borderRadius: "6px", fontSize: "10px", padding: "4px 8px" }}
+                                  formatter={(v, name) => [`${formatBw(v)}`, name === "dl" ? "↓ Download" : "↑ Upload"]}
+                                  labelFormatter={() => ""}
+                                />
+                                <Area type="monotone" dataKey="dl" stroke="#3b82f6" fill={`url(#dl_${d.id})`} strokeWidth={1.5} dot={false} name="dl" />
+                                <Area type="monotone" dataKey="ul" stroke="#22c55e" fill={`url(#ul_${d.id})`} strokeWidth={1.5} dot={false} name="ul" />
+                              </AreaChart>
+                            </ResponsiveContainer>
+                          </div>
+                        )}
+                        {hist.length <= 1 && (
+                          <div className="h-10 flex items-center justify-center">
+                            <p className="text-[10px] text-slate-600 flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin" style={{ animationDuration: "2s" }} /> Collecting data...</p>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="flex items-center justify-center py-4">
+                        <WifiOff className="w-8 h-8 text-red-500/50" />
                       </div>
                     )}
                   </div>
                 );
               })}
-              {devices.filter(d => d.status === "online").length === 0 && (
-                <p className="text-[10px] text-slate-600 text-center py-2">No online devices</p>
-              )}
-              </div>
             </div>
-          </div>
+          )}
+        </div>
 
+        {/* ── Right Panel: Active Alerts only ── */}
+        <div className="w-full lg:w-64 flex-shrink-0 flex flex-col gap-3">
           {/* Active Alerts */}
           <div
-            className="rounded-xl border p-4"
+            className="rounded-xl border p-4 flex-1"
             style={{
               background: "rgba(255,255,255,0.03)",
               borderColor: "rgba(99,179,237,0.2)",
@@ -720,7 +625,7 @@ export default function WallDisplayPage() {
             <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-widest mb-3 flex items-center gap-2">
               <AlertTriangle className="w-3.5 h-3.5 text-yellow-400" /> Active Alerts
             </h3>
-            <div className="space-y-2 max-h-48 overflow-y-auto">
+            <div className="space-y-2 max-h-[60vh] overflow-y-auto">
               {devices.filter(d => d.alert_level !== "normal").length === 0 ? (
                 <div className="flex items-center gap-2 text-green-400 text-xs">
                   <CheckCircle2 className="w-4 h-4" /> All systems normal
@@ -729,8 +634,13 @@ export default function WallDisplayPage() {
                 devices
                   .filter(d => d.alert_level !== "normal")
                   .map(d => (
-                    <div key={d.id} className={`flex items-start gap-2 p-2 rounded-lg text-xs ${d.alert_level === "critical" ? "bg-red-500/10 border border-red-500/20" : "bg-yellow-500/10 border border-yellow-500/20"}`}>
-                      {d.alert_level === "critical" ? <WifiOff className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" /> : <AlertTriangle className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0 mt-0.5" />}
+                    <div key={d.id} className={`flex items-start gap-2 p-2 rounded-lg text-xs ${
+                      d.alert_level === "critical" ? "bg-red-500/10 border border-red-500/20" : "bg-yellow-500/10 border border-yellow-500/20"
+                    }`}>
+                      {d.alert_level === "critical"
+                        ? <WifiOff className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
+                        : <AlertTriangle className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                      }
                       <div>
                         <p className={`font-semibold ${d.alert_level === "critical" ? "text-red-300" : "text-yellow-300"}`}>{d.name}</p>
                         <p className="text-slate-400 font-mono text-[10px]">
@@ -746,7 +656,7 @@ export default function WallDisplayPage() {
           {/* Refresh indicator */}
           <div className="flex items-center justify-center gap-2 text-slate-600 text-[10px]">
             <RefreshCw className="w-3 h-3 animate-spin" style={{ animationDuration: "3s" }} />
-            Auto-refresh every 10s
+            Auto-refresh every 5s
           </div>
         </div>
       </div>
