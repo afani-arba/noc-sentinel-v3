@@ -296,11 +296,14 @@ async def poll_via_api(device: dict) -> dict:
                 # ── ROS 6.x: Ambil raw bytes stats (1 koneksi, semua interface) ─
                 # Delta bps akan dihitung di poll_single_device yang punya akses ke db.
                 try:
-                    cur_stats = await mt.get_all_interface_stats()  # {name: {rx-bytes, tx-bytes}}
-                    # Simpan ke iface_stats_raw untuk diproses di poll_single_device
-                    # bw_precomputed akan diisi di sana setelah delta dihitung
+                    stats_result = await mt.get_all_interface_stats()
+                    # Format baru: {"stats": {...}, "isp_interfaces": [...]}
+                    cur_stats    = stats_result.get("stats", {})
+                    isp_from_api = stats_result.get("isp_interfaces", [])
                     if cur_stats:
                         logger.debug(f"ROS6 raw stats: {device.get('name','?')} {len(cur_stats)} interfaces")
+                    if isp_from_api:
+                        logger.info(f"ROS6 ISP detected: {device.get('name','?')} -> {isp_from_api}")
 
                     # ── PPPoE & Hotspot Active Count untuk ROS6 ──────────────────
                     # PENTING: fetch SEBELUM return agar data tersimpan ke DB!
@@ -339,14 +342,15 @@ async def poll_via_api(device: dict) -> dict:
                         "interfaces":      interfaces,
                         "traffic":         {},
                         "health":          health,
-                        "bw_precomputed":  {},           # akan diisi poll_single_device
-                        "iface_stats_raw": cur_stats,   # raw bytes untuk delta calc
+                        "bw_precomputed":  {},
+                        "iface_stats_raw": cur_stats,
                         "running_ifaces":  running_ifaces,
+                        "isp_detected":    isp_from_api,   # fix DL=UL: gunakan hanya ISP iface
                         "pppoe_active":    pppoe_active_ros6,
                         "hotspot_active":  hotspot_active_ros6,
                     }
                 except Exception as e:
-                    logger.warning(f"ROS6 get_all_interface_stats gagal untuk {device.get('name','?')}: {e}")
+                    logger.warning(f"ROS6 poll gagal untuk {device.get('name','?')}: {e}")
 
         # ── PPPoE Active & Hotspot Active Count (ROS7 REST API) ────────────────
         # Hanya dicapai oleh ROS7 — ROS6 sudah return lebih atas dengan datanya.

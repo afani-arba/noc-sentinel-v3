@@ -1048,9 +1048,16 @@ class MikroTikRouterAPI(MikroTikBase):
 
     async def get_all_interface_stats(self):
         """
-        ROS 6: Ambil stats SEMUA interface fisik (rx-byte, tx-byte) dalam 1 koneksi.
-        Filter: skip interface virtual (bridge, vlan, pppoe-out, gre, eoip, dll).
-        Return: dict {interface_name: {rx-bytes: int, tx-bytes: int}}
+        ROS 6: Ambil stats interface fisik (rx-byte, tx-byte) + deteksi ISP interface.
+        Semua dalam 1 koneksi ke MikroTik — efisien.
+
+        Return: {
+            'stats':          {iface_name: {rx-bytes: int, tx-bytes: int}},
+            'isp_interfaces': [nama-nama interface ISP/WAN yang terdeteksi]
+        }
+
+        ISP detection menggunakan keyword di field 'comment'.
+        Dilakukan dalam 1 loop — tidak perlu koneksi/call terpisah.
         """
         _SKIP_TYPES = {
             "bridge", "vlan", "pppoe-out", "pppoe-in", "l2tp", "pptp",
@@ -1058,26 +1065,37 @@ class MikroTikRouterAPI(MikroTikBase):
             "gre", "eoip", "eoipv6", "veth", "wireguard", "loopback",
             "6to4", "ipip", "ipip6",
         }
-        _SKIP_PREFIXES = ("lo", "docker", "veth", "tun", "tap")
+        _SKIP_PREFIXES = ("lo", "docker", "veth", "tun", "tap", "<")
+        _ISP_KEYWORDS = (
+            "isp", *[f"isp{i}" for i in range(1, 21)],
+            "wan", *[f"wan{i}" for i in range(1, 21)],
+            "input", *[f"input{i}" for i in range(1, 21)],
+            "uplink", "upstream", "internet", "gateway",
+        )
         try:
             items = await asyncio.to_thread(self._list_resource, "/interface")
-            result = {}
+            stats      = {}
+            isp_ifaces = []
             for item in items:
                 name  = item.get("name", "")
                 itype = item.get("type", "").lower()
                 if not name:
                     continue
-                # Skip virtual interfaces — hanya monitor interface fisik
+                # Deteksi ISP/WAN dari comment (satu loop, tidak perlu call terpisah)
+                comment = str(item.get("comment", "") or "").lower()
+                if any(kw in comment for kw in _ISP_KEYWORDS):
+                    isp_ifaces.append(name)
+                # Skip virtual/internal interfaces
                 if itype in _SKIP_TYPES or name.lower().startswith(_SKIP_PREFIXES):
                     continue
-                result[name] = {
+                stats[name] = {
                     "rx-bytes": int(item.get("rx-byte", 0) or 0),
                     "tx-bytes": int(item.get("tx-byte", 0) or 0),
                 }
-            return result
+            return {"stats": stats, "isp_interfaces": isp_ifaces}
         except Exception as e:
             logger.debug(f"get_all_interface_stats ROS6 gagal: {e}")
-            return {}
+            return {"stats": {}, "isp_interfaces": []}
 
 
     # ── IP Address List ──
