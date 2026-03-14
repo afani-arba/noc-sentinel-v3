@@ -1074,17 +1074,20 @@ class MikroTikRouterAPI(MikroTikBase):
         )
         try:
             items = await asyncio.to_thread(self._list_resource, "/interface")
-            stats      = {}
-            isp_ifaces = []
+            stats              = {}
+            isp_ifaces         = []
+            isp_comments: dict = {}   # {iface_name: original_comment}
             for item in items:
                 name  = item.get("name", "")
                 itype = item.get("type", "").lower()
                 if not name:
                     continue
                 # Deteksi ISP/WAN dari comment (satu loop, tidak perlu call terpisah)
-                comment = str(item.get("comment", "") or "").lower()
+                raw_comment = str(item.get("comment", "") or "")
+                comment     = raw_comment.lower()
                 if any(kw in comment for kw in _ISP_KEYWORDS):
                     isp_ifaces.append(name)
+                    isp_comments[name] = raw_comment   # simpan comment asli (case-preserved)
                 # Skip virtual/internal interfaces
                 if itype in _SKIP_TYPES or name.lower().startswith(_SKIP_PREFIXES):
                     continue
@@ -1092,10 +1095,10 @@ class MikroTikRouterAPI(MikroTikBase):
                     "rx-bytes": int(item.get("rx-byte", 0) or 0),
                     "tx-bytes": int(item.get("tx-byte", 0) or 0),
                 }
-            return {"stats": stats, "isp_interfaces": isp_ifaces}
+            return {"stats": stats, "isp_interfaces": isp_ifaces, "isp_comments": isp_comments}
         except Exception as e:
             logger.debug(f"get_all_interface_stats ROS6 gagal: {e}")
-            return {"stats": {}, "isp_interfaces": []}
+            return {"stats": {}, "isp_interfaces": [], "isp_comments": {}}
 
 
     # ── IP Address List ──

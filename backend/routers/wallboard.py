@@ -109,43 +109,42 @@ async def wallboard_status(user=Depends(get_current_user)):
         hotspot_count = d.get("hotspot_active", 0)
 
         # ── ISP Interface Status (untuk badge ISP Down) ─────────────────────────
-        # Baca per-interface bandwidth dari isp_bw_stored atau bw+isp_interfaces fallback
-        # Threshold: traffic < 1 Mbps (1_000_000 bps) atau tidak ada data = down
         ISP_DOWN_THRESHOLD_BPS = 1_000_000   # 1 Mbps
         isp_status = []
+        # isp_interface_comments: {iface_name: comment} — disimpan oleh polling.py dari MikroTik
+        isp_name_map = d.get("isp_interface_comments", {}) or {}
+
         if d.get("status") == "online":
             isp_bw_stored = last_bw.get("isp_bandwidth") if last_bw else None
             bw_data       = last_bw.get("bandwidth")      if last_bw else None
 
             if isp_bw_stored:
-                # isp_bw_stored: {iface_name: {download_bps, upload_bps, status}}
                 for iface_name, iface_bw in isp_bw_stored.items():
                     if not isinstance(iface_bw, dict):
                         continue
                     dl_bps = iface_bw.get("download_bps", 0)
                     ul_bps = iface_bw.get("upload_bps",   0)
-                    # Down jika KEDUA arah di bawah threshold atau interface status down
                     is_down = (
                         (dl_bps < ISP_DOWN_THRESHOLD_BPS and ul_bps < ISP_DOWN_THRESHOLD_BPS)
                         or iface_bw.get("status") == "down"
                     )
                     isp_status.append({
                         "name":          iface_name,
+                        "comment":       isp_name_map.get(iface_name, ""),  # comment dari MikroTik
                         "download_mbps": round(dl_bps / 1_000_000, 2),
                         "upload_mbps":   round(ul_bps / 1_000_000, 2),
                         "is_down":       is_down,
                     })
             elif bw_data and isp_interfaces:
-                # Fallback: baca dari bw + isp_interfaces list
                 for iface_name in isp_interfaces:
                     iface_bw = bw_data.get(iface_name)
                     if iface_bw is None:
-                        # Interface ada di list tapi tidak ada di data BW = tidak terbaca
                         isp_status.append({
                             "name":          iface_name,
+                            "comment":       isp_name_map.get(iface_name, ""),
                             "download_mbps": 0,
                             "upload_mbps":   0,
-                            "is_down":       True,  # tidak ada data = down
+                            "is_down":       True,
                         })
                     elif isinstance(iface_bw, dict):
                         dl_bps = iface_bw.get("download_bps", 0)
@@ -153,6 +152,7 @@ async def wallboard_status(user=Depends(get_current_user)):
                         is_down = (dl_bps < ISP_DOWN_THRESHOLD_BPS and ul_bps < ISP_DOWN_THRESHOLD_BPS)
                         isp_status.append({
                             "name":          iface_name,
+                            "comment":       isp_name_map.get(iface_name, ""),
                             "download_mbps": round(dl_bps / 1_000_000, 2),
                             "upload_mbps":   round(ul_bps / 1_000_000, 2),
                             "is_down":       is_down,

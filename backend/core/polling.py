@@ -297,9 +297,10 @@ async def poll_via_api(device: dict) -> dict:
                 # Delta bps akan dihitung di poll_single_device yang punya akses ke db.
                 try:
                     stats_result = await mt.get_all_interface_stats()
-                    # Format baru: {"stats": {...}, "isp_interfaces": [...]}
+                    # Format: {"stats": {...}, "isp_interfaces": [...], "isp_comments": {...}}
                     cur_stats    = stats_result.get("stats", {})
                     isp_from_api = stats_result.get("isp_interfaces", [])
+                    isp_comments = stats_result.get("isp_comments", {})
                     if cur_stats:
                         logger.debug(f"ROS6 raw stats: {device.get('name','?')} {len(cur_stats)} interfaces")
                     if isp_from_api:
@@ -345,7 +346,8 @@ async def poll_via_api(device: dict) -> dict:
                         "bw_precomputed":  {},
                         "iface_stats_raw": cur_stats,
                         "running_ifaces":  running_ifaces,
-                        "isp_detected":    isp_from_api,   # fix DL=UL: gunakan hanya ISP iface
+                        "isp_detected":    isp_from_api,
+                        "isp_comments":    isp_comments,   # {iface: comment} untuk badge label
                         "pppoe_active":    pppoe_active_ros6,
                         "hotspot_active":  hotspot_active_ros6,
                     }
