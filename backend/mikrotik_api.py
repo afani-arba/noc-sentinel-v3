@@ -720,8 +720,13 @@ class MikroTikRouterAPI(MikroTikBase):
         self.use_ssl = use_ssl
         self.plaintext_login = plaintext_login
 
+    # Socket timeout untuk koneksi RouterOS API Protocol.
+    # Tanpa timeout, koneksi TCP yang gagal bisa hang 120+ detik (OS default),
+    # mengexhaust asyncio thread-pool dan memblok semua fetch paralel.
+    _SOCKET_TIMEOUT = 15   # detik
+
     def _get_connection(self):
-        """Create a new connection to the router."""
+        """Create a new connection to the router with explicit socket timeout."""
         try:
             pool = routeros_api.RouterOsApiPool(
                 host=self.host,
@@ -731,6 +736,7 @@ class MikroTikRouterAPI(MikroTikBase):
                 use_ssl=self.use_ssl,
                 ssl_verify=False,
                 plaintext_login=self.plaintext_login,
+                timeout=self._SOCKET_TIMEOUT,
             )
             return pool
         except Exception as e:
