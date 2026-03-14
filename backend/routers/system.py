@@ -276,6 +276,42 @@ async def update_status(user=Depends(require_admin)):
     }
 
 
+@router.get("/debug-bw")
+async def debug_bw(user=Depends(require_admin)):
+    """
+    Debug endpoint: lihat data bandwidth terakhir dari traffic_history.
+    Berguna untuk diagnosa kenapa DL/UL = 0.
+    """
+    from core.db import get_db
+    db = get_db()
+    devs = await db.devices.find({}, {"_id": 0, "id": 1, "name": 1, "isp_interfaces": 1,
+                                      "api_mode": 1, "ros_version": 1}).to_list(50)
+    results = []
+    for d in devs:
+        last = await db.traffic_history.find_one(
+            {"device_id": d["id"]},
+            {"_id": 0, "timestamp": 1, "bandwidth": 1, "isp_bandwidth": 1,
+             "download_mbps": 1, "upload_mbps": 1},
+            sort=[("timestamp", -1)]
+        )
+        bw_keys = list((last.get("bandwidth") or {}).keys()) if last else []
+        isp_bw_keys = list((last.get("isp_bandwidth") or {}).keys()) if last else []
+        results.append({
+            "name": d.get("name"),
+            "api_mode": d.get("api_mode"),
+            "ros_version": d.get("ros_version"),
+            "isp_interfaces": d.get("isp_interfaces", []),
+            "last_ts": (last or {}).get("timestamp"),
+            "dl_mbps": (last or {}).get("download_mbps", 0),
+            "ul_mbps": (last or {}).get("upload_mbps", 0),
+            "bw_iface_count": len(bw_keys),
+            "bw_iface_names": bw_keys[:10],   # max 10 for readability
+            "isp_bw_names": isp_bw_keys,
+        })
+    return {"debug_bw": results}
+
+
+
 @router.get("/app-info")
 async def app_info():
     """Return current app version info (commit hash, message, date)."""

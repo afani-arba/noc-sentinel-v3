@@ -18,11 +18,22 @@ import ping_service
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL        = 30    # Detik antar polling cycle
-DEVICE_TIMEOUT       = 30    # Maks waktu per device (REST API + health)
+DEVICE_TIMEOUT       = 90    # Maks waktu per device — naikkan untuk device dengan banyak interface
 OFFLINE_GRACE_POLLS  = 2     # Gagal berturut-turut sebelum tandai offline
 MAX_CONCURRENT_POLLS = 20    # Paralel polling — aman untuk 100+ device
 OFFLINE_SKIP_AFTER   = 6     # Setelah N kali offline beruntun, skip polling sekian siklus
 OFFLINE_SKIP_CYCLES  = 4     # Jumlah siklus yang di-skip sebelum poll ulang
+
+# ISP keyword detection (comment field di MikroTik)
+_ISP_KEYWORDS = (
+    "isp",
+    *[f"isp{i}" for i in range(1, 21)],
+    "wan",
+    *[f"wan{i}" for i in range(1, 21)],
+    "input",
+    *[f"input{i}" for i in range(1, 21)],
+    "uplink", "upstream", "internet", "gateway",
+)
 
 # Interface virtual yang tidak perlu di-monitor untuk bandwidth
 _VIRTUAL_IFACE_TYPES = {
@@ -161,6 +172,15 @@ async def poll_via_api(device: dict) -> dict:
             "power":      health_raw.get("power",      0) if isinstance(health_raw, dict) else 0,
         }
 
+        # ── ISP Interface Detection (dari ifaces_raw yang sudah di-fetch) ──────────
+        # Deteksi di sini agar tidak perlu 2nd API call di poll_single_device
+        isp_detected = []
+        for iface in (ifaces_raw if isinstance(ifaces_raw, list) else []):
+            iname   = iface.get("name", "")
+            comment = str(iface.get("comment", "") or "").lower()
+            if iname and any(kw in comment for kw in _ISP_KEYWORDS):
+                isp_detected.append(iname)
+
         # ── Interfaces ────────────────────────────────────────────────────────
         interfaces  = []
         running_ifaces = []
@@ -280,7 +300,7 @@ async def poll_via_api(device: dict) -> dict:
         logger.info(
             f"Poll OK [{mode_label}]: {device.get('name', '?')} "
             f"cpu={cpu_load}% mem={memory['percent']}% "
-            f"ifaces={len(running_ifaces)} bw={len(bw_precomputed)}"
+            f"ifaces={len(running_ifaces)} bw={len(bw_precomputed)} isp={isp_detected}"
         )
 
         return {
@@ -294,8 +314,9 @@ async def poll_via_api(device: dict) -> dict:
             "traffic":         {},
             "health":          health,
             "bw_precomputed":  bw_precomputed,
-            "iface_stats_raw": {},   # kosong untuk mode REST (tidak butuh delta)
+            "iface_stats_raw": {},   # kosong untuk mode REST
             "running_ifaces":  running_ifaces,
+            "isp_detected":    isp_detected,   # ISP interfaces dari comment detection
         }
 
     except Exception as e:
@@ -388,17 +409,20 @@ async def poll_single_device(device: dict) -> dict:
 
     await db.devices.update_one({"id": did}, {"$set": update})
 
-    # -- Deteksi ISP interface via MikroTik API --------------------------------
-    try:
-        mt = get_api_client(device)
-        isp_ifaces = await mt.get_isp_interfaces()
-        if isp_ifaces:
+    # -- Deteksi ISP interface (dari hasil poll_via_api, bukan API call terpisah) --
+    # isp_detected sudah diisi di poll_via_api dari ifaces_raw yang sama
+    isp_detected_in_poll = result.get("isp_detected", [])
+    if isp_detected_in_poll:
+        # Update DB hanya jika ada perubahan (cek vs nilai saat ini)
+        current_isp = device.get("isp_interfaces", [])
+        if set(isp_detected_in_poll) != set(current_isp):
             await db.devices.update_one(
                 {"id": did},
-                {"$set": {"isp_interfaces": isp_ifaces}}
+                {"$set": {"isp_interfaces": isp_detected_in_poll}}
             )
-    except Exception as isp_err:
-        logger.debug(f"ISP interface detect skip untuk {did}: {isp_err}")
+
+    # ISP interfaces untuk kalkulasi bandwidth (kombinasi dari DB dan hasil poll)
+    isp_interfaces_for_bw = isp_detected_in_poll or device.get("isp_interfaces", [])
 
     # -- Notifikasi WhatsApp ---------------------------------------------------
     try:
@@ -444,10 +468,8 @@ async def poll_single_device(device: dict) -> dict:
                 )
         except Exception as e:
             logger.warning(f"ROS6 delta calc gagal untuk {device.get('name','?')}: {e}")
-    # -- Hitung isp_bandwidth: traffic hanya dari interface ISP (comment-detected) --
-    # isp_interfaces disimpan di devices collection dari setiap polling cycle.
-    # Ini dipakai wallboard untuk menampilkan DL/UL yang akurat (hanya traffic ISP).
-    isp_interfaces = device.get("isp_interfaces", [])
+    # -- Hitung isp_bandwidth: traffic dari interface ISP (comment-detected) ------
+    isp_interfaces = isp_interfaces_for_bw   # sudah diisi dari result["isp_detected"] / DB
     isp_bw = {}
     if bw and isp_interfaces:
         for iface_name in isp_interfaces:
@@ -459,19 +481,26 @@ async def poll_single_device(device: dict) -> dict:
                     "status":       iface_data.get("status", "up"),
                 }
 
-    # -- Hitung total ISP bw (sum semua ISP interface) ────────────────────────────
+    # -- Total ISP bw ---------------------------------------------------------------
     if isp_bw:
-        # Ada ISP interface terdeteksi → pakai ISP-only untuk total
         isp_dl_bps = sum(v.get("download_bps", 0) for v in isp_bw.values())
         isp_ul_bps = sum(v.get("upload_bps",   0) for v in isp_bw.values())
     else:
-        # Fallback: sum semua interface yang ada di bw
         isp_dl_bps = 0
         isp_ul_bps = 0
 
-    # -- Hitung total bw untuk snapshot (semua interface) ────────────────────────
+    # -- Total semua interface fisik -----------------------------------------------
     total_dl_bps = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
     total_ul_bps = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
+
+    # -- Log ringkasan bandwidth (info: mudah debug di server) --------------------
+    eff_dl = isp_dl_bps if isp_bw else total_dl_bps
+    eff_ul = isp_ul_bps if isp_bw else total_ul_bps
+    logger.info(
+        f"BW [{device.get('name','?')}]: total_ifaces={len(bw)} "
+        f"isp_ifaces={isp_interfaces} "
+        f"dl={eff_dl/1_000_000:.2f}Mbps ul={eff_ul/1_000_000:.2f}Mbps"
+    )
 
     # -- Ping real via ICMP (untuk wall display & SLA monitoring) ----------------
     # API mode tidak melakukan ICMP ping saat poll — lakukan di sini agar
