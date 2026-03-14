@@ -36,8 +36,9 @@ export default function DashboardPage() {
   const [topTalkers, setTopTalkers] = useState([]);
   const [topTalkersRange, setTopTalkersRange] = useState("1h");
   // v4 — ISP Multi-series
-  const [ispSeries, setIspSeries] = useState([]);  // [{name, data:[{time,download,upload}]}]
+  const [ispSeries, setIspSeries]   = useState([]);  // [{name, data:[{time,download,upload}]}]
   const [ispRange, setIspRange]   = useState("24h");
+  const [ispInterfaceList, setIspInterfaceList] = useState([]); // daftar ISP ifaces terdeteksi
   // v4 — Historical Comparison
   const [compareData, setCompareData] = useState(null); // {current, previous, anomalies}
   const [comparePeriod, setComparePeriod] = useState("week");
@@ -82,9 +83,11 @@ export default function DashboardPage() {
         const ifaceList = Array.isArray(raw) ? raw : (raw?.interfaces || ["all"]);
         const ispList   = Array.isArray(raw) ? [] : (raw?.isp_interfaces || []);
         setInterfaces(ifaceList);
-        // Auto-select first ISP interface as default if detected; else keep "all"
-        setSelectedInterface(ispList.length > 0 ? ispList[0] : "all");
-      }).catch(() => { setInterfaces(["all"]); setSelectedInterface("all"); });
+        setIspInterfaceList(ispList);
+        // Default ke "all" agar backend menampilkan akumulasi semua ISP interface
+        // (backend ISP-aware: jika ada isp_bandwidth → sum semua ISP; jika tidak → sum semua interface)
+        setSelectedInterface("all");
+      }).catch(() => { setInterfaces(["all"]); setSelectedInterface("all"); setIspInterfaceList([]); });
     // Fetch system resource info (board name, architecture, ROS version, etc.)
     api.get(`/devices/${selectedDevice}/system-resource`)
       .then(r => { if (!r.data.error) setSysResource(r.data); else setSysResource(null); })
@@ -321,7 +324,15 @@ export default function DashboardPage() {
           {/* Traffic Chart */}
           <div className="bg-card border border-border rounded-sm p-3 sm:p-5" data-testid="traffic-chart">
             <div className="flex items-center justify-between mb-3 sm:mb-4">
-              <h3 className="text-base sm:text-lg font-semibold font-['Rajdhani']">Traffic History</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base sm:text-lg font-semibold font-['Rajdhani']">Traffic History</h3>
+                {/* Badge ISP-accumulated mode */}
+                {selectedInterface === "all" && ispInterfaceList.length > 0 && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-blue-500/10 border border-blue-500/20 text-blue-400 font-mono hidden sm:inline">
+                    ISP ×{ispInterfaceList.length} accumulated
+                  </span>
+                )}
+              </div>
               <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                 {loadingTraffic && <RefreshCw className="w-3 h-3 animate-spin" />}
                 <span className="font-mono">{td.length} samples</span>
