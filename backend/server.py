@@ -107,6 +107,12 @@ async def lifespan(app: FastAPI):
     _background_tasks.append(speedtest_task)
     logger.info("Speed test scheduler started")
 
+    # Start PPPoE & Hotspot session cache updater
+    from services.session_cache_service import session_cache_loop
+    session_task = asyncio.create_task(session_cache_loop())
+    _background_tasks.append(session_task)
+    logger.info("Session cache service started (PPPoE & Hotspot count, interval=1h)")
+
     logger.info("NOC-Sentinel ready!")
 
     yield  # Server berjalan di sini

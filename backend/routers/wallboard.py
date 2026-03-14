@@ -9,45 +9,9 @@ from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends
 from core.db import get_db
 from core.auth import get_current_user
-from mikrotik_api import get_api_client
 
 router = APIRouter(prefix="/wallboard", tags=["wallboard"])
 logger = logging.getLogger(__name__)
-
-
-async def _fetch_session_counts(device: dict) -> tuple[int, int]:
-    """
-    Fetch PPPoE active count + Hotspot active count langsung dari MikroTik.
-    Sama dengan cara kerja pppoe.py yang sudah terbukti bekerja.
-    Timeout 6 detik agar tidak memperlambat wallboard response.
-    Returns (pppoe_count, hotspot_count).
-    """
-    if device.get("status") != "online":
-        return (
-            device.get("pppoe_active", 0),
-            device.get("hotspot_active", 0),
-        )
-    try:
-        mt = get_api_client(device)
-
-        async def safe_count(coro) -> int:
-            try:
-                result = await asyncio.wait_for(coro, timeout=6)
-                return len(result) if isinstance(result, list) else 0
-            except Exception:
-                return 0
-
-        pppoe, hotspot = await asyncio.gather(
-            safe_count(mt.list_pppoe_active()),
-            safe_count(mt.list_hotspot_active()),
-        )
-        return pppoe, hotspot
-    except Exception:
-        # Fallback: gunakan nilai dari DB (hasil polling terakhir)
-        return (
-            device.get("pppoe_active", 0),
-            device.get("hotspot_active", 0),
-        )
 
 
 @router.get("/status")
@@ -70,33 +34,6 @@ async def wallboard_status(user=Depends(get_current_user)):
         devices = devices_all
 
     enriched = []
-
-    # ── Fetch PPPoE & Hotspot counts untuk semua device secara paralel ──────────
-    # PENTING: butuh api_password untuk autentikasi ke MikroTik → fetch terpisah
-    # dari DB, hanya untuk kebutuhan internal session counting (tidak dikirim ke client).
-    device_ids = [d["id"] for d in devices]
-    devices_with_creds = await db.devices.find(
-        {"id": {"$in": device_ids}},
-        {"_id": 0}   # ambil SEMUA field termasuk api_password
-    ).to_list(200)
-    # Index by device id untuk lookup cepat
-    creds_map = {d["id"]: d for d in devices_with_creds}
-
-    # Fetch session counts paralel menggunakan device dengan credentials
-    session_counts = await asyncio.gather(
-        *[_fetch_session_counts(creds_map.get(d["id"], d)) for d in devices],
-        return_exceptions=True,
-    )
-    # Buat dict {device_id: (pppoe_count, hotspot_count)}
-    device_sessions: dict = {}
-    for d, counts in zip(devices, session_counts):
-        if isinstance(counts, tuple) and len(counts) == 2:
-            device_sessions[d["id"]] = counts
-        else:
-            device_sessions[d["id"]] = (
-                d.get("pppoe_active", 0),
-                d.get("hotspot_active", 0),
-            )
 
     for d in devices:
         # Get latest traffic snapshot for bandwidth
@@ -168,7 +105,8 @@ async def wallboard_status(user=Depends(get_current_user)):
         elif cpu > 75 or mem > 75 or ping > 100:
             alert_level = "warning"
 
-        pppoe_count, hotspot_count = device_sessions.get(d.get("id"), (0, 0))
+        pppoe_count   = d.get("pppoe_active", 0)
+        hotspot_count = d.get("hotspot_active", 0)
         enriched.append({
             "id": d.get("id"),
             "name": d.get("name", ""),
@@ -188,7 +126,8 @@ async def wallboard_status(user=Depends(get_current_user)):
             "last_poll": d.get("last_poll", ""),
             "alert_level": alert_level,
             "isp_interfaces": d.get("isp_interfaces", []),
-            # Session counters — live fetch langsung dari MikroTik (sama seperti PPPoE user page)
+            # Session counters dari DB cache (diupdate session_cache_service setiap 1 jam)
+            # Stabil — tidak live fetch → tidak ada flicker/hilang-timbul
             "pppoe_active":   pppoe_count,
             "hotspot_active": hotspot_count,
         })
