@@ -58,6 +58,7 @@ async def wallboard_status(user=Depends(get_current_user)):
     - user: hanya melihat device yang di-tag di allowed_devices
     """
     db = get_db()
+    # Fetch tanpa credentials untuk response (aman dikirim ke client)
     devices_all = await db.devices.find({}, {"_id": 0, "snmp_community": 0, "api_password": 0}).to_list(200)
 
     # Filter berdasarkan role
@@ -71,10 +72,19 @@ async def wallboard_status(user=Depends(get_current_user)):
     enriched = []
 
     # ── Fetch PPPoE & Hotspot counts untuk semua device secara paralel ──────────
-    # Ini lebih cepat dari fetch satu per satu karena semua request ke MikroTik
-    # dieksekusi bersamaan. Sama dengan cara kerja halaman PPPoE user.
+    # PENTING: butuh api_password untuk autentikasi ke MikroTik → fetch terpisah
+    # dari DB, hanya untuk kebutuhan internal session counting (tidak dikirim ke client).
+    device_ids = [d["id"] for d in devices]
+    devices_with_creds = await db.devices.find(
+        {"id": {"$in": device_ids}},
+        {"_id": 0}   # ambil SEMUA field termasuk api_password
+    ).to_list(200)
+    # Index by device id untuk lookup cepat
+    creds_map = {d["id"]: d for d in devices_with_creds}
+
+    # Fetch session counts paralel menggunakan device dengan credentials
     session_counts = await asyncio.gather(
-        *[_fetch_session_counts(d) for d in devices],
+        *[_fetch_session_counts(creds_map.get(d["id"], d)) for d in devices],
         return_exceptions=True,
     )
     # Buat dict {device_id: (pppoe_count, hotspot_count)}
