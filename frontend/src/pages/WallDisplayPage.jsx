@@ -588,6 +588,30 @@ export default function WallDisplayPage() {
                           </div>
                         )}
 
+                        {/* ── ISP Interface Down Badges ── */}
+                        {/* Tampil jika ada ISP interface dengan traffic < 1Mbps atau tidak terbaca */}
+                        {d.isp_status?.some(isp => isp.is_down) && (
+                          <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-red-500/20">
+                            {d.isp_status.filter(isp => isp.is_down).map(isp => (
+                              <div
+                                key={isp.name}
+                                className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold font-mono animate-pulse"
+                                style={{
+                                  background: "rgba(239,68,68,0.15)",
+                                  border: "1px solid rgba(239,68,68,0.5)",
+                                  color: "#f87171",
+                                }}
+                                title={`Interface ${isp.name}: DL=${isp.download_mbps}Mbps UL=${isp.upload_mbps}Mbps`}
+                              >
+                                <svg className="w-3 h-3 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0 1 19 12.55M5 12.55a10.94 10.94 0 0 1 5.17-2.39M10.71 5.05A16 16 0 0 1 22.56 9M1.42 9a15.91 15.91 0 0 1 4.7-2.88M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01" />
+                                </svg>
+                                <span>{isp.name} Down</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
                         {/* Embedded interface sparkline graph */}
                         {hist.length > 1 && (
                           <div className="h-16">
