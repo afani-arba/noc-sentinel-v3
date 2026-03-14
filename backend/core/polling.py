@@ -32,6 +32,14 @@ _VIRTUAL_IFACE_TYPES = {
 }
 _VIRTUAL_IFACE_PREFIXES = ("lo", "docker", "veth", "tun", "tap")
 
+# Interface fisik SFP/SFP+ — ROS 7.16.2 kadang report running=false
+# meski interface aktif (SFP bonded ke switch chip). Tetap monitor.
+_SFP_IFACE_TYPES = {
+    "sfp-sfpplus", "sfpplus", "sfp",
+    "10g-sfp", "10gbase-x", "qsfp", "qsfp+", "qsfp28",
+}
+_SFP_IFACE_PREFIXES = ("sfp", "sfpplus", "qsfp")
+
 
 # ── Core: Poll device via MikroTik API ───────────────────────────────────────
 
@@ -161,7 +169,21 @@ async def poll_via_api(device: dict) -> dict:
             itype    = iface.get("type", "").lower()
             running  = iface.get("running", False)
             disabled = str(iface.get("disabled", "false")).lower() == "true"
+
+            # ── Cek apakah interface SFP/SFP+ ──────────────────────────────
+            # ROS 7.16.2: SFP bonded ke switch chip dilaporkan running=false
+            # meski fisiknya aktif. Detect via type atau nama interface.
+            is_sfp = (
+                itype in _SFP_IFACE_TYPES
+                or name.lower().startswith(_SFP_IFACE_PREFIXES)
+            )
+
+            # SFP yang tidak disabled → anggap berpotensi aktif (override running flag)
+            if is_sfp and not disabled:
+                running = True
+
             status   = "down" if disabled else ("up" if running else "down")
+
             # ── Cek apakah interface virtual ────────────────────────────────
             is_virtual = (
                 itype in _VIRTUAL_IFACE_TYPES
@@ -179,6 +201,7 @@ async def poll_via_api(device: dict) -> dict:
                     "status":  status,
                     "speed":   0,
                     "virtual": is_virtual,  # flag virtual untuk filter frontend
+                    "is_sfp":  is_sfp,      # flag SFP untuk logging/debug
                 })
 
             # Hanya interface fisik/relevan yang masuk running_ifaces untuk BW monitoring
@@ -205,6 +228,22 @@ async def poll_via_api(device: dict) -> dict:
                         if isinstance(r, dict):
                             rx_bps = int(r.get("rx-bits-per-second", 0) or 0)
                             tx_bps = int(r.get("tx-bits-per-second", 0) or 0)
+                            # Jika monitor-traffic return 0 untuk SFP, coba ethernet/monitor
+                            if rx_bps == 0 and tx_bps == 0:
+                                # Check if SFP interface by name prefix
+                                if iface_name.lower().startswith(_SFP_IFACE_PREFIXES):
+                                    logger.debug(f"SFP {iface_name} monitor-traffic=0, trying ethernet/monitor")
+                                    try:
+                                        em = await mt._async_req(
+                                            "POST", "interface/ethernet/monitor",
+                                            {"numbers": iface_name, "once": ""}
+                                        )
+                                        if isinstance(em, list) and em:
+                                            em = em[0]
+                                        # ethernet/monitor hanya ada link-speed, bukan traffic
+                                        # anggap interface up tapi data=0 (tidak error)
+                                    except Exception:
+                                        pass
                             return (iface_name, {
                                 "download_bps": rx_bps,
                                 "upload_bps":   tx_bps,
