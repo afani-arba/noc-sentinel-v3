@@ -219,36 +219,25 @@ async def poll_via_api(device: dict) -> dict:
                 # ── ROS 7.x: REST API monitor-traffic ────────────────────────
                 async def get_iface_bw_rest(iface_name):
                     try:
-                        r = await mt._async_req(
-                            "POST", "interface/monitor-traffic",
-                            {"interface": iface_name, "once": ""}
+                        r = await asyncio.wait_for(
+                            mt._async_req(
+                                "POST", "interface/monitor-traffic",
+                                {"interface": iface_name, "once": True}  # True (bool) wajib di ROS 7.16+
+                            ),
+                            timeout=8.0  # per-interface timeout, cegah hanging
                         )
                         if isinstance(r, list) and r:
                             r = r[0]
                         if isinstance(r, dict):
                             rx_bps = int(r.get("rx-bits-per-second", 0) or 0)
                             tx_bps = int(r.get("tx-bits-per-second", 0) or 0)
-                            # Jika monitor-traffic return 0 untuk SFP, coba ethernet/monitor
-                            if rx_bps == 0 and tx_bps == 0:
-                                # Check if SFP interface by name prefix
-                                if iface_name.lower().startswith(_SFP_IFACE_PREFIXES):
-                                    logger.debug(f"SFP {iface_name} monitor-traffic=0, trying ethernet/monitor")
-                                    try:
-                                        em = await mt._async_req(
-                                            "POST", "interface/ethernet/monitor",
-                                            {"numbers": iface_name, "once": ""}
-                                        )
-                                        if isinstance(em, list) and em:
-                                            em = em[0]
-                                        # ethernet/monitor hanya ada link-speed, bukan traffic
-                                        # anggap interface up tapi data=0 (tidak error)
-                                    except Exception:
-                                        pass
                             return (iface_name, {
                                 "download_bps": rx_bps,
                                 "upload_bps":   tx_bps,
                                 "status":       "up",
                             })
+                    except asyncio.TimeoutError:
+                        logger.debug(f"monitor-traffic timeout (8s) untuk {iface_name}")
                     except Exception as e:
                         logger.debug(f"REST monitor-traffic gagal untuk {iface_name}: {e}")
                     return None

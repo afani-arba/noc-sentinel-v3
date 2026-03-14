@@ -497,13 +497,17 @@ class MikroTikRestAPI(MikroTikBase):
     async def get_interface_traffic(self, interface_name: str = "ether1", duration: int = 1):
         """
         Ambil traffic realtime via /rest/interface/monitor-traffic.
-        ROS 7.x: POST dengan body {"interface": "ether1", "once": ""}
+        ROS 7.x: POST dengan body {"interface": "ether1", "once": true}
+        CATATAN: ROS 7.16+ wajib pakai boolean True (bukan empty string "")
         Return: {"rx-bits-per-second": ..., "tx-bits-per-second": ...}
         """
         try:
-            result = await self._async_req(
-                "POST", "interface/monitor-traffic",
-                {"interface": interface_name, "once": ""}
+            result = await asyncio.wait_for(
+                self._async_req(
+                    "POST", "interface/monitor-traffic",
+                    {"interface": interface_name, "once": True}  # True bukan ""
+                ),
+                timeout=8.0
             )
             if isinstance(result, list):
                 return result[0] if result else {}

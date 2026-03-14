@@ -89,9 +89,15 @@ export default function UpdatePage() {
 
   const startUpdate = async () => {
     if (status === "running") return;
+
+    // Set initial state
+    const initLog = ["🚀 Memulai proses update..."];
     setStatus("running");
-    setLog(["🚀 Memulai proses update..."]);
+    setLog(initLog);
     setElapsed(0);
+
+    // Kecil delay agar React sempat render initial state sebelum blocking request
+    await new Promise(r => setTimeout(r, 200));
 
     try {
       await api.post("/system/perform-update");
@@ -100,6 +106,8 @@ export default function UpdatePage() {
       setStatus("failed");
       return;
     }
+
+    setLog(prev => [...prev, "⏳ Update berjalan di background..."]);
 
     // Catat waktu mulai di sisi frontend (independen dari server)
     const localStartTime = Date.now();
