@@ -3,14 +3,51 @@ Wallboard router: NOC Wall Display endpoints.
 Provides aggregated device status, live metrics, and event ticker
 for NOC wall display screens.
 """
+import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends
 from core.db import get_db
 from core.auth import get_current_user
+from mikrotik_api import get_api_client
 
 router = APIRouter(prefix="/wallboard", tags=["wallboard"])
 logger = logging.getLogger(__name__)
+
+
+async def _fetch_session_counts(device: dict) -> tuple[int, int]:
+    """
+    Fetch PPPoE active count + Hotspot active count langsung dari MikroTik.
+    Sama dengan cara kerja pppoe.py yang sudah terbukti bekerja.
+    Timeout 6 detik agar tidak memperlambat wallboard response.
+    Returns (pppoe_count, hotspot_count).
+    """
+    if device.get("status") != "online":
+        return (
+            device.get("pppoe_active", 0),
+            device.get("hotspot_active", 0),
+        )
+    try:
+        mt = get_api_client(device)
+
+        async def safe_count(coro) -> int:
+            try:
+                result = await asyncio.wait_for(coro, timeout=6)
+                return len(result) if isinstance(result, list) else 0
+            except Exception:
+                return 0
+
+        pppoe, hotspot = await asyncio.gather(
+            safe_count(mt.list_pppoe_active()),
+            safe_count(mt.list_hotspot_active()),
+        )
+        return pppoe, hotspot
+    except Exception:
+        # Fallback: gunakan nilai dari DB (hasil polling terakhir)
+        return (
+            device.get("pppoe_active", 0),
+            device.get("hotspot_active", 0),
+        )
 
 
 @router.get("/status")
@@ -32,6 +69,25 @@ async def wallboard_status(user=Depends(get_current_user)):
         devices = devices_all
 
     enriched = []
+
+    # ── Fetch PPPoE & Hotspot counts untuk semua device secara paralel ──────────
+    # Ini lebih cepat dari fetch satu per satu karena semua request ke MikroTik
+    # dieksekusi bersamaan. Sama dengan cara kerja halaman PPPoE user.
+    session_counts = await asyncio.gather(
+        *[_fetch_session_counts(d) for d in devices],
+        return_exceptions=True,
+    )
+    # Buat dict {device_id: (pppoe_count, hotspot_count)}
+    device_sessions: dict = {}
+    for d, counts in zip(devices, session_counts):
+        if isinstance(counts, tuple) and len(counts) == 2:
+            device_sessions[d["id"]] = counts
+        else:
+            device_sessions[d["id"]] = (
+                d.get("pppoe_active", 0),
+                d.get("hotspot_active", 0),
+            )
+
     for d in devices:
         # Get latest traffic snapshot for bandwidth
         snap = await db.traffic_snapshots.find_one({"device_id": d["id"]})
@@ -102,6 +158,7 @@ async def wallboard_status(user=Depends(get_current_user)):
         elif cpu > 75 or mem > 75 or ping > 100:
             alert_level = "warning"
 
+        pppoe_count, hotspot_count = device_sessions.get(d.get("id"), (0, 0))
         enriched.append({
             "id": d.get("id"),
             "name": d.get("name", ""),
@@ -121,9 +178,9 @@ async def wallboard_status(user=Depends(get_current_user)):
             "last_poll": d.get("last_poll", ""),
             "alert_level": alert_level,
             "isp_interfaces": d.get("isp_interfaces", []),
-            # Session counters — diambil dari DB (diupdate setiap polling cycle ~30 detik)
-            "pppoe_active":   d.get("pppoe_active",   0),
-            "hotspot_active": d.get("hotspot_active", 0),
+            # Session counters — live fetch langsung dari MikroTik (sama seperti PPPoE user page)
+            "pppoe_active":   pppoe_count,
+            "hotspot_active": hotspot_count,
         })
 
 
