@@ -1,4 +1,4 @@
-"""
+﻿"""
 Devices router: CRUD + dashboard + MikroTik API test.
 """
 import uuid
@@ -1483,7 +1483,7 @@ async def reboot_device(device_id: str, user=Depends(require_admin)):
 # â”€â”€ Winbox Remote URL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/devices/{device_id}/winbox-url")
-async def get_winbox_url(device_id: str, user=Depends(require_admin)):
+async def get_winbox_url(device_id: str, user=Depends(get_current_user)):
     """
     Kembalikan URL Winbox dengan credential yang sudah terisi otomatis.
     Format: winbox://username:password@ip_address
@@ -1509,13 +1509,14 @@ async def get_winbox_url(device_id: str, user=Depends(require_admin)):
     enc_user = urllib.parse.quote(username, safe="")
     enc_pass = urllib.parse.quote(password, safe="")
 
-    # Format Winbox URL dengan credential
-    # winbox://user:password@address  â†’ Winbox langsung pre-fill, user cukup klik Connect
-    # Kompatibel dengan Winbox desktop (Windows) DAN Winbox mobile app (Android/iOS)
+    # Format Desktop (Windows Winbox): winbox://user:password@address
+    # Format Mobile  (Winbox App Android/iOS): winbox://address/user/pass
     if password:
-        winbox_url = f"winbox://{enc_user}:{enc_pass}@{winbox_addr}"
+        winbox_url        = f"winbox://{enc_user}:{enc_pass}@{winbox_addr}"
+        winbox_mobile_url = f"winbox://{winbox_addr}/{enc_user}/{enc_pass}"
     else:
-        winbox_url = f"winbox://{enc_user}@{winbox_addr}"
+        winbox_url        = f"winbox://{enc_user}@{winbox_addr}"
+        winbox_mobile_url = f"winbox://{winbox_addr}/{enc_user}"
 
     # Catat di audit log
     await db.audit_logs.insert_one({
@@ -1527,22 +1528,25 @@ async def get_winbox_url(device_id: str, user=Depends(require_admin)):
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
 
+    has_remote = bool((device.get("winbox_address") or "").strip())
     return {
-        "url": winbox_url,
-        "address": winbox_addr,
-        "api_address": ip_api,
-        "has_remote_address": bool(device.get("winbox_address", "").strip()),
-        "username": username,
-        "device_name": device.get("name"),
-        "device_id": device_id,
+        "url":                winbox_url,
+        "mobile_url":         winbox_mobile_url,
+        "address":            winbox_addr,
+        "api_address":        ip_api,
+        "has_remote_address": has_remote,
+        "username":           username,
+        "device_name":        device.get("name"),
+        "device_id":          device_id,
     }
 
 
 @router.get("/devices/{device_id}/connection-info")
-async def get_connection_info(device_id: str, user=Depends(require_admin)):
+async def get_connection_info(device_id: str, user=Depends(get_current_user)):
     """
     Kembalikan informasi koneksi device TANPA password (aman untuk display di UI).
     Digunakan oleh modal Wall Display untuk menampilkan info koneksi.
+    Dapat diakses oleh semua user yang login.
     """
     db = get_db()
     device = await db.devices.find_one({"id": device_id}, {"_id": 0, "api_password": 0})

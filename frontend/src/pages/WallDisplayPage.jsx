@@ -71,15 +71,18 @@ function DeviceActionModal({ device, onClose }) {
     setWinboxLoading(true);
     try {
       const res = await api.get(`/devices/${device.id}/winbox-url`);
-      const { url, address, username, has_remote_address } = res.data;
-      // winbox:// URL kompatibel desktop (Windows Winbox) DAN mobile (Winbox App Android/iOS)
-      // Di mobile: browser akan prompt "Buka dengan Winbox?" jika app terinstall
-      window.location.href = url;  // pakai location.href agar intercept URI scheme di mobile
-      // Fallback toast
+      const { url, mobile_url, address, username, has_remote_address } = res.data;
+      // Di mobile, gunakan format mobile_url = winbox://address/user/pass
+      // Di desktop, gunakan format url = winbox://user:pass@address
+      const targetUrl = (isMobile && mobile_url) ? mobile_url : url;
+      window.location.href = targetUrl;  // trigger deep link / custom URI scheme
       const addrLabel = has_remote_address ? `${address} (remote)` : address;
       toast.success(`Winbox dibuka ke ${addrLabel} (user: ${username})`);
     } catch (e) {
-      const msg = e.response?.data?.detail || "Gagal membuka Winbox";
+      const status = e.response?.status;
+      const msg = status === 403
+        ? "Akses ditolak — hubungi administrator"
+        : (e.response?.data?.detail || "Gagal membuka Winbox");
       toast.error(msg);
     }
     setWinboxLoading(false);

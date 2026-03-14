@@ -37,9 +37,10 @@ async def wallboard_status(user=Depends(get_current_user)):
         snap = await db.traffic_snapshots.find_one({"device_id": d["id"]})
 
         # Get last bandwidth from traffic_history
+        # FIXBUG: tambahkan isp_bandwidth ke projection agar PRIORITAS 1 bisa terpakai
         last_bw = await db.traffic_history.find_one(
             {"device_id": d["id"]},
-            {"_id": 0, "bandwidth": 1, "ping_ms": 1, "timestamp": 1},
+            {"_id": 0, "bandwidth": 1, "isp_bandwidth": 1, "ping_ms": 1, "timestamp": 1},
             sort=[("timestamp", -1)]
         )
 

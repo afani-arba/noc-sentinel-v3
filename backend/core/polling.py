@@ -48,8 +48,11 @@ _VIRTUAL_IFACE_PREFIXES = ("lo", "docker", "veth", "tun", "tap")
 _SFP_IFACE_TYPES = {
     "sfp-sfpplus", "sfpplus", "sfp",
     "10g-sfp", "10gbase-x", "qsfp", "qsfp+", "qsfp28",
+    # CCR2004 / combo port types
+    "combo", "sfp-sfpplus-combo", "10gsfp-sfpplus",
+    "sfp28", "25g-sfp28", "40g-qsfp", "100g-qsfp28",
 }
-_SFP_IFACE_PREFIXES = ("sfp", "sfpplus", "qsfp")
+_SFP_IFACE_PREFIXES = ("sfp", "sfpplus", "qsfp", "combo")
 
 
 # ── Core: Poll device via MikroTik API ───────────────────────────────────────
@@ -260,7 +263,28 @@ async def poll_via_api(device: dict) -> dict:
                         logger.debug(f"REST monitor-traffic gagal untuk {iface_name}: {e}")
                     return None
 
-                tasks = [get_iface_bw_rest(n) for n in running_ifaces[:16]]
+                # ── Prioritas query: ISP interfaces duluan, lalu SFP, lalu sisanya ──
+                # Bug fix: CCR2004-16G-2S+ punya 16 ether + 2 SFP+ = 18 interfaces.
+                # Limit lama (:16) memotong persis sebelum SFP port → bandwidth SFP = 0.
+                isp_set = set(isp_detected)  # interface dengan comment ISP/WAN/INPUT
+                sfp_set = {n for n in running_ifaces
+                           if n.lower().startswith(_SFP_IFACE_PREFIXES)}
+
+                # Sort: ISP > SFP > lainnya (ISP dan SFP SELALU masuk, sisanya dibatasi)
+                isp_ifaces  = [n for n in running_ifaces if n in isp_set]
+                sfp_ifaces  = [n for n in running_ifaces if n in sfp_set and n not in isp_set]
+                rest_ifaces = [n for n in running_ifaces if n not in isp_set and n not in sfp_set]
+                # Limit max 64 total; ISP+SFP selalu dijamin, sisanya diisi dari sisa kuota
+                max_rest = max(0, 64 - len(isp_ifaces) - len(sfp_ifaces))
+                priority_ifaces = isp_ifaces + sfp_ifaces + rest_ifaces[:max_rest]
+
+                logger.info(
+                    f"BW poll priority [{device.get('name','?')}]: "
+                    f"isp={len(isp_ifaces)} sfp={len(sfp_ifaces)} other={len(rest_ifaces[:max_rest])} "
+                    f"total={len(priority_ifaces)}"
+                )
+
+                tasks = [get_iface_bw_rest(n) for n in priority_ifaces]
                 bw_results = await asyncio.gather(*tasks, return_exceptions=True)
                 for r in bw_results:
                     if r and not isinstance(r, Exception):
