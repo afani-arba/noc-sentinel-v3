@@ -410,9 +410,66 @@ async def dashboard_stats(device_id: str = "", interface: str = "", user=Depends
         alerts.append({"id": "ok", "type": "success", "message": "All systems normal", "time": datetime.now(timezone.utc).strftime("%H:%M")})
 
     last = traffic_data[-1] if traffic_data else {"download": 0, "upload": 0}
+
+    # ── Total bandwidth: sum live dari semua device online ─────────────────────
+    # FIX: sebelumnya hanya mengambil last row dari traffic_history (1 device saja).
+    # Sekarang: hitung jumlah aktual dari semua device online, sama seperti wallboard.py
+    VIRTUAL_PREFIXES = (
+        "bridge", "vlan", "lo", "loopback", "ovpn", "pppoe-", "pptp",
+        "l2tp", "eoip", "gre", "wireguard", "wg", "veth", "docker",
+        "ip6tnl", "sit", "tun", "tap", "dummy",
+    )
+
+    if not device_id:
+        # Ambil snapshot traffic terbaru per device secara paralel
+        total_dl_bps = 0
+        total_ul_bps = 0
+        for d in all_devs:
+            if d.get("status") != "online":
+                continue
+            last_bw_doc = await db.traffic_history.find_one(
+                {"device_id": d["id"]},
+                {"_id": 0, "bandwidth": 1, "isp_bandwidth": 1},
+                sort=[("timestamp", -1)]
+            )
+            if not last_bw_doc:
+                continue
+            bw      = last_bw_doc.get("bandwidth")      or {}
+            isp_bw  = last_bw_doc.get("isp_bandwidth")  or {}
+            isp_ifaces = d.get("isp_interfaces") or []
+
+            if isp_bw:
+                # Prioritas 1: isp_bandwidth (dari comment ISP/WAN di MikroTik)
+                for iface_bw in isp_bw.values():
+                    if isinstance(iface_bw, dict):
+                        total_dl_bps += iface_bw.get("download_bps", 0)
+                        total_ul_bps += iface_bw.get("upload_bps",   0)
+            elif bw and isp_ifaces:
+                # Prioritas 2: filter hanya interface ISP yang sudah dikonfigurasi
+                for iface_name in isp_ifaces:
+                    iface_bw = bw.get(iface_name, {})
+                    if isinstance(iface_bw, dict):
+                        total_dl_bps += iface_bw.get("download_bps", 0)
+                        total_ul_bps += iface_bw.get("upload_bps",   0)
+            elif bw:
+                # Prioritas 3: sum semua interface fisik (hindari virtual)
+                for iface_name, iface_bw in bw.items():
+                    n = iface_name.lower()
+                    if isinstance(iface_bw, dict) and not any(n.startswith(p) for p in VIRTUAL_PREFIXES):
+                        total_dl_bps += iface_bw.get("download_bps", 0)
+                        total_ul_bps += iface_bw.get("upload_bps",   0)
+
+        live_bw = {
+            "download": round(total_dl_bps / 1_000_000, 2),
+            "upload":   round(total_ul_bps / 1_000_000, 2),
+        }
+    else:
+        # Untuk satu device: gunakan last point dari traffic_data (sudah SUM semua interface)
+        live_bw = {"download": last["download"], "upload": last["upload"]}
+
     return {
         "devices": {"total": len(all_devs), "online": online},
-        "total_bandwidth": {"download": last["download"], "upload": last["upload"]},
+        "total_bandwidth": live_bw,
         "traffic_data": traffic_data, "alerts": alerts,
         "system_health": sys_h, "interfaces": ifaces,
         "selected_device": {
@@ -423,6 +480,7 @@ async def dashboard_stats(device_id: str = "", interface: str = "", user=Depends
             "status": device.get("status", ""), "ip_address": device.get("ip_address", "")
         } if device else None,
     }
+
 
 
 @router.get("/dashboard/interfaces")
