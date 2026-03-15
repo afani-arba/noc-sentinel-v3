@@ -147,6 +147,8 @@ printf 'User=root\n' >> "$SVC_FILE"
 printf 'Group=root\n' >> "$SVC_FILE"
 printf 'WorkingDirectory=%s/backend\n' "$APP_DIR" >> "$SVC_FILE"
 printf 'EnvironmentFile=%s/backend/.env\n' "$APP_DIR" >> "$SVC_FILE"
+# ExecStartPre: paksa bebaskan port 8000 sebelum start (cegah address-already-in-use)
+printf 'ExecStartPre=/bin/bash -c "fuser -k 8000/tcp 2>/dev/null; lsof -ti:8000 | xargs -r kill -9 2>/dev/null; sleep 1; exit 0"\n' >> "$SVC_FILE"
 printf 'ExecStart=%s server:app --host 127.0.0.1 --port 8000 --workers 1 --loop asyncio --log-level info\n' "$VENV_BIN" >> "$SVC_FILE"
 printf 'ExecReload=/bin/kill -s HUP $MAINPID\n' >> "$SVC_FILE"
 printf 'Restart=on-failure\n' >> "$SVC_FILE"
@@ -169,24 +171,30 @@ sed -i 's/\r//' /usr/local/bin/noc-update 2>/dev/null || true
 chmod +x /usr/local/bin/noc-update 2>/dev/null || true
 ok "Systemd service diperbarui"
 
-# ── 5. Restart service ────────────────────────────────────────────────────────
+# ── 5. Restart service ─────────────────────────────────────────────────
 step "5/6 Restart backend service"
 
-# Stop dulu secara paksa agar port 8000 bebas sebelum start lagi
+# Stop dulu secara paksa
 systemctl stop "$SERVICE" 2>/dev/null || true
-sleep 2
 
-# Pastikan port 8000 benar-benar bebas (cegah "address already in use")
+# Tunggu sampai benar-benar stopped (max 30 detik)
+WAIT=0
+while systemctl is-active --quiet "$SERVICE" 2>/dev/null && [[ $WAIT -lt 30 ]]; do
+    sleep 1
+    WAIT=$((WAIT+1))
+done
+
+# Paksa bebaskan port 8000 (juga handled oleh ExecStartPre di service file)
 if command -v fuser &>/dev/null; then
     fuser -k 8000/tcp 2>/dev/null || true
 elif command -v lsof &>/dev/null; then
     lsof -ti:8000 | xargs -r kill -9 2>/dev/null || true
 fi
-sleep 1
+sleep 2
 
 systemctl daemon-reload
 systemctl start "$SERVICE"
-sleep 5
+sleep 6
 
 if systemctl is-active --quiet "$SERVICE"; then
     ok "Backend '$SERVICE': RUNNING ✓"
