@@ -3,11 +3,9 @@
 # ║   NOC Sentinel v3 — One-Command Update Script                           ║
 # ║                                                                          ║
 # ║   INSTALL (sekali saja di server):                                       ║
-# ║     sudo cp /opt/noc-sentinel-v3/noc-update /usr/local/bin/noc-update   ║
-# ║     sudo chmod +x /usr/local/bin/noc-update                             ║
+# ║     sudo bash /opt/noc-sentinel-v3/install-update.sh                    ║
 # ║                                                                          ║
-# ║   CARA PAKAI (setelah install):                                          ║
-# ║     sudo noc-update                                                      ║
+# ║   CARA PAKAI:  sudo noc-update                                          ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 set -e
 
@@ -33,8 +31,48 @@ echo -e "  Waktu : $(date '+%Y-%m-%d %H:%M:%S')"
 echo -e "  Versi : $(git -C $APP_DIR rev-parse --short HEAD 2>/dev/null || echo '?')"
 echo ""
 
-# ── 1. Git Pull ──────────────────────────────────────────────────────────────
-step "[1/4] Git Pull dari GitHub..."
+# ══════════════════════════════════════════════════════════════════════════════
+# STEP 1 — STOP SERVICE DULU (sebelum pull/build)
+# Ini kritis: memastikan port 8000 benar-benar bebas SEBELUM kita mulai build
+# ══════════════════════════════════════════════════════════════════════════════
+step "[1/5] Stop Backend (bebaskan port 8000)..."
+
+systemctl stop "$SERVICE" 2>/dev/null || true
+
+# Tunggu service inactive (max 20 detik)
+i=0
+while systemctl is-active --quiet "$SERVICE" 2>/dev/null && [[ $i -lt 20 ]]; do
+    sleep 1; i=$((i+1))
+done
+
+# Bunuh paksa semua proses yang masih memegang port 8000
+set +e
+PIDS=$(lsof -ti:8000 2>/dev/null)
+if [[ -n "$PIDS" ]]; then
+    echo "  Membunuh proses di port 8000: $PIDS"
+    kill -9 $PIDS 2>/dev/null
+fi
+fuser -k 8000/tcp 2>/dev/null
+set -e
+
+# Tunggu port benar-benar bebas (max 15 detik)
+echo -n "  Menunggu port 8000 bebas"
+p=0
+while lsof -ti:8000 &>/dev/null && [[ $p -lt 15 ]]; do
+    echo -n "."; sleep 1; p=$((p+1))
+done
+echo ""
+
+if lsof -ti:8000 &>/dev/null; then
+    warn "Port 8000 masih busy! Force kill terakhir..."
+    fuser -k -KILL 8000/tcp 2>/dev/null || true
+    sleep 2
+fi
+
+ok "Backend stopped — port 8000 bebas"
+
+# ── 2. Git Pull ──────────────────────────────────────────────────────────────
+step "[2/5] Git Pull dari GitHub..."
 cd "$APP_DIR"
 BEFORE=$(git rev-parse --short HEAD)
 git pull origin main 2>/dev/null || git pull origin master 2>/dev/null || warn "Git pull gagal — melanjutkan dengan kode lokal"
@@ -47,18 +85,16 @@ else
     echo -e "  Perubahan: $(git log -1 --format='%s')"
 fi
 
-# ── 2. Python deps ───────────────────────────────────────────────────────────
-step "[2/4] Update Python packages..."
+# ── 3. Python deps ───────────────────────────────────────────────────────────
+step "[3/5] Update Python packages..."
 "$VENV/bin/pip" install --upgrade pip -q
 "$VENV/bin/pip" install -r "$APP_DIR/backend/requirements.txt" -q
 
-# Force install pysnmp-lextudio (SNMP monitoring dependency)
-# Uninstall pysnmp lama jika ada, lalu install pysnmp-lextudio
+# Force install pysnmp-lextudio jika belum ada
 if "$VENV/bin/python" -c "import pysnmp" 2>/dev/null; then
     ok "pysnmp tersedia di venv"
 else
     warn "pysnmp belum ada — force install pysnmp-lextudio..."
-    # Hapus pysnmp lama jika ada (konflik dengan lextudio)
     "$VENV/bin/pip" uninstall pysnmp -y -q 2>/dev/null || true
     "$VENV/bin/pip" install 'pysnmp-lextudio>=1.1.0' --upgrade -q \
         && ok "pysnmp-lextudio terinstall" \
@@ -66,47 +102,24 @@ else
 fi
 ok "Python packages OK"
 
-# ── 3. Build Frontend ────────────────────────────────────────────────────────
-step "[3/4] Build Frontend..."
+# ── 4. Build Frontend ────────────────────────────────────────────────────────
+step "[4/5] Build Frontend..."
 cd "$APP_DIR/frontend"
 npm install --legacy-peer-deps --prefer-offline -q 2>/dev/null || npm install --legacy-peer-deps -q
 npm run build
 [[ -f "build/index.html" ]] && ok "Frontend build OK → build/" || err "Build frontend gagal"
 
-# ── 4. Restart Backend ───────────────────────────────────────────────────────
-step "[4/4] Restart Backend..."
+# ── 5. Start Backend ─────────────────────────────────────────────────────────
+step "[5/5] Start Backend..."
 
-# Stop service dulu
-systemctl stop "$SERVICE" 2>/dev/null || true
-
-# Tunggu service benar-benar inactive (max 20 detik)
-i=0
-while systemctl is-active --quiet "$SERVICE" 2>/dev/null && [[ $i -lt 20 ]]; do
-    sleep 1; i=$((i+1))
-done
-
-# Matikan semua proses yang masih memegang port 8000 secara paksa
-set +e   # jangan abort jika kill tidak ada target
-PIDS=$(lsof -ti:8000 2>/dev/null)
-if [[ -n "$PIDS" ]]; then
-    echo "  Membunuh proses di port 8000: $PIDS"
-    kill -9 $PIDS 2>/dev/null
-fi
-fuser -k 8000/tcp 2>/dev/null
-set -e
-
-# Pastikan port benar-benar bebas sebelum start (max 15 detik)
-echo -n "  Menunggu port 8000 bebas"
-p=0
-while lsof -ti:8000 &>/dev/null && [[ $p -lt 15 ]]; do
-    echo -n "."; sleep 1; p=$((p+1))
-done
-echo ""
-
-if lsof -ti:8000 &>/dev/null; then
-    warn "Port 8000 masih busy! Coba force kill terakhir..."
-    fuser -k -KILL 8000/tcp 2>/dev/null || true
-    sleep 2
+# Pastikan SYSLOG_PORT di .env pakai port non-privileged (5140)
+ENV_FILE="$APP_DIR/backend/.env"
+if [[ -f "$ENV_FILE" ]]; then
+    # Jika .env masih set SYSLOG_PORT=514, otomatis ganti ke 5140
+    if grep -q "^SYSLOG_PORT=514$" "$ENV_FILE" 2>/dev/null; then
+        sed -i 's/^SYSLOG_PORT=514$/SYSLOG_PORT=5140/' "$ENV_FILE"
+        ok ".env: SYSLOG_PORT diperbaiki 514 → 5140 (non-privileged)"
+    fi
 fi
 
 systemctl daemon-reload

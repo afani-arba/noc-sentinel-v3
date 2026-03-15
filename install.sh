@@ -59,8 +59,8 @@ read -rp  "  IP atau domain server   [contoh: 192.168.1.10 / monitoring.arba.co.
 read -rsp "  Password MongoDB user '$MONGO_USER': " MONGO_PASS; echo
 read -rsp "  Password admin pertama NOC Sentinel: " ADMIN_PASS; echo
 read -rsp "  JWT Secret (Enter = auto-generate 64-char random): " JWT_SECRET; echo
-read -rp  "  Port Syslog UDP [default: 514, tekan Enter]: " SYSLOG_PORT
-SYSLOG_PORT=${SYSLOG_PORT:-514}
+read -rp  "  Port Syslog UDP [default: 5140, tekan Enter]: " SYSLOG_PORT
+SYSLOG_PORT=${SYSLOG_PORT:-5140}
 
 # Validasi input
 [[ -z "$SERVER_HOST" ]] && print_error "IP/Domain server tidak boleh kosong"
