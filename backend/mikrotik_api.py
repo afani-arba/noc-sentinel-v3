@@ -1,8 +1,13 @@
 """
-Unified MikroTik API client supporting both:
-  - RouterOS 6.x: MikroTik API protocol (port 8728/8729)
-  - RouterOS 7.x: REST API (port 443/80)
-Both implementations share the same interface.
+Unified MikroTik API client — Hybrid Monitoring.
+=================================================
+Dua implementasi dengan interface yang identik:
+  - MikroTikRestAPI     : RouterOS 7.x — REST API (port 443/80)
+  - MikroTikLegacyAPI   : RouterOS 6.x — API Protocol (port 8728/8729)
+
+Factory:
+  get_api_client(device) → pilih class berdasarkan device['api_mode']
+  discover_device(device) → auto-detect mode dan simpan ke DB
 """
 import ssl
 import requests
@@ -709,9 +714,11 @@ class MikroTikRestAPI(MikroTikBase):
 
 
 # ═══════════════════════════════════════════════════════════
-# RouterOS 6.x+ MikroTik API Protocol (port 8728/8729)
+# RouterOS 6.x — MikroTik API Protocol (port 8728/8729)
+# Nama class: MikroTikLegacyAPI
+# Alias backward-compat: MikroTikRouterAPI
 # ═══════════════════════════════════════════════════════════
-class MikroTikRouterAPI(MikroTikBase):
+class MikroTikLegacyAPI(MikroTikBase):
     def __init__(self, host, username, password, port=8728, use_ssl=False, plaintext_login=True):
         self.host = host
         self.username = username
@@ -1174,6 +1181,10 @@ class MikroTikRouterAPI(MikroTikBase):
             return []
 
 
+# Backward compatibility alias
+MikroTikRouterAPI = MikroTikLegacyAPI
+
+
 # ═══════════════════════════════════════════════════════════
 # Helper — extract hanya host dari ip_address (tanpa port)
 # Digunakan untuk SNMP dan ICMP ping yang memerlukan plain IP
@@ -1341,11 +1352,10 @@ def get_api_client(device: dict) -> MikroTikBase:
     parsed_host, port_from_ip = parse_host_port(raw_ip)
 
     if mode == "api":
-        # RouterOS 6+ API protocol (port default 8728)
-        # Jika ip_address mengandung port → pakai itu, else pakai api_port
+        # RouterOS 6.x — API Protocol (MikroTikLegacyAPI)
         port = port_from_ip if port_from_ip is not None else (device.get("api_port") or 8728)
-        logger.info(f"Creating RouterOS API client: host={parsed_host}, port={port}")
-        return MikroTikRouterAPI(
+        logger.info(f"Creating MikroTikLegacyAPI client: host={parsed_host}, port={port}")
+        return MikroTikLegacyAPI(
             host=parsed_host,
             username=device.get("api_username", "admin"),
             password=device.get("api_password", ""),
@@ -1354,12 +1364,11 @@ def get_api_client(device: dict) -> MikroTikBase:
             plaintext_login=device.get("api_plaintext_login", True),
         )
     else:
-        # RouterOS 7+ REST API (port default 80 HTTP / 443 HTTPS)
+        # RouterOS 7.x — REST API (MikroTikRestAPI)
         use_https = device.get("use_https", False)
         default_port = 443 if use_https else 80
-        # Jika ip_address mengandung port → pakai itu, else pakai api_port
         port = port_from_ip if port_from_ip is not None else (device.get("api_port") or default_port)
-        logger.info(f"Creating REST API client: host={parsed_host}, port={port}, https={use_https}")
+        logger.info(f"Creating MikroTikRestAPI client: host={parsed_host}, port={port}, https={use_https}")
         return MikroTikRestAPI(
             host=parsed_host,
             username=device.get("api_username", "admin"),
