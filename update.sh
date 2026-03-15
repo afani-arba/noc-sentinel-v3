@@ -131,12 +131,34 @@ VENV_BIN="$VENV/bin/uvicorn"
 [[ ! -f "$VENV_BIN" ]] && VENV_BIN="$(which uvicorn 2>/dev/null || echo uvicorn)"
 
 # Tulis service file via printf — aman dari CRLF (tidak pakai heredoc)
+# StartLimitIntervalSec & StartLimitBurst masuk [Unit] — bukan [Service] (systemd ≥230)
 SVC_FILE="/etc/systemd/system/${SERVICE}.service"
-printf '[Unit]\nDescription=NOC Sentinel v3 Backend (FastAPI/Uvicorn)\nDocumentation=https://github.com/afani-arba/noc-sentinel-v3\nAfter=network.target mongod.service\nWants=mongod.service\n\n' > "$SVC_FILE"
-printf '[Service]\nType=simple\nUser=root\nGroup=root\nWorkingDirectory=%s/backend\nEnvironmentFile=%s/backend/.env\n' "$APP_DIR" "$APP_DIR" >> "$SVC_FILE"
+printf '[Unit]\n' > "$SVC_FILE"
+printf 'Description=NOC Sentinel v3 Backend (FastAPI/Uvicorn)\n' >> "$SVC_FILE"
+printf 'Documentation=https://github.com/afani-arba/noc-sentinel-v3\n' >> "$SVC_FILE"
+printf 'After=network.target mongod.service\n' >> "$SVC_FILE"
+printf 'Wants=mongod.service\n' >> "$SVC_FILE"
+printf 'StartLimitIntervalSec=120\n' >> "$SVC_FILE"
+printf 'StartLimitBurst=5\n' >> "$SVC_FILE"
+printf '\n' >> "$SVC_FILE"
+printf '[Service]\n' >> "$SVC_FILE"
+printf 'Type=simple\n' >> "$SVC_FILE"
+printf 'User=root\n' >> "$SVC_FILE"
+printf 'Group=root\n' >> "$SVC_FILE"
+printf 'WorkingDirectory=%s/backend\n' "$APP_DIR" >> "$SVC_FILE"
+printf 'EnvironmentFile=%s/backend/.env\n' "$APP_DIR" >> "$SVC_FILE"
 printf 'ExecStart=%s server:app --host 127.0.0.1 --port 8000 --workers 1 --loop asyncio --log-level info\n' "$VENV_BIN" >> "$SVC_FILE"
-printf 'ExecReload=/bin/kill -s HUP $MAINPID\nRestart=always\nRestartSec=5\nStartLimitIntervalSec=120\nStartLimitBurst=5\nStandardOutput=journal\nStandardError=journal\nSyslogIdentifier=%s\nKillMode=mixed\nTimeoutStopSec=30\n\n' "$SERVICE" >> "$SVC_FILE"
-printf '[Install]\nWantedBy=multi-user.target\n' >> "$SVC_FILE"
+printf 'ExecReload=/bin/kill -s HUP $MAINPID\n' >> "$SVC_FILE"
+printf 'Restart=on-failure\n' >> "$SVC_FILE"
+printf 'RestartSec=5\n' >> "$SVC_FILE"
+printf 'StandardOutput=journal\n' >> "$SVC_FILE"
+printf 'StandardError=journal\n' >> "$SVC_FILE"
+printf 'SyslogIdentifier=%s\n' "$SERVICE" >> "$SVC_FILE"
+printf 'KillMode=mixed\n' >> "$SVC_FILE"
+printf 'TimeoutStopSec=30\n' >> "$SVC_FILE"
+printf '\n' >> "$SVC_FILE"
+printf '[Install]\n' >> "$SVC_FILE"
+printf 'WantedBy=multi-user.target\n' >> "$SVC_FILE"
 
 systemctl daemon-reload
 systemctl enable "$SERVICE" --quiet
@@ -149,8 +171,22 @@ ok "Systemd service diperbarui"
 
 # ── 5. Restart service ────────────────────────────────────────────────────────
 step "5/6 Restart backend service"
-systemctl restart "$SERVICE"
-sleep 4
+
+# Stop dulu secara paksa agar port 8000 bebas sebelum start lagi
+systemctl stop "$SERVICE" 2>/dev/null || true
+sleep 2
+
+# Pastikan port 8000 benar-benar bebas (cegah "address already in use")
+if command -v fuser &>/dev/null; then
+    fuser -k 8000/tcp 2>/dev/null || true
+elif command -v lsof &>/dev/null; then
+    lsof -ti:8000 | xargs -r kill -9 2>/dev/null || true
+fi
+sleep 1
+
+systemctl daemon-reload
+systemctl start "$SERVICE"
+sleep 5
 
 if systemctl is-active --quiet "$SERVICE"; then
     ok "Backend '$SERVICE': RUNNING ✓"
