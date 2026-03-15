@@ -19,8 +19,12 @@ APP_DIR = str(Path(__file__).parent.parent.parent)
 BACKEND_DIR = str(Path(__file__).parent.parent)
 FRONTEND_DIR = str(Path(__file__).parent.parent.parent / "frontend")
 
-# Candidate paths
-VENV_PIP  = str(Path(BACKEND_DIR) / "venv" / "bin" / "pip")
+# Candidate paths — support both venv/ and .venv/
+BACKEND_DIR_PATH = Path(BACKEND_DIR)
+_venv_candidates = [BACKEND_DIR_PATH / "venv" / "bin" / "pip", BACKEND_DIR_PATH / ".venv" / "bin" / "pip"]
+VENV_PIP = str(next((p for p in _venv_candidates if p.exists()), _venv_candidates[0]))
+_uvicorn_candidates = [BACKEND_DIR_PATH / "venv" / "bin" / "uvicorn", BACKEND_DIR_PATH / ".venv" / "bin" / "uvicorn"]
+VENV_UVICORN = str(next((u for u in _uvicorn_candidates if u.exists()), _uvicorn_candidates[0]))
 UPDATE_SH = str(Path(APP_DIR) / "update.sh")
 # Baca dari env agar bisa dikonfigurasi tanpa edit kode
 SERVICE_NAME = os.environ.get("NOC_SERVICE_NAME", "noc-backend")
@@ -217,12 +221,15 @@ async def perform_update(user=Depends(require_admin)):
             _append("✅ Backend deps OK" if pip.returncode == 0 else f"⚠️ pip: {pip.stderr[:200]}")
 
             _append("[3/4] Install + build frontend...")
-            yarn_path = subprocess.run(["which", "yarn"], capture_output=True, text=True).stdout.strip() or "yarn"
-            subprocess.run([yarn_path, "install", "--silent"], capture_output=True, cwd=FRONTEND_DIR, timeout=180)
+            npm_path = subprocess.run(["which", "npm"], capture_output=True, text=True).stdout.strip() or "npm"
+            subprocess.run(
+                [npm_path, "install", "--legacy-peer-deps", "--prefer-offline"],
+                capture_output=True, cwd=FRONTEND_DIR, timeout=240
+            )
 
             build_env = {**dict(os.environ), "CI": "false", "DISABLE_ESLINT_PLUGIN": "true"}
             build_proc = subprocess.Popen(
-                [yarn_path, "build"],
+                [npm_path, "run", "build"],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, cwd=FRONTEND_DIR, env=build_env
             )
