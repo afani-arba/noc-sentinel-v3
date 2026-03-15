@@ -89,13 +89,14 @@ fi
 
 "$VENV/bin/pip" install --upgrade pip -q
 "$VENV/bin/pip" install -r "$APP_DIR/backend/requirements.txt" -q
-ok "Python packages updated"
 
-# Cek pysnmp (Hybrid Monitoring dependency)
-if "$VENV/bin/python" -c "import pysnmp" 2>/dev/null; then
-    ok "pysnmp tersedia — SNMP Hybrid Monitoring aktif"
+# Pastikan pysnmp-lextudio terinstall (fork aktif pysnmp, kompatibel Python 3.12+)
+# Dicoba eksplisit karena kadang requirements.txt skip jika ada konflik versi
+if ! "$VENV/bin/python" -c "import pysnmp" 2>/dev/null; then
+    warn "pysnmp belum ada — install pysnmp-lextudio..."
+    "$VENV/bin/pip" install 'pysnmp-lextudio>=1.1.0' -q && ok "pysnmp-lextudio terinstall" || warn "Install pysnmp gagal (SNMP nonaktif)"
 else
-    warn "pysnmp belum terinstall — install manual: pip install 'pysnmp>=6.1.0'"
+    ok "pysnmp tersedia — SNMP Hybrid Monitoring aktif"
 fi
 
 # ── 3. Build frontend ─────────────────────────────────────────────────────────
