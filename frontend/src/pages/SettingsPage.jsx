@@ -295,12 +295,30 @@ export default function SettingsPage() {
   const [appInfo, setAppInfo] = useState(null);
   const [serviceName, setServiceName] = useState("noc-backend");
   const [savingSvc, setSavingSvc] = useState(false);
+  // Auto-check: cek update otomatis saat halaman dibuka
+  const [autoChecked, setAutoChecked] = useState(false);
 
   useEffect(() => {
+    // Load app info
     api.get("/system/app-info").then(r => {
       setAppInfo(r.data);
       if (r.data.service_name) setServiceName(r.data.service_name);
     }).catch(() => { });
+
+    // AUTO-CHECK UPDATE: cek update otomatis saat halaman pertama dibuka
+    if (!autoChecked) {
+      setAutoChecked(true);
+      setChecking(true);
+      api.get("/system/check-update")
+        .then(r => {
+          setUpdateInfo(r.data);
+          if (r.data.has_update) {
+            toast.info(`🔔 Update tersedia! (${r.data.commits_behind || 1} commit baru)`, { duration: 6000 });
+          }
+        })
+        .catch(() => { })
+        .finally(() => setChecking(false));
+    }
   }, []);
 
   const saveServiceName = async () => {
@@ -322,41 +340,65 @@ export default function SettingsPage() {
     setChecking(false);
   };
 
+  // startPollingUpdate: polling status update job di background
+  const startPollingUpdate = () => {
+    const poll = setInterval(async () => {
+      try {
+        const s = await api.get("/system/update-status");
+        setUpdateLog([...s.data.log]);
+        if (s.data.done) {
+          clearInterval(poll);
+          setUpdating(false);
+          if (s.data.success) {
+            toast.success("✅ Update berhasil! Silakan reload halaman.");
+            setUpdateInfo(null);
+            setUpdateDone(true);
+          } else {
+            toast.error("Update gagal: " + (s.data.error || "lihat log"));
+          }
+        }
+      } catch { /* network hiccup — lanjut poll */ }
+    }, 2000);
+    // Safety: stop polling setelah 15 menit
+    setTimeout(() => clearInterval(poll), 15 * 60 * 1000);
+  };
+
   const performUpdate = async () => {
     if (!updateInfo?.has_update) { toast.error("Tidak ada update"); return; }
     setUpdating(true); setUpdateDone(false); setUpdateLog(["🚀 Memulai update di background..."]);
-
     try {
-      // Mulai background job — langsung return tanpa tunggu selesai
       await api.post("/system/perform-update");
-
-      // Polling setiap 2 detik
-      const poll = setInterval(async () => {
-        try {
-          const s = await api.get("/system/update-status");
-          setUpdateLog([...s.data.log]);
-
-          if (s.data.done) {
-            clearInterval(poll);
-            setUpdating(false);
-            if (s.data.success) {
-              toast.success("✅ Update berhasil! Silakan reload halaman.");
-              setUpdateInfo(null);
-              setUpdateDone(true);
-            } else {
-              toast.error("Update gagal: " + (s.data.error || "lihat log"));
-            }
-          }
-        } catch {
-          // network hiccup — lanjut poll
-        }
-      }, 2000);
-
-      // Safety: berhenti polling setelah 15 menit
-      setTimeout(() => clearInterval(poll), 15 * 60 * 1000);
-
+      startPollingUpdate();
     } catch (e) {
       toast.error(e.response?.data?.detail || "Gagal memulai update");
+      setUpdateLog(prev => [...prev, `❌ Error: ${e.response?.data?.detail || e.message}`]);
+      setUpdating(false);
+    }
+  };
+
+  // AUTO-UPDATE: cek update lalu langsung jalankan jika ada — semua otomatis
+  const performAutoUpdate = async () => {
+    setUpdating(true); setUpdateDone(false); setUpdateLog(["🔍 Mengecek update dari GitHub..."]);
+    try {
+      // 1. Cek update
+      const r = await api.get("/system/check-update");
+      setUpdateInfo(r.data);
+      if (!r.data.has_update) {
+        toast.success("Aplikasi sudah versi terbaru — tidak ada update.");
+        setUpdateLog(["✅ Tidak ada update tersedia."]);
+        setUpdating(false);
+        return;
+      }
+      setUpdateLog(prev => [...prev,
+        `📦 Update ditemukan: ${r.data.commits_behind || 1} commit baru`,
+        `   Commit: ${r.data.latest_commit?.slice(0, 7)} — ${r.data.latest_message}`,
+        "🚀 Memulai proses update otomatis..."
+      ]);
+      // 2. Jalankan update
+      await api.post("/system/perform-update");
+      startPollingUpdate();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Gagal auto-update");
       setUpdateLog(prev => [...prev, `❌ Error: ${e.response?.data?.detail || e.message}`]);
       setUpdating(false);
     }
@@ -375,9 +417,22 @@ export default function SettingsPage() {
           <div className="w-10 h-10 rounded-sm bg-primary/10 flex items-center justify-center">
             <Github className="w-5 h-5 text-primary" />
           </div>
-          <div>
-            <h2 className="text-base sm:text-lg font-semibold font-['Rajdhani']">Update Aplikasi</h2>
-            <p className="text-[10px] sm:text-xs text-muted-foreground">Pull update dari GitHub dan rebuild otomatis</p>
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <h2 className="text-base sm:text-lg font-semibold font-['Rajdhani']">Update Aplikasi</h2>
+              {/* Badge notifikasi update tersedia */}
+              {updateInfo?.has_update && !updating && !updateDone && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-yellow-500/20 border border-yellow-500/40 text-yellow-400 animate-pulse">
+                  🔔 Update Tersedia
+                </span>
+              )}
+              {checking && !updating && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] text-muted-foreground">
+                  <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Mengecek...
+                </span>
+              )}
+            </div>
+            <p className="text-[10px] sm:text-xs text-muted-foreground">Auto-check saat halaman dibuka · Pull dari GitHub dan rebuild otomatis</p>
           </div>
         </div>
 
@@ -474,16 +529,34 @@ export default function SettingsPage() {
 
           {/* Action buttons */}
           <div className="flex flex-wrap gap-2 pt-2">
-            <Button variant="outline" size="sm" onClick={checkUpdate} disabled={checking || updating}
-              className="rounded-sm gap-2 flex-1 sm:flex-none" data-testid="check-update-btn">
-              <RefreshCw className={`w-4 h-4 ${checking ? 'animate-spin' : ''}`} />
-              {checking ? "Mengecek..." : "Cek Update"}
-            </Button>
-            <Button size="sm" onClick={performUpdate} disabled={updating || !updateInfo?.has_update}
-              className="rounded-sm gap-2 flex-1 sm:flex-none" data-testid="perform-update-btn">
+            {/* Tombol utama: UPDATE OTOMATIS (cek + update dalam 1 klik) */}
+            <Button
+              size="sm"
+              onClick={performAutoUpdate}
+              disabled={updating || checking}
+              className="rounded-sm gap-2 flex-1 sm:flex-none bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white font-semibold"
+              data-testid="auto-update-btn"
+            >
               <Download className={`w-4 h-4 ${updating ? 'animate-bounce' : ''}`} />
-              {updating ? "Mengupdate..." : "Update Sekarang"}
+              {updating ? "Mengupdate..." : "🚀 Update Otomatis"}
             </Button>
+
+            {/* Tombol manual: hanya cek */}
+            <Button variant="outline" size="sm" onClick={checkUpdate} disabled={checking || updating}
+              className="rounded-sm gap-2" data-testid="check-update-btn">
+              <RefreshCw className={`w-3.5 h-3.5 ${checking ? 'animate-spin' : ''}`} />
+              {checking ? "Mengecek..." : "Cek Saja"}
+            </Button>
+
+            {/* Tombol apply jika sudah cek manual dan ada update */}
+            {updateInfo?.has_update && !updating && (
+              <Button size="sm" onClick={performUpdate} disabled={updating}
+                className="rounded-sm gap-2 bg-yellow-600 hover:bg-yellow-500 text-white" data-testid="perform-update-btn">
+                <Download className="w-3.5 h-3.5" />
+                Apply Update
+              </Button>
+            )}
+
             {updateDone && (
               <Button size="sm" variant="default" onClick={() => window.location.reload()}
                 className="rounded-sm gap-2 flex-1 sm:flex-none bg-green-600 hover:bg-green-700" data-testid="reload-btn">
@@ -492,9 +565,10 @@ export default function SettingsPage() {
             )}
           </div>
 
-          <div className="p-3 bg-secondary/20 rounded-sm border border-dashed border-border">
+          <div className="p-3 bg-blue-500/5 rounded-sm border border-blue-500/20">
             <p className="text-[10px] text-muted-foreground">
-              <strong>Cara kerja:</strong> Push kode ke GitHub dari PC → Klik "Cek Update" di sini → Klik "Update Sekarang" → Tunggu log selesai → Reload halaman.
+              <strong className="text-blue-400">⚡ Update Otomatis:</strong> Klik satu tombol → otomatis cek GitHub → download update → rebuild frontend → restart backend → selesai!
+              <br/><span className="text-muted-foreground/60">Auto-check juga berjalan setiap kali halaman ini dibuka.</span>
             </p>
           </div>
         </div>
