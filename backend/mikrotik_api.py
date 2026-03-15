@@ -1185,6 +1185,146 @@ def get_host_only(ip_address: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════
+# Discovery & Version Detection
+# ═══════════════════════════════════════════════════════════
+async def discover_device(device: dict) -> dict:
+    """
+    Deteksi otomatis mode API yang tepat untuk device ini.
+
+    Urutan coba:
+      1. REST API (port 443 HTTPS atau 80 HTTP) → mode=rest  (ROS 7.x)
+      2. API Protocol (port 8728)               → mode=api   (ROS 6.x)
+
+    Return dict:
+      {
+        "api_mode":      "rest" | "api" | "unknown",
+        "version_major": 7 | 6 | 0,
+        "ros_version":   "7.x.x" | "6.x.x" | "",
+        "board_name":    str,
+        "detected_at":   float (timestamp),
+        "success":       bool,
+      }
+
+    Simpan hasil ke DB agar tidak re-discover setiap siklus 30 detik.
+    Caller (polling) cukup re-discover jika `api_mode` belum ada di device,
+    atau jika polling gagal berkali-kali dan mau coba mode lain.
+    """
+    import time
+    raw_ip = device.get("ip_address", "")
+    parsed_host, port_from_ip = parse_host_port(raw_ip)
+
+    result = {
+        "api_mode":      "unknown",
+        "version_major": 0,
+        "ros_version":   "",
+        "board_name":    "",
+        "detected_at":   time.time(),
+        "success":       False,
+    }
+
+    # ── Coba REST API (ROS 7.x) ───────────────────────────────────────────────
+    # Urutan port: custom port dari ip_address → 443 (HTTPS) → 80 (HTTP)
+    rest_ports_ssl = []
+    if port_from_ip is not None:
+        rest_ports_ssl.append((port_from_ip, port_from_ip in (443, 8443)))
+    rest_ports_ssl += [(443, True), (80, False)]
+
+    for rest_port, use_ssl in rest_ports_ssl:
+        try:
+            rest_client = MikroTikRestAPI(
+                host=parsed_host, username=device.get("api_username", "admin"),
+                password=device.get("api_password", ""),
+                port=rest_port, use_ssl=use_ssl,
+            )
+            # Override timeout menjadi pendek (5s) agar discovery cepat
+            rest_client.timeout = 5
+            test = await rest_client.test_connection()
+            if test.get("success"):
+                # Ambil versi ROS
+                try:
+                    sys_res = await asyncio.wait_for(
+                        rest_client._async_req("GET", "system/resource"), timeout=5
+                    )
+                    ros_ver = sys_res.get("version", "") if isinstance(sys_res, dict) else ""
+                    board   = sys_res.get("board-name", "") if isinstance(sys_res, dict) else ""
+                except Exception:
+                    ros_ver, board = "", ""
+
+                ver_major = 7
+                if ros_ver and ros_ver[0].isdigit():
+                    try:
+                        ver_major = int(ros_ver.split(".")[0])
+                    except Exception:
+                        pass
+
+                result.update({
+                    "api_mode":      "rest",
+                    "version_major": ver_major,
+                    "ros_version":   ros_ver,
+                    "board_name":    board,
+                    "success":       True,
+                    "rest_port":     rest_port,
+                    "use_https":     use_ssl,
+                })
+                logger.info(
+                    f"Discovery [{device.get('name','?')}@{parsed_host}]: "
+                    f"REST API OK port={rest_port} ssl={use_ssl} ROS={ros_ver}"
+                )
+                return result
+        except Exception:
+            pass
+
+    # ── Coba API Protocol (ROS 6.x) ───────────────────────────────────────────
+    api_port = port_from_ip if port_from_ip is not None else (device.get("api_port") or 8728)
+    try:
+        api_client = MikroTikRouterAPI(
+            host=parsed_host,
+            username=device.get("api_username", "admin"),
+            password=device.get("api_password", ""),
+            port=api_port,
+            use_ssl=device.get("api_ssl", False),
+            plaintext_login=device.get("api_plaintext_login", True),
+        )
+        test = await asyncio.wait_for(api_client.test_connection(), timeout=8)
+        if test.get("success"):
+            try:
+                sys_res = await asyncio.wait_for(api_client.get_system_resource(), timeout=5)
+                ros_ver = sys_res.get("version", "") if isinstance(sys_res, dict) else ""
+                board   = sys_res.get("board-name", "") if isinstance(sys_res, dict) else ""
+            except Exception:
+                ros_ver, board = "", ""
+
+            ver_major = 6
+            if ros_ver and ros_ver[0].isdigit():
+                try:
+                    ver_major = int(ros_ver.split(".")[0])
+                except Exception:
+                    pass
+
+            result.update({
+                "api_mode":      "api",
+                "version_major": ver_major,
+                "ros_version":   ros_ver,
+                "board_name":    board,
+                "success":       True,
+                "api_port":      api_port,
+            })
+            logger.info(
+                f"Discovery [{device.get('name','?')}@{parsed_host}]: "
+                f"API Protocol OK port={api_port} ROS={ros_ver}"
+            )
+            return result
+    except Exception as e:
+        logger.debug(f"Discovery API Protocol gagal [{parsed_host}]: {e}")
+
+    logger.warning(
+        f"Discovery [{device.get('name','?')}@{parsed_host}]: "
+        f"Semua mode gagal — pastikan kredensial dan port benar"
+    )
+    return result
+
+
+# ═══════════════════════════════════════════════════════════
 # Factory function
 # ═══════════════════════════════════════════════════════════
 def get_api_client(device: dict) -> MikroTikBase:

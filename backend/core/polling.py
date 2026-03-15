@@ -1,41 +1,45 @@
 """
-Polling Engine — MikroTik REST API & RouterOS API Protocol.
-Tidak menggunakan SNMP. Semua data diambil via MikroTik REST API (ROS 7+)
-atau RouterOS API Protocol (ROS 6+).
+Polling Engine — Hybrid Monitoring (API + SNMP).
+================================================
+Arsitektur:
+  - Data SISTEM  (CPU, RAM, Uptime, Health, PPPoE, Hotspot) via MikroTik REST/API
+  - Data TRAFFIC (bandwidth iface) via SNMP v2c 64-bit counters
+    └─ Fallback ke API traffic jika SNMP tidak tersedia
 
-Dioptimalkan untuk monitoring 100+ device secara bersamaan:
-- MAX_CONCURRENT_POLLS: 20 (paralel, dibatasi semaphore)
-- Timeout per device: 30s
-- Interval polling: 30s
+Optimasi untuk 100+ device:
+  - asyncio.Semaphore(50): maks paralel polling
+  - SNMP delta 1-detik + SMA window=3 untuk grafik halus
+  - Discovery auto-detect mode (REST/API) — hasil di-cache di DB
+  - Offline skip: device gagal ≥6x → poll 1x per 5 siklus
 """
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone, timedelta
+
 from core.db import get_db
-from mikrotik_api import get_host_only, get_api_client
+from mikrotik_api import get_host_only, get_api_client, discover_device
 import ping_service
 
 logger = logging.getLogger(__name__)
 
-POLL_INTERVAL        = 30    # Detik antar polling cycle
-DEVICE_TIMEOUT       = 90    # Maks waktu per device — naikkan untuk device dengan banyak interface
-OFFLINE_GRACE_POLLS  = 2     # Gagal berturut-turut sebelum tandai offline
-MAX_CONCURRENT_POLLS = 20    # Paralel polling — aman untuk 100+ device
-OFFLINE_SKIP_AFTER   = 6     # Setelah N kali offline beruntun, skip polling sekian siklus
-OFFLINE_SKIP_CYCLES  = 4     # Jumlah siklus yang di-skip sebelum poll ulang
+# ── Konstanta Polling ──────────────────────────────────────────────────────────
+POLL_INTERVAL        = 30    # Detik antar siklus polling
+DEVICE_TIMEOUT       = 90    # Maks waktu per device (sudah include SNMP 1+s delta)
+OFFLINE_GRACE_POLLS  = 2     # Kegagalan beruntun sebelum tandai offline
+MAX_CONCURRENT_POLLS = 50    # Semaphore — aman untuk 100+ device
+OFFLINE_SKIP_AFTER   = 6     # Jika offline ≥ N kali: mulai skip siklus
+OFFLINE_SKIP_CYCLES  = 4     # Skip N siklus sebelum poll ulang
 
-# ISP keyword detection (comment field di MikroTik)
+# Keyword ISP — berikan prioritas pada interface ini untuk BW monitoring
 _ISP_KEYWORDS = (
-    "isp",
-    *[f"isp{i}" for i in range(1, 21)],
-    "wan",
-    *[f"wan{i}" for i in range(1, 21)],
-    "input",
-    *[f"input{i}" for i in range(1, 21)],
+    "isp", *[f"isp{i}" for i in range(1, 21)],
+    "wan", *[f"wan{i}" for i in range(1, 21)],
+    "input", *[f"input{i}" for i in range(1, 21)],
     "uplink", "upstream", "internet", "gateway",
 )
 
-# Interface virtual yang tidak perlu di-monitor untuk bandwidth
+# Interface virtual yang tidak perlu di-monitor
 _VIRTUAL_IFACE_TYPES = {
     "bridge", "vlan", "pppoe-out", "pppoe-in", "l2tp", "pptp", "ovpn-client",
     "ovpn-server", "sstp-client", "sstp-server", "gre", "eoip", "eoipv6",
@@ -43,24 +47,185 @@ _VIRTUAL_IFACE_TYPES = {
 }
 _VIRTUAL_IFACE_PREFIXES = ("lo", "docker", "veth", "tun", "tap")
 
-# Interface fisik SFP/SFP+ — ROS 7.16.2 kadang report running=false
-# meski interface aktif (SFP bonded ke switch chip). Tetap monitor.
+# Interface SFP yang kadang di-report running=false di ROS 7.16.2+
 _SFP_IFACE_TYPES = {
-    "sfp-sfpplus", "sfpplus", "sfp",
-    "10g-sfp", "10gbase-x", "qsfp", "qsfp+", "qsfp28",
-    # CCR2004 / combo port types
-    "combo", "sfp-sfpplus-combo", "10gsfp-sfpplus",
-    "sfp28", "25g-sfp28", "40g-qsfp", "100g-qsfp28",
+    "sfp-sfpplus", "sfpplus", "sfp", "10g-sfp", "10gbase-x",
+    "qsfp", "qsfp+", "qsfp28", "combo", "sfp-sfpplus-combo",
+    "10gsfp-sfpplus", "sfp28", "25g-sfp28", "40g-qsfp", "100g-qsfp28",
 }
 _SFP_IFACE_PREFIXES = ("sfp", "sfpplus", "qsfp", "combo")
 
 
-# ── Core: Poll device via MikroTik API ───────────────────────────────────────
+# ── Module: Auto-Discovery ─────────────────────────────────────────────────────
+
+async def _ensure_api_mode(device: dict, db) -> dict:
+    """
+    Pastikan device memiliki api_mode yang valid.
+    Jika belum ada atau 'unknown', jalankan discover_device() dan simpan ke DB.
+    Return device dict yang sudah ter-update.
+    """
+    current_mode = device.get("api_mode", "")
+    if current_mode in ("rest", "api"):
+        return device  # sudah diketahui, tidak perlu discover ulang
+
+    logger.info(f"Auto-discover mode untuk {device.get('name', '?')} [{device.get('ip_address', '?')}]...")
+    disc = await discover_device(device)
+
+    if disc["success"]:
+        update_fields = {
+            "api_mode":      disc["api_mode"],
+            "ros_version":   disc.get("ros_version", ""),
+            "model":         disc.get("board_name", "") or device.get("model", ""),
+        }
+        if disc["api_mode"] == "rest":
+            update_fields["use_https"] = disc.get("use_https", False)
+            if disc.get("rest_port"):
+                update_fields["api_port"] = disc["rest_port"]
+        elif disc.get("api_port"):
+            update_fields["api_port"] = disc["api_port"]
+
+        await db.devices.update_one({"id": device["id"]}, {"$set": update_fields})
+        device = {**device, **update_fields}
+        logger.info(f"Discovery OK: {device.get('name','?')} → mode={disc['api_mode']} ROS={disc.get('ros_version','?')}")
+    else:
+        logger.warning(f"Discovery GAGAL: {device.get('name','?')} — pertahankan mode default 'rest'")
+        device = {**device, "api_mode": "rest"}
+
+    return device
+
+
+# ── Module: SNMP Traffic ───────────────────────────────────────────────────────
+
+async def _get_traffic_snmp(
+    device: dict,
+    running_ifaces: list,
+    isp_detected: list,
+    device_id: str,
+) -> dict:
+    """
+    Ambil bandwidth traffic via SNMP v2c (metode utama Hybrid Monitoring).
+
+    Fitur:
+      - 64-bit HC counters (ifHCInOctets / ifHCOutOctets) — akurat > 4Gbps
+      - Delta 1-detik: T1 → sleep 1s → T2 → bps = (T2-T1)*8
+      - SMA window=3 untuk grafik halus
+      - Fallback ke {} jika SNMP tidak tersedia
+
+    Return: {iface_name: {download_bps, upload_bps, status, source}}
+    """
+    try:
+        from snmp_poller import get_snmp_traffic
+    except ImportError:
+        logger.debug("snmp_poller tidak tersedia — fallback ke API traffic")
+        return {}
+
+    host      = get_host_only(device.get("ip_address", ""))
+    community = device.get("snmp_community", "public") or "public"
+
+    if not host:
+        return {}
+
+    # Tentukan interface yang akan di-monitor via SNMP
+    # ISP interface selalu masuk, sisanya sampai 64 interface
+    isp_set  = set(isp_detected)
+    isp_if   = [n for n in running_ifaces if n in isp_set]
+    rest_if  = [n for n in running_ifaces if n not in isp_set]
+    max_rest = max(0, 64 - len(isp_if))
+    iface_filter = isp_if + rest_if[:max_rest]
+
+    try:
+        bw = await asyncio.wait_for(
+            get_snmp_traffic(
+                host=host,
+                community=community,
+                device_id=device_id,
+                iface_filter=iface_filter if iface_filter else None,
+                snmp_timeout=5,
+                apply_smoothing=True,
+            ),
+            timeout=15  # total max: T1 walk + 1s sleep + T2 walk
+        )
+
+        if bw:
+            logger.info(
+                f"SNMP traffic OK [{device.get('name','?')}]: "
+                f"{len(bw)} ifaces community={community}"
+            )
+        else:
+            logger.debug(f"SNMP traffic kosong [{device.get('name','?')}] — fallback ke API")
+
+        return bw
+
+    except asyncio.TimeoutError:
+        logger.debug(f"SNMP timeout [{device.get('name','?')}] — fallback ke API")
+        return {}
+    except Exception as e:
+        logger.debug(f"SNMP traffic error [{device.get('name','?')}]: {e}")
+        return {}
+
+
+# ── Module: API Traffic Fallback ───────────────────────────────────────────────
+
+async def _get_traffic_api_rest(mt, running_ifaces: list, isp_detected: list, device_name: str) -> dict:
+    """Ambil bandwidth via monitor-traffic REST API (ROS 7.x). Fallback jika SNMP gagal."""
+    bw_precomputed = {}
+    if not running_ifaces:
+        return bw_precomputed
+
+    isp_set  = set(isp_detected)
+    sfp_set  = {n for n in running_ifaces if n.lower().startswith(_SFP_IFACE_PREFIXES)}
+    isp_if   = [n for n in running_ifaces if n in isp_set]
+    sfp_if   = [n for n in running_ifaces if n in sfp_set and n not in isp_set]
+    rest_if  = [n for n in running_ifaces if n not in isp_set and n not in sfp_set]
+    max_rest = max(0, 64 - len(isp_if) - len(sfp_if))
+    priority = isp_if + sfp_if + rest_if[:max_rest]
+
+    async def _one(iface_name):
+        try:
+            r = await mt._async_req(
+                "POST", "interface/monitor-traffic",
+                {"interface": iface_name, "once": True},
+                timeout=10
+            )
+            if isinstance(r, list) and r:
+                r = r[0]
+            if isinstance(r, dict):
+                return (iface_name, {
+                    "download_bps": int(r.get("rx-bits-per-second", 0) or 0),
+                    "upload_bps":   int(r.get("tx-bits-per-second", 0) or 0),
+                    "status":       "up",
+                    "source":       "api_rest",
+                })
+        except Exception:
+            pass
+        return None
+
+    results = await asyncio.gather(*[_one(n) for n in priority], return_exceptions=True)
+    for r in results:
+        if r and not isinstance(r, Exception):
+            bw_precomputed[r[0]] = r[1]
+    return bw_precomputed
+
+
+async def _get_traffic_api_protocol(mt, device, running_ifaces: list) -> tuple:
+    """Ambil raw byte stats via API Protocol (ROS 6.x). Fallback jika SNMP gagal."""
+    try:
+        stats_result = await mt.get_all_interface_stats()
+        cur_stats    = stats_result.get("stats", {})
+        isp_from_api = stats_result.get("isp_interfaces", [])
+        isp_comments = stats_result.get("isp_comments", {})
+        return cur_stats, isp_from_api, isp_comments
+    except Exception as e:
+        logger.warning(f"ROS6 stats gagal [{device.get('name','?')}]: {e}")
+        return {}, [], {}
+
+
+# ── Core: Hybrid Poll ─────────────────────────────────────────────────────────
 
 async def poll_via_api(device: dict) -> dict:
     """
-    Ambil data monitoring via MikroTik REST API (ROS 7+) atau RouterOS API Protocol (ROS 6+).
-    Menghasilkan struktur data standar untuk disimpan ke DB.
+    Hybrid poll: API untuk data sistem, SNMP untuk traffic bandwidth.
+    Fallback ke API traffic jika SNMP tidak tersedia.
     """
     EMPTY_RESULT = {
         "reachable":      False,
@@ -78,12 +243,15 @@ async def poll_via_api(device: dict) -> dict:
     }
 
     try:
-        mt = get_api_client(device)
+        mt       = get_api_client(device)
         api_mode = device.get("api_mode", "rest")
+        dev_name = device.get("name", device.get("ip_address", "?"))
+        dev_id   = device.get("id", "")
 
-        # ── Ambil semua data secara paralel ──────────────────────────────────
-        async def _empty():
-            return {}
+        # ══════════════════════════════════════════════════════════════════════
+        # FASE 1: Data Sistem via API (paralel)
+        # ══════════════════════════════════════════════════════════════════════
+        async def _empty(): return {}
 
         sys_res, identity_res, health_raw, ifaces_raw = await asyncio.gather(
             mt.get_system_resource(),
@@ -93,18 +261,16 @@ async def poll_via_api(device: dict) -> dict:
             return_exceptions=True,
         )
 
-        # Bersihkan exceptions
         if isinstance(sys_res,      Exception): sys_res      = {}
         if isinstance(identity_res, Exception): identity_res = {}
         if isinstance(health_raw,   Exception): health_raw   = {}
         if isinstance(ifaces_raw,   Exception): ifaces_raw   = []
 
-        # Jika tidak ada data sama sekali → device tidak bisa dijangkau
         if not sys_res and not identity_res:
-            logger.warning(f"API tidak merespon untuk {device.get('name', '?')} [{device.get('ip_address', '?')}]")
+            logger.warning(f"API tidak merespon untuk {dev_name}")
             return EMPTY_RESULT
 
-        # ── Identity (nama router) ────────────────────────────────────────────
+        # ── Identity ─────────────────────────────────────────────────────────
         router_name = ""
         if isinstance(identity_res, dict):
             router_name = identity_res.get("name", "")
@@ -112,25 +278,23 @@ async def poll_via_api(device: dict) -> dict:
             router_name = device.get("name", device.get("ip_address", ""))
 
         # ── Sistem Info ───────────────────────────────────────────────────────
-        sys_info = {}
-        uptime_formatted = "N/A"
-        uptime_seconds = 0
+        sys_info          = {}
+        uptime_formatted  = "N/A"
+        uptime_seconds    = 0
 
         if sys_res:
-            import re
             board_name   = sys_res.get("board-name", "")
             ros_version  = sys_res.get("version", "")
             architecture = sys_res.get("architecture-name", "")
 
-            # Parse uptime format ROS: "3d15h30m10s"
             uptime_raw = str(sys_res.get("uptime", "") or "")
             try:
                 d = int(re.search(r"(\d+)d", uptime_raw).group(1)) if "d" in uptime_raw else 0
                 h = int(re.search(r"(\d+)h", uptime_raw).group(1)) if "h" in uptime_raw else 0
                 m = int(re.search(r"(\d+)m", uptime_raw).group(1)) if "m" in uptime_raw else 0
-                s_match = re.search(r"(\d+)s", uptime_raw)
-                sec = int(s_match.group(1)) if s_match else 0
-                uptime_seconds = d * 86400 + h * 3600 + m * 60 + sec
+                s_m = re.search(r"(\d+)s", uptime_raw)
+                sec = int(s_m.group(1)) if s_m else 0
+                uptime_seconds   = d * 86400 + h * 3600 + m * 60 + sec
                 uptime_formatted = f"{d}d {h}h {m}m"
             except Exception:
                 uptime_formatted = uptime_raw or "N/A"
@@ -169,7 +333,7 @@ async def poll_via_api(device: dict) -> dict:
         except (ValueError, TypeError):
             pass
 
-        # ── Health (suhu, voltage, power) ─────────────────────────────────────
+        # ── Health ────────────────────────────────────────────────────────────
         health = {
             "cpu_temp":   health_raw.get("cpu_temp",   0) if isinstance(health_raw, dict) else 0,
             "board_temp": health_raw.get("board_temp", 0) if isinstance(health_raw, dict) else 0,
@@ -177,213 +341,150 @@ async def poll_via_api(device: dict) -> dict:
             "power":      health_raw.get("power",      0) if isinstance(health_raw, dict) else 0,
         }
 
-        # ── ISP Interface Detection (dari ifaces_raw yang sudah di-fetch) ──────────
-        # Deteksi di sini agar tidak perlu 2nd API call di poll_single_device
-        isp_detected = []
-        for iface in (ifaces_raw if isinstance(ifaces_raw, list) else []):
-            iname   = iface.get("name", "")
-            comment = str(iface.get("comment", "") or "").lower()
-            if iname and any(kw in comment for kw in _ISP_KEYWORDS):
-                isp_detected.append(iname)
-
-        # ── Interfaces ────────────────────────────────────────────────────────
-        interfaces  = []
+        # ── Interface List + ISP Detection ────────────────────────────────────
+        isp_detected   = []
+        interfaces     = []
         running_ifaces = []
+
         for iface in (ifaces_raw if isinstance(ifaces_raw, list) else []):
             name     = iface.get("name", "")
             itype    = iface.get("type", "").lower()
             running  = iface.get("running", False)
             disabled = str(iface.get("disabled", "false")).lower() == "true"
+            comment  = str(iface.get("comment", "") or "").lower()
 
-            # ── Cek apakah interface SFP/SFP+ ──────────────────────────────
-            # ROS 7.16.2: SFP bonded ke switch chip dilaporkan running=false
-            # meski fisiknya aktif. Detect via type atau nama interface.
-            is_sfp = (
-                itype in _SFP_IFACE_TYPES
-                or name.lower().startswith(_SFP_IFACE_PREFIXES)
-            )
-
-            # SFP yang tidak disabled → anggap berpotensi aktif (override running flag)
+            is_sfp = itype in _SFP_IFACE_TYPES or name.lower().startswith(_SFP_IFACE_PREFIXES)
             if is_sfp and not disabled:
-                running = True
+                running = True  # SFP bonded ke switch chip: override running=false
 
-            status   = "down" if disabled else ("up" if running else "down")
+            status = "down" if disabled else ("up" if running else "down")
 
-            # ── Cek apakah interface virtual ────────────────────────────────
             is_virtual = (
                 itype in _VIRTUAL_IFACE_TYPES
                 or name.lower().startswith(_VIRTUAL_IFACE_PREFIXES)
-                or name.startswith("<")   # Dynamic PPPoE session: "<pppoe-username>"
+                or name.startswith("<")
             )
 
-            # Simpan interface ke list beserta field type dan virtual flag
-            # (field 'type' diperlukan oleh /dashboard/interfaces untuk filter)
+            # ISP detection via comment
+            if name and any(kw in comment for kw in _ISP_KEYWORDS):
+                isp_detected.append(name)
+
             if name:
                 interfaces.append({
                     "index":   iface.get(".id", ""),
                     "name":    name,
-                    "type":    itype,       # field type dari MikroTik
+                    "type":    itype,
                     "status":  status,
                     "speed":   0,
-                    "virtual": is_virtual,  # flag virtual untuk filter frontend
-                    "is_sfp":  is_sfp,      # flag SFP untuk logging/debug
+                    "virtual": is_virtual,
+                    "is_sfp":  is_sfp,
                 })
 
-            # Hanya interface fisik/relevan yang masuk running_ifaces untuk BW monitoring
             if running and not disabled and name and not is_virtual:
                 running_ifaces.append(name)
 
-
-        # ── Bandwidth via monitor-traffic ──────────────────────────────────────
-        # Ambil bandwidth real-time untuk setiap interface yang running.
-        # ROS 7+ (mode=rest): POST /rest/interface/monitor-traffic
-        # ROS 6+ (mode=api):  get_interface_traffic() via API Protocol (port 8728)
-        bw_precomputed = {}
-        if running_ifaces:
-            if api_mode == "rest" and hasattr(mt, "_async_req"):
-                # ── ROS 7.x: REST API monitor-traffic ────────────────────────
-                async def get_iface_bw_rest(iface_name):
-                    try:
-                        # CATATAN: asyncio.wait_for TIDAK BISA membatalkan thread sync.
-                        # Gunakan timeout langsung di dalam _request melalui session khusus.
-                        r = await mt._async_req(
-                            "POST", "interface/monitor-traffic",
-                            {"interface": iface_name, "once": True},
-                            timeout=10  # timeout langsung di requests, bukan asyncio
-                        )
-                        if isinstance(r, list) and r:
-                            r = r[0]
-                        if isinstance(r, dict):
-                            rx_bps = int(r.get("rx-bits-per-second", 0) or 0)
-                            tx_bps = int(r.get("tx-bits-per-second", 0) or 0)
-                            return (iface_name, {
-                                "download_bps": rx_bps,
-                                "upload_bps":   tx_bps,
-                                "status":       "up",
-                            })
-                    except Exception as e:
-                        logger.debug(f"REST monitor-traffic gagal untuk {iface_name}: {e}")
-                    return None
-
-                # ── Prioritas query: ISP interfaces duluan, lalu SFP, lalu sisanya ──
-                # Bug fix: CCR2004-16G-2S+ punya 16 ether + 2 SFP+ = 18 interfaces.
-                # Limit lama (:16) memotong persis sebelum SFP port → bandwidth SFP = 0.
-                isp_set = set(isp_detected)  # interface dengan comment ISP/WAN/INPUT
-                sfp_set = {n for n in running_ifaces
-                           if n.lower().startswith(_SFP_IFACE_PREFIXES)}
-
-                # Sort: ISP > SFP > lainnya (ISP dan SFP SELALU masuk, sisanya dibatasi)
-                isp_ifaces  = [n for n in running_ifaces if n in isp_set]
-                sfp_ifaces  = [n for n in running_ifaces if n in sfp_set and n not in isp_set]
-                rest_ifaces = [n for n in running_ifaces if n not in isp_set and n not in sfp_set]
-                # Limit max 64 total; ISP+SFP selalu dijamin, sisanya diisi dari sisa kuota
-                max_rest = max(0, 64 - len(isp_ifaces) - len(sfp_ifaces))
-                priority_ifaces = isp_ifaces + sfp_ifaces + rest_ifaces[:max_rest]
-
-                logger.info(
-                    f"BW poll priority [{device.get('name','?')}]: "
-                    f"isp={len(isp_ifaces)} sfp={len(sfp_ifaces)} other={len(rest_ifaces[:max_rest])} "
-                    f"total={len(priority_ifaces)}"
-                )
-
-                tasks = [get_iface_bw_rest(n) for n in priority_ifaces]
-                bw_results = await asyncio.gather(*tasks, return_exceptions=True)
-                for r in bw_results:
-                    if r and not isinstance(r, Exception):
-                        bw_precomputed[r[0]] = r[1]
-
-            elif api_mode == "api":
-                # ── ROS 6.x: Ambil raw bytes stats (1 koneksi, semua interface) ─
-                # Delta bps akan dihitung di poll_single_device yang punya akses ke db.
-                try:
-                    stats_result = await mt.get_all_interface_stats()
-                    # Format: {"stats": {...}, "isp_interfaces": [...], "isp_comments": {...}}
-                    cur_stats    = stats_result.get("stats", {})
-                    isp_from_api = stats_result.get("isp_interfaces", [])
-                    isp_comments = stats_result.get("isp_comments", {})
-                    if cur_stats:
-                        logger.debug(f"ROS6 raw stats: {device.get('name','?')} {len(cur_stats)} interfaces")
-                    if isp_from_api:
-                        logger.info(f"ROS6 ISP detected: {device.get('name','?')} -> {isp_from_api}")
-
-                    # ── PPPoE & Hotspot Active Count untuk ROS6 ──────────────────
-                    # PENTING: fetch SEBELUM return agar data tersimpan ke DB!
-                    # ROS6 punya early return di blok ini — jika tidak di-fetch di sini,
-                    # blok PPPoE di bawah (untuk ROS7) tidak akan pernah dicapai.
-                    pppoe_active_ros6   = 0
-                    hotspot_active_ros6 = 0
-                    try:
-                        pppoe_list_ros6 = await asyncio.to_thread(
-                            mt._list_resource, "/ppp/active"
-                        )
-                        pppoe_active_ros6 = len(pppoe_list_ros6) if isinstance(pppoe_list_ros6, list) else 0
-                    except Exception as e:
-                        logger.debug(f"PPPoE fetch ROS6 gagal [{device.get('name','?')}]: {e}")
-
-                    try:
-                        hs_list_ros6 = await asyncio.to_thread(
-                            mt._list_resource, "/ip/hotspot/active"
-                        )
-                        hotspot_active_ros6 = len(hs_list_ros6) if isinstance(hs_list_ros6, list) else 0
-                    except Exception as e:
-                        logger.debug(f"Hotspot fetch ROS6 gagal [{device.get('name','?')}]: {e}")
-
-                    logger.info(
-                        f"Sessions ROS6 [{device.get('name','?')}]: "
-                        f"pppoe={pppoe_active_ros6} hotspot={hotspot_active_ros6}"
-                    )
-
-                    return {
-                        "reachable":       True,
-                        "poll_mode":       "api_protocol",
-                        "ping":            {"reachable": True, "min": 0, "avg": 0, "max": 0, "jitter": 0, "loss": 0},
-                        "system":          sys_info,
-                        "cpu":             cpu_load,
-                        "memory":          memory,
-                        "interfaces":      interfaces,
-                        "traffic":         {},
-                        "health":          health,
-                        "bw_precomputed":  {},
-                        "iface_stats_raw": cur_stats,
-                        "running_ifaces":  running_ifaces,
-                        "isp_detected":    isp_from_api,
-                        "isp_comments":    isp_comments,   # {iface: comment} untuk badge label
-                        "pppoe_active":    pppoe_active_ros6,
-                        "hotspot_active":  hotspot_active_ros6,
-                    }
-                except Exception as e:
-                    logger.warning(f"ROS6 poll gagal untuk {device.get('name','?')}: {e}")
-
-        # ── PPPoE Active & Hotspot Active Count (ROS7 REST API) ────────────────
-        # Hanya dicapai oleh ROS7 — ROS6 sudah return lebih atas dengan datanya.
+        # ══════════════════════════════════════════════════════════════════════
+        # FASE 2: PPPoE & Hotspot Count via API (paralel, ROS7 REST only)
+        # ══════════════════════════════════════════════════════════════════════
         pppoe_active   = 0
         hotspot_active = 0
-        try:
-            pppoe_list, hotspot_list = await asyncio.gather(
-                mt.list_pppoe_active(),
-                mt.list_hotspot_active(),
-                return_exceptions=True,
-            )
-            pppoe_active   = len(pppoe_list)   if isinstance(pppoe_list,   list) else 0
-            hotspot_active = len(hotspot_list) if isinstance(hotspot_list, list) else 0
-            logger.info(
-                f"Sessions ROS7 [{device.get('name','?')}]: "
-                f"pppoe={pppoe_active} hotspot={hotspot_active}"
-            )
-        except Exception as sess_err:
-            logger.debug(f"Session count gagal [{device.get('name','?')}]: {sess_err}")
 
+        if api_mode == "api":
+            # ROS6: fetch via thread
+            try:
+                pppoe_list_r6 = await asyncio.to_thread(mt._list_resource, "/ppp/active")
+                pppoe_active  = len(pppoe_list_r6) if isinstance(pppoe_list_r6, list) else 0
+            except Exception:
+                pass
+            try:
+                hs_list_r6    = await asyncio.to_thread(mt._list_resource, "/ip/hotspot/active")
+                hotspot_active = len(hs_list_r6) if isinstance(hs_list_r6, list) else 0
+            except Exception:
+                pass
+        else:
+            # ROS7: REST API
+            try:
+                pppoe_list, hotspot_list = await asyncio.gather(
+                    mt.list_pppoe_active(),
+                    mt.list_hotspot_active(),
+                    return_exceptions=True,
+                )
+                pppoe_active   = len(pppoe_list)   if isinstance(pppoe_list,   list) else 0
+                hotspot_active = len(hotspot_list) if isinstance(hotspot_list, list) else 0
+            except Exception:
+                pass
 
-        mode_label = "rest_api" if api_mode == "rest" else "api_protocol"
-        logger.info(
-            f"Poll OK [{mode_label}]: {device.get('name', '?')} "
-            f"cpu={cpu_load}% mem={memory['percent']}% "
-            f"ifaces={len(running_ifaces)} bw={len(bw_precomputed)} isp={isp_detected}"
+        logger.debug(
+            f"Sessions [{dev_name}]: pppoe={pppoe_active} hotspot={hotspot_active}"
         )
+
+        # ══════════════════════════════════════════════════════════════════════
+        # FASE 3: Traffic via SNMP (utama) → fallback ke API
+        # ══════════════════════════════════════════════════════════════════════
+        bw_precomputed   = {}
+        iface_stats_raw  = {}
+        isp_from_api     = isp_detected[:]
+        isp_comments     = {}
+        poll_source      = "snmp"
+
+        if running_ifaces:
+            # ── Coba SNMP terlebih dahulu ─────────────────────────────────────
+            bw_precomputed = await _get_traffic_snmp(
+                device, running_ifaces, isp_detected, dev_id
+            )
+
+            # ── Fallback ke API jika SNMP kosong ─────────────────────────────
+            if not bw_precomputed:
+                poll_source = "api_fallback"
+                if api_mode == "rest" and hasattr(mt, "_async_req"):
+                    bw_precomputed = await _get_traffic_api_rest(
+                        mt, running_ifaces, isp_detected, dev_name
+                    )
+                    logger.info(
+                        f"SNMP fallback → REST monitor-traffic [{dev_name}]: "
+                        f"{len(bw_precomputed)} ifaces"
+                    )
+                elif api_mode == "api":
+                    iface_stats_raw, isp_from_api, isp_comments = \
+                        await _get_traffic_api_protocol(mt, device, running_ifaces)
+                    if iface_stats_raw:
+                        poll_source = "api_delta_ros6"
+                        logger.info(f"SNMP fallback → ROS6 delta [{dev_name}]: {len(iface_stats_raw)} ifaces")
+
+        mode_label = f"{api_mode}_hybrid_snmp" if poll_source == "snmp" else f"{api_mode}_{poll_source}"
+        logger.info(
+            f"Poll OK [{mode_label}] {dev_name}: "
+            f"cpu={cpu_load}% mem={memory['percent']}% "
+            f"ifaces={len(running_ifaces)} bw={len(bw_precomputed)} "
+            f"isp={isp_from_api} source={poll_source}"
+        )
+
+        # ── ROS6: return langsung dengan iface_stats_raw ──────────────────────
+        if api_mode == "api" and not bw_precomputed and iface_stats_raw:
+            return {
+                "reachable":       True,
+                "poll_mode":       "api_protocol_hybrid",
+                "poll_source":     poll_source,
+                "ping":            {"reachable": True, "min": 0, "avg": 0, "max": 0, "jitter": 0, "loss": 0},
+                "system":          sys_info,
+                "cpu":             cpu_load,
+                "memory":          memory,
+                "interfaces":      interfaces,
+                "traffic":         {},
+                "health":          health,
+                "bw_precomputed":  {},
+                "iface_stats_raw": iface_stats_raw,
+                "running_ifaces":  running_ifaces,
+                "isp_detected":    isp_from_api,
+                "isp_comments":    isp_comments,
+                "pppoe_active":    pppoe_active,
+                "hotspot_active":  hotspot_active,
+            }
 
         return {
             "reachable":       True,
             "poll_mode":       mode_label,
+            "poll_source":     poll_source,
             "ping":            {"reachable": True, "min": 0, "avg": 0, "max": 0, "jitter": 0, "loss": 0},
             "system":          sys_info,
             "cpu":             cpu_load,
@@ -394,7 +495,7 @@ async def poll_via_api(device: dict) -> dict:
             "bw_precomputed":  bw_precomputed,
             "iface_stats_raw": {},
             "running_ifaces":  running_ifaces,
-            "isp_detected":    isp_detected,
+            "isp_detected":    isp_from_api,
             "pppoe_active":    pppoe_active,
             "hotspot_active":  hotspot_active,
         }
@@ -415,42 +516,52 @@ async def poll_via_api(device: dict) -> dict:
         }
 
 
+# ── poll_single_device ────────────────────────────────────────────────────────
+
 async def poll_single_device(device: dict) -> dict:
     """
-    Poll satu device via MikroTik API (REST atau API Protocol — tanpa SNMP).
-    Update DB dengan status, metrics, SLA events, bandwidth history.
+    Poll satu device: auto-discover mode → Hybrid poll → simpan ke DB.
     """
     db  = get_db()
     did = device["id"]
 
-    # -- Poll via MikroTik API ------------------------------------------------
+    # ── Auto-discover mode jika belum ada ────────────────────────────────────
+    device = await _ensure_api_mode(device, db)
+
+    # ── Hybrid Poll ───────────────────────────────────────────────────────────
     result = await poll_via_api(device)
 
-    # -- Offline grace period: jangan tandai offline pada kegagalan pertama ----
+    # ── Offline grace period ──────────────────────────────────────────────────
     consecutive_failures = device.get("consecutive_poll_failures", 0)
     old_status = device.get("status", "unknown")
 
     if result["reachable"]:
         new_status = "online"
         consecutive_failures = 0
+        # Jika sebelumnya offline, clear SMA cache agar tidak ada data stale
+        if old_status == "offline":
+            try:
+                from snmp_poller import clear_sma_cache
+                clear_sma_cache(did)
+            except Exception:
+                pass
     else:
         consecutive_failures += 1
         if consecutive_failures >= OFFLINE_GRACE_POLLS:
             new_status = "offline"
         else:
-            # Grace period: pertahankan status sekarang
             new_status = old_status if old_status in ("online", "offline") else "offline"
             logger.info(
-                f"Poll gagal untuk {device.get('name', did)} "
+                f"Poll gagal {device.get('name', did)} "
                 f"({consecutive_failures}/{OFFLINE_GRACE_POLLS}), grace period aktif"
             )
 
     now = datetime.now(timezone.utc).isoformat()
 
     update = {
-        "status":                   new_status,
-        "last_poll":                now,
-        "last_poll_data":           result,
+        "status":                    new_status,
+        "last_poll":                 now,
+        "last_poll_data":            result,
         "consecutive_poll_failures": consecutive_failures,
     }
 
@@ -471,12 +582,11 @@ async def poll_single_device(device: dict) -> dict:
             "board_temp":     health.get("board_temp", 0),
             "voltage":        health.get("voltage",    0),
             "power":          health.get("power",      0),
-            # Session counters (diupdate setiap polling cycle)
             "pppoe_active":   result.get("pppoe_active",   0),
             "hotspot_active": result.get("hotspot_active", 0),
         })
 
-    # -- SLA Event: catat transisi status online/offline -----------------------
+    # ── SLA Event ─────────────────────────────────────────────────────────────
     if old_status != new_status and new_status in ("online", "offline"):
         try:
             await db.sla_events.insert_one({
@@ -492,11 +602,9 @@ async def poll_single_device(device: dict) -> dict:
 
     await db.devices.update_one({"id": did}, {"$set": update})
 
-    # -- Deteksi ISP interface (dari hasil poll_via_api, bukan API call terpisah) --
-    # isp_detected sudah diisi di poll_via_api dari ifaces_raw yang sama
+    # ── ISP Interface update ───────────────────────────────────────────────────
     isp_detected_in_poll = result.get("isp_detected", [])
     if isp_detected_in_poll:
-        # Update DB hanya jika ada perubahan (cek vs nilai saat ini)
         current_isp = device.get("isp_interfaces", [])
         if set(isp_detected_in_poll) != set(current_isp):
             await db.devices.update_one(
@@ -504,31 +612,29 @@ async def poll_single_device(device: dict) -> dict:
                 {"$set": {"isp_interfaces": isp_detected_in_poll}}
             )
 
-    # ISP interfaces untuk kalkulasi bandwidth (kombinasi dari DB dan hasil poll)
     isp_interfaces_for_bw = isp_detected_in_poll or device.get("isp_interfaces", [])
 
-    # -- Notifikasi WhatsApp ---------------------------------------------------
+    # ── Notifikasi WhatsApp ───────────────────────────────────────────────────
     try:
         from services.notification_service import check_and_notify
         await check_and_notify(device, result, update)
     except Exception as e:
         logger.debug(f"Notification skip: {e}")
 
-    # -- Bandwidth: ROS7 dari bw_precomputed, ROS6 dari delta iface_stats_raw ----
+    # ── Bandwidth kalkulasi ────────────────────────────────────────────────────
     ping_data = result.get("ping", {})
-    bw = result.get("bw_precomputed", {})
+    bw        = result.get("bw_precomputed", {})
 
-    # ROS6: hitung delta bps dari raw bytes (iface_stats_raw dari poll_via_api)
+    # ROS6 fallback: hitung delta bps dari raw bytes
     iface_stats_raw = result.get("iface_stats_raw", {})
     if iface_stats_raw and not bw:
         try:
-            now_ts      = datetime.now(timezone.utc).timestamp()
+            now_ts     = datetime.now(timezone.utc).timestamp()
             running_set = set(result.get("running_ifaces", []))
 
-            # Ambil snapshot sebelumnya dari DB
-            snap_doc  = await db.traffic_snapshots.find_one({"device_id": did}, {"_id": 0})
+            snap_doc   = await db.traffic_snapshots.find_one({"device_id": did}, {"_id": 0})
             prev_stats = snap_doc.get("iface_bytes", {}) if snap_doc else {}
-            prev_ts    = snap_doc.get("ts")            if snap_doc else None
+            prev_ts    = snap_doc.get("ts")              if snap_doc else None
 
             if prev_stats and prev_ts:
                 elapsed = max(now_ts - prev_ts, 1)
@@ -540,10 +646,21 @@ async def poll_single_device(device: dict) -> dict:
                         continue
                     rx_delta = max(0, cur.get("rx-bytes", 0) - prev.get("rx-bytes", 0))
                     tx_delta = max(0, cur.get("tx-bytes", 0) - prev.get("tx-bytes", 0))
+                    dl_bps   = int((rx_delta * 8) / elapsed)
+                    ul_bps   = int((tx_delta * 8) / elapsed)
+
+                    # Terapkan SMA untuk ROS6 delta juga
+                    try:
+                        from snmp_poller import apply_sma
+                        dl_bps, ul_bps = apply_sma(did, iface_name, dl_bps, ul_bps)
+                    except Exception:
+                        pass
+
                     bw[iface_name] = {
-                        "download_bps": int((rx_delta * 8) / elapsed),
-                        "upload_bps":   int((tx_delta * 8) / elapsed),
+                        "download_bps": dl_bps,
+                        "upload_bps":   ul_bps,
                         "status":       "up",
+                        "source":       "api_delta_ros6",
                     }
                 logger.info(
                     f"ROS6 delta bw OK: {device.get('name','?')} "
@@ -551,70 +668,60 @@ async def poll_single_device(device: dict) -> dict:
                 )
         except Exception as e:
             logger.warning(f"ROS6 delta calc gagal untuk {device.get('name','?')}: {e}")
-    # -- Hitung isp_bandwidth: traffic dari interface ISP (comment-detected) ------
-    isp_interfaces = isp_interfaces_for_bw   # sudah diisi dari result["isp_detected"] / DB
+
+    # ── ISP bandwidth ──────────────────────────────────────────────────────────
     isp_bw = {}
-    if bw and isp_interfaces:
-        for iface_name in isp_interfaces:
+    if bw and isp_interfaces_for_bw:
+        for iface_name in isp_interfaces_for_bw:
             iface_data = bw.get(iface_name)
             if isinstance(iface_data, dict):
                 isp_bw[iface_name] = {
                     "download_bps": iface_data.get("download_bps", 0),
-                    "upload_bps":   iface_data.get("upload_bps", 0),
+                    "upload_bps":   iface_data.get("upload_bps",   0),
                     "status":       iface_data.get("status", "up"),
                 }
 
-    # -- Total ISP bw ---------------------------------------------------------------
-    if isp_bw:
-        isp_dl_bps = sum(v.get("download_bps", 0) for v in isp_bw.values())
-        isp_ul_bps = sum(v.get("upload_bps",   0) for v in isp_bw.values())
-    else:
-        isp_dl_bps = 0
-        isp_ul_bps = 0
+    # Total
+    isp_dl_bps = sum(v.get("download_bps", 0) for v in isp_bw.values())
+    isp_ul_bps = sum(v.get("upload_bps",   0) for v in isp_bw.values())
+    total_dl   = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
+    total_ul   = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
 
-    # -- Total semua interface fisik -----------------------------------------------
-    total_dl_bps = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
-    total_ul_bps = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
-
-    # -- Log ringkasan bandwidth (info: mudah debug di server) --------------------
-    eff_dl = isp_dl_bps if isp_bw else total_dl_bps
-    eff_ul = isp_ul_bps if isp_bw else total_ul_bps
+    eff_dl = isp_dl_bps if isp_bw else total_dl
+    eff_ul = isp_ul_bps if isp_bw else total_ul
     logger.info(
-        f"BW [{device.get('name','?')}]: total_ifaces={len(bw)} "
-        f"isp_ifaces={isp_interfaces} "
+        f"BW [{device.get('name','?')}] source={result.get('poll_source','?')}: "
+        f"isp={list(isp_bw.keys())} "
         f"dl={eff_dl/1_000_000:.2f}Mbps ul={eff_ul/1_000_000:.2f}Mbps"
     )
 
-    # -- Ping real via ICMP (untuk wall display & SLA monitoring) ----------------
-    # API mode tidak melakukan ICMP ping saat poll — lakukan di sini agar
-    # traffic_history.ping_ms selalu terisi dengan nilai nyata.
+    # ── ICMP Ping ─────────────────────────────────────────────────────────────
     real_ping_ms = ping_data.get("avg", 0) or 0
     if not real_ping_ms and result.get("reachable"):
         try:
-            ip_raw  = device.get("ip_address", "")
-            ip_only = get_host_only(ip_raw)  # IPv6-safe: handle [::1]:port
+            ip_only = get_host_only(device.get("ip_address", ""))
             if ip_only:
                 pr = await ping_service.ping_host(ip_only, count=2, timeout=2)
                 real_ping_ms = pr.get("avg", 0) or 0
         except Exception:
             real_ping_ms = 0
 
+    # ── Simpan ke traffic_history ──────────────────────────────────────────────
     snapshot = {
-        "device_id":       did,
-        "timestamp":       now,
-        "bandwidth":       bw,           # semua interface fisik
-        "isp_bandwidth":   isp_bw,       # hanya interface ISP (bisa multi-ISP)
-        # ISP-aware total: gunakan isp_bw jika ada, fallback ke total semua interface
-        "download_mbps":   round((isp_dl_bps if isp_bw else total_dl_bps) / 1_000_000, 3),
-        "upload_mbps":     round((isp_ul_bps if isp_bw else total_ul_bps) / 1_000_000, 3),
-        "cpu":             result.get("cpu", 0),
-        "memory_percent":  result.get("memory", {}).get("percent", 0),
-        "ping_ms":         round(real_ping_ms, 1),
-        "jitter_ms":       ping_data.get("jitter", 0) or 0,
+        "device_id":      did,
+        "timestamp":      now,
+        "bandwidth":      bw,
+        "isp_bandwidth":  isp_bw,
+        "download_mbps":  round((isp_dl_bps if isp_bw else total_dl) / 1_000_000, 3),
+        "upload_mbps":    round((isp_ul_bps if isp_bw else total_ul) / 1_000_000, 3),
+        "cpu":            result.get("cpu", 0),
+        "memory_percent": result.get("memory", {}).get("percent", 0),
+        "ping_ms":        round(real_ping_ms, 1),
+        "jitter_ms":      ping_data.get("jitter", 0) or 0,
+        "poll_source":    result.get("poll_source", "unknown"),
     }
     try:
         await db.traffic_history.insert_one(snapshot)
-        # Pertahankan maks 2880 record per device (24h × 30s interval)
         count = await db.traffic_history.count_documents({"device_id": did})
         if count > 2880:
             oldest = await db.traffic_history.find(
@@ -626,46 +733,42 @@ async def poll_single_device(device: dict) -> dict:
     except Exception as hist_err:
         logger.debug(f"Traffic history write gagal: {hist_err}")
 
-    # -- Tulis ke InfluxDB (opsional) ─────────────────────────────────────────
+    # ── InfluxDB (opsional) ───────────────────────────────────────────────────
     if bw:
         try:
             from services.metrics_service import write_device_metrics, is_enabled
             if is_enabled():
-                metrics_payload = {
-                    "cpu":       result.get("cpu", 0),
-                    "memory":    result.get("memory", {}),
-                    "ping":      ping_data,
-                    "health":    result.get("health", {}),
-                    "bandwidth": bw,
-                }
                 await asyncio.to_thread(
-                    write_device_metrics, did, device.get("name", did), metrics_payload,
+                    write_device_metrics, did, device.get("name", did),
+                    {
+                        "cpu":       result.get("cpu", 0),
+                        "memory":    result.get("memory", {}),
+                        "ping":      ping_data,
+                        "health":    result.get("health", {}),
+                        "bandwidth": bw,
+                    },
                 )
         except Exception as e:
             logger.debug(f"InfluxDB write skip: {e}")
 
-    # -- Update traffic snapshot (simpan iface_bytes untuk delta ROS6 berikutnya) -
+    # ── Update traffic_snapshots (untuk delta ROS6 berikutnya) ────────────────
     snap_update = {"device_id": did, "timestamp": now, "traffic": {}}
     if iface_stats_raw:
-        # ROS6: simpan raw bytes untuk kalkulasi delta cycle berikutnya
         snap_update["iface_bytes"] = iface_stats_raw
         snap_update["ts"]          = datetime.now(timezone.utc).timestamp()
     await db.traffic_snapshots.update_one(
-        {"device_id": did},
-        {"$set": snap_update},
-        upsert=True
+        {"device_id": did}, {"$set": snap_update}, upsert=True
     )
 
     return result
 
 
-# ── Polling Loop: jalankan polling semua device setiap POLL_INTERVAL detik ───
+# ── Polling Loop ──────────────────────────────────────────────────────────────
 
 async def polling_loop():
     """
     Background task: poll semua device setiap POLL_INTERVAL detik.
-    Semaphore membatasi concurrency agar tidak overload server maupun network.
-    Optimal untuk 100+ device MikroTik.
+    Semaphore(50) membatasi concurrency agar tidak overload server.
     """
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_POLLS)
 
@@ -685,12 +788,11 @@ async def polling_loop():
                 return None
 
     while True:
-        start = asyncio.get_running_loop().time()  # FIX BUG #7: get_running_loop()
+        start = asyncio.get_running_loop().time()
         try:
             db      = get_db()
             devices = await db.devices.find({}, {"_id": 0}).to_list(None)
             if devices:
-                # Fix C: skip device yang sudah lama offline (hemat resource)
                 tick = getattr(polling_loop, "_tick", 0) + 1
                 polling_loop._tick = tick
 
@@ -698,7 +800,6 @@ async def polling_loop():
                     fails = dev.get("consecutive_poll_failures", 0)
                     if fails < OFFLINE_SKIP_AFTER:
                         return True
-                    # Skip setiap OFFLINE_SKIP_CYCLES siklus, poll 1 siklus
                     return (tick % (OFFLINE_SKIP_CYCLES + 1)) == 0
 
                 to_poll = [d for d in devices if _should_poll(d)]
@@ -706,17 +807,20 @@ async def polling_loop():
                 if skipped:
                     logger.debug(f"Polling: {len(to_poll)} active, {skipped} offline skipped")
 
-                logger.debug(f"Polling {len(to_poll)} device (max {MAX_CONCURRENT_POLLS} paralel)...")
+                logger.debug(
+                    f"Polling {len(to_poll)} device "
+                    f"(max {MAX_CONCURRENT_POLLS} paralel, hybrid SNMP+API)..."
+                )
                 await asyncio.gather(
                     *[poll_with_semaphore(d) for d in to_poll],
                     return_exceptions=True
                 )
 
-            # Fix D: Bersihkan traffic_snapshots yang sudah > 2 jam
-            snap_cutoff_ts = (datetime.now(timezone.utc) - timedelta(hours=2)).timestamp()
-            await db.traffic_snapshots.delete_many({"ts": {"$lt": snap_cutoff_ts}})
+            # Bersihkan snapshots lama (> 2 jam)
+            snap_cutoff = (datetime.now(timezone.utc) - timedelta(hours=2)).timestamp()
+            await db.traffic_snapshots.delete_many({"ts": {"$lt": snap_cutoff}})
 
-            # Bersihkan traffic_history > 31 hari
+            # Bersihkan traffic_history lama (> 31 hari)
             cutoff = (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
             await db.traffic_history.delete_many({"timestamp": {"$lt": cutoff}})
 
@@ -725,7 +829,6 @@ async def polling_loop():
         except Exception as e:
             logger.error(f"Poll loop error: {e}")
 
-        # Tunggu interval berikutnya (dikurangi waktu yang sudah terpakai)
-        elapsed    = asyncio.get_running_loop().time() - start  # FIX BUG #7
+        elapsed    = asyncio.get_running_loop().time() - start
         sleep_time = max(1, POLL_INTERVAL - elapsed)
         await asyncio.sleep(sleep_time)
