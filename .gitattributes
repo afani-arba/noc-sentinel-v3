@@ -1,0 +1,38 @@
+# .gitattributes — paksa LF untuk semua shell/Python script
+# Mencegah CRLF bug saat Windows edit dan Linux run
+
+# Default: normalisasi semua text ke LF
+* text=auto eol=lf
+
+# Shell scripts: WAJIB LF
+*.sh    text eol=lf
+*.bash  text eol=lf
+
+# Python
+*.py    text eol=lf
+
+# Konfigurasi
+*.env         text eol=lf
+*.env.example text eol=lf
+*.txt         text eol=lf
+*.md          text eol=lf
+*.json        text eol=lf
+*.yaml        text eol=lf
+*.yml         text eol=lf
+*.toml        text eol=lf
+*.cfg         text eol=lf
+*.ini         text eol=lf
+*.conf        text eol=lf
+
+# Nginx / Systemd configs
+*.service     text eol=lf
+*.nginx       text eol=lf
+
+# Binary files — jangan diubah
+*.png   binary
+*.jpg   binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary

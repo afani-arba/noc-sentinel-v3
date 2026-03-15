@@ -5,6 +5,10 @@
 #           atau: sudo noc-update  (jika sudah diinstall)
 # Fungsi: git pull → pip install → npm build → restart service
 # =============================================================================
+
+# Auto-fix Windows CRLF line endings (\r\n → \n) agar heredoc tidak error
+sed -i 's/\r//' "$0" 2>/dev/null || true
+
 set -euo pipefail
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'
@@ -126,45 +130,20 @@ step "4/6 Perbarui systemd service"
 VENV_BIN="$VENV/bin/uvicorn"
 [[ ! -f "$VENV_BIN" ]] && VENV_BIN="$(which uvicorn 2>/dev/null || echo uvicorn)"
 
-cat > "/etc/systemd/system/${SERVICE}.service" <<SVCEOF
-[Unit]
-Description=NOC Sentinel v3 Backend (FastAPI/Uvicorn)
-Documentation=https://github.com/afani-arba/noc-sentinel-v3
-After=network.target mongod.service
-Wants=mongod.service
-
-[Service]
-Type=simple
-User=root
-Group=root
-WorkingDirectory=${APP_DIR}/backend
-EnvironmentFile=${APP_DIR}/backend/.env
-ExecStart=${VENV_BIN} server:app \
-    --host 127.0.0.1 \
-    --port 8000 \
-    --workers 1 \
-    --loop asyncio \
-    --log-level info
-ExecReload=/bin/kill -s HUP \$MAINPID
-Restart=always
-RestartSec=5
-StartLimitIntervalSec=120
-StartLimitBurst=5
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=${SERVICE}
-KillMode=mixed
-TimeoutStopSec=30
-
-[Install]
-WantedBy=multi-user.target
-SVCEOF
+# Tulis service file via printf — aman dari CRLF (tidak pakai heredoc)
+SVC_FILE="/etc/systemd/system/${SERVICE}.service"
+printf '[Unit]\nDescription=NOC Sentinel v3 Backend (FastAPI/Uvicorn)\nDocumentation=https://github.com/afani-arba/noc-sentinel-v3\nAfter=network.target mongod.service\nWants=mongod.service\n\n' > "$SVC_FILE"
+printf '[Service]\nType=simple\nUser=root\nGroup=root\nWorkingDirectory=%s/backend\nEnvironmentFile=%s/backend/.env\n' "$APP_DIR" "$APP_DIR" >> "$SVC_FILE"
+printf 'ExecStart=%s server:app --host 127.0.0.1 --port 8000 --workers 1 --loop asyncio --log-level info\n' "$VENV_BIN" >> "$SVC_FILE"
+printf 'ExecReload=/bin/kill -s HUP $MAINPID\nRestart=always\nRestartSec=5\nStartLimitIntervalSec=120\nStartLimitBurst=5\nStandardOutput=journal\nStandardError=journal\nSyslogIdentifier=%s\nKillMode=mixed\nTimeoutStopSec=30\n\n' "$SERVICE" >> "$SVC_FILE"
+printf '[Install]\nWantedBy=multi-user.target\n' >> "$SVC_FILE"
 
 systemctl daemon-reload
 systemctl enable "$SERVICE" --quiet
 
-# Symlink untuk akses mudah
+# Symlink untuk akses mudah (strip CRLF dari salinan)
 cp "$APP_DIR/update.sh" /usr/local/bin/noc-update 2>/dev/null || true
+sed -i 's/\r//' /usr/local/bin/noc-update 2>/dev/null || true
 chmod +x /usr/local/bin/noc-update 2>/dev/null || true
 ok "Systemd service diperbarui"
 
