@@ -1,8 +1,9 @@
 #!/bin/bash
 # =============================================================================
-# NOC Sentinel v3 — Update Script v4.0
+# NOC Sentinel v3 — Update Script v5.0
 # Jalankan: sudo bash update.sh
 #           atau: sudo noc-update  (jika sudah diinstall)
+# Fungsi: git pull → pip install → npm build → restart service
 # =============================================================================
 set -euo pipefail
 
@@ -26,7 +27,7 @@ SERVICE="${SERVICE:-nocsentinel}"
 
 echo -e "${BOLD}${BLUE}"
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║     NOC Sentinel v3 — Update Script v4.0                    ║"
+echo "║     NOC Sentinel v3 — Update Script v5.0                    ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 echo -e "  Waktu    : $(date '+%Y-%m-%d %H:%M:%S')"
@@ -85,6 +86,13 @@ fi
 "$VENV/bin/pip" install --upgrade pip -q
 "$VENV/bin/pip" install -r "$APP_DIR/backend/requirements.txt" -q
 ok "Python packages updated"
+
+# Cek pysnmp (Hybrid Monitoring dependency)
+if "$VENV/bin/python" -c "import pysnmp" 2>/dev/null; then
+    ok "pysnmp tersedia — SNMP Hybrid Monitoring aktif"
+else
+    warn "pysnmp belum terinstall — install manual: pip install 'pysnmp>=6.1.0'"
+fi
 
 # ── 3. Build frontend ─────────────────────────────────────────────────────────
 step "3/6 Build frontend (npm + Vite)"
@@ -197,6 +205,8 @@ echo -e "  ${BOLD}Commit  :${NC} $(git -C $APP_DIR rev-parse --short HEAD 2>/dev
 echo -e "  ${BOLD}Backend :${NC} $(systemctl is-active $SERVICE)"
 echo -e "  ${BOLD}Nginx   :${NC} $(systemctl is-active nginx 2>/dev/null || echo 'n/a')"
 echo -e "  ${BOLD}MongoDB :${NC} $(systemctl is-active mongod 2>/dev/null || echo 'n/a')"
+echo -e "  ${BOLD}SNMP    :${NC} $($VENV/bin/python -c 'import pysnmp; print(\"aktif\")' 2>/dev/null || echo 'nonaktif — pip install pysnmp')"
 echo ""
+echo -e "  ${YELLOW}➡ Aktifkan SNMP di MikroTik: /snmp set enabled=yes${NC}"
 echo -e "  ${YELLOW}➡ Buka browser → Ctrl+Shift+R untuk melihat perubahan${NC}"
 echo ""
