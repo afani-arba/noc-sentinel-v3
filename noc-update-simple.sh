@@ -44,7 +44,7 @@ echo "▶ 3/5  Build frontend..."
 cd "$APP_DIR/frontend"
 npm install --legacy-peer-deps --prefer-offline -q 2>/dev/null || npm install --legacy-peer-deps -q
 CI=false npm run build
-[ -f "dist/index.html" ] && ok "Frontend build OK" || err "Build frontend gagal"
+[ -f "build/index.html" ] && ok "Frontend build OK" || { [ -f "dist/index.html" ] && ok "Frontend build OK (dist/)" || err "Build frontend gagal"; }
 
 # ── 4. Restart backend ───────────────────────────────────────────
 echo "▶ 4/5  Restart backend..."

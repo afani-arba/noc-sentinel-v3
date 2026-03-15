@@ -436,10 +436,10 @@ function TelegramSection({ settings, setSettings }) {
     if (!testChatId) { toast.error("Masukkan Chat ID tujuan test"); return; }
     setSendingTest(true);
     try {
-      const r = await import("@/lib/api").then(m => m.default.post("/notifications/test-telegram", {
+      const r = await api.post("/notifications/test-telegram", {
         chat_id: testChatId,
         bot_token: settings.telegram_bot_token,
-      }));
+      });
       toast.success(r.data.message || "Test Telegram berhasil dikirim!");
     } catch (e) {
       toast.error(e.response?.data?.detail || "Test gagal. Periksa bot token dan chat ID.");
