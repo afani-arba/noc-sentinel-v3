@@ -1567,7 +1567,7 @@ async def get_connection_info(device_id: str, user=Depends(get_current_user)):
         "id": device.get("id"),
         "name": device.get("name"),
         "ip_address": device.get("ip_address"),
-        "winbox_address": winbox_addr_raw or None,   # None jika tidak diset
+        "winbox_address": winbox_addr_raw or None,
         "api_username": device.get("api_username", "admin"),
         "api_mode": device.get("api_mode", "rest"),
         "api_port": device.get("api_port"),
@@ -1575,4 +1575,129 @@ async def get_connection_info(device_id: str, user=Depends(get_current_user)):
         "model": device.get("model"),
         "ros_version": device.get("ros_version"),
         "status": device.get("status"),
+    }
+
+
+@router.get("/devices/{device_id}/test-snmp")
+async def test_snmp(device_id: str, user=Depends(get_current_user)):
+    """
+    Tes konektivitas SNMP ke device secara real-time.
+    Mengambil sysName, sysDescr, sysUptime + jumlah interface.
+    Hasil TIDAK disimpan ke database.
+    """
+    db = get_db()
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(404, "Device tidak ditemukan")
+
+    # Ambil IP bersih (tanpa port/protokol)
+    raw_ip    = (device.get("ip_address") or "").strip().split(":")[0].strip()
+    community = (device.get("snmp_community") or "public").strip()
+    host      = raw_ip
+
+    if not host:
+        return {"success": False, "error": "IP address tidak valid"}
+
+    # ── Synchronous SNMP get (dijalankan di thread pool) ─────────────────────
+    def _snmp_probe():
+        result = {
+            "sys_name":    "",
+            "sys_descr":   "",
+            "sys_uptime":  0,
+            "iface_count": 0,
+        }
+        error_msg = ""
+
+        try:
+            from pysnmp.hlapi import (
+                SnmpEngine, CommunityData, UdpTransportTarget,
+                ContextData, ObjectType, ObjectIdentity, getCmd, nextCmd
+            )
+        except ImportError:
+            return None, "pysnmp tidak terinstall di server"
+
+        try:
+            engine = SnmpEngine()
+            transport = UdpTransportTarget((host, 161), timeout=4, retries=1)
+            comm = CommunityData(community, mpModel=1)  # SNMP v2c
+
+            oids = [
+                ObjectType(ObjectIdentity("1.3.6.1.2.1.1.5.0")),  # sysName
+                ObjectType(ObjectIdentity("1.3.6.1.2.1.1.1.0")),  # sysDescr
+                ObjectType(ObjectIdentity("1.3.6.1.2.1.1.3.0")),  # sysUpTime
+                ObjectType(ObjectIdentity("1.3.6.1.2.1.2.1.0")),  # ifNumber
+            ]
+
+            for err_ind, err_st, err_idx, var_binds in getCmd(
+                engine, comm, transport, ContextData(), *oids
+            ):
+                if err_ind:
+                    error_msg = str(err_ind)
+                    # Terjemahkan error umum ke bahasa manusia
+                    ei = str(err_ind).lower()
+                    if "timeout" in ei:
+                        error_msg = "Timeout — SNMP tidak merespon (cek: SNMP enabled? community? firewall?)"
+                    elif "no response" in ei:
+                        error_msg = "No response — device tidak terjangkau via UDP 161"
+                    elif "unknown" in ei or "community" in ei:
+                        error_msg = "Wrong Community — cek SNMP community string"
+                    return None, error_msg
+
+                if err_st:
+                    error_msg = f"SNMP error status: {err_st.prettyPrint()}"
+                    return None, error_msg
+
+                for vb in var_binds:
+                    oid_str = str(vb[0])
+                    val     = vb[1]
+                    try:
+                        if "1.5.0" in oid_str:   # sysName
+                            result["sys_name"] = str(val).strip()
+                        elif "1.1.0" in oid_str:  # sysDescr
+                            result["sys_descr"] = str(val).strip()[:120]
+                        elif "1.3.0" in oid_str:  # sysUpTime (TimeTicks, 1/100s)
+                            ticks = int(val)
+                            d  = ticks // (24 * 3600 * 100)
+                            h  = (ticks % (24 * 3600 * 100)) // (3600 * 100)
+                            m  = (ticks % (3600 * 100)) // (60 * 100)
+                            result["sys_uptime"] = f"{d}d {h}h {m}m"
+                        elif "2.1.0" in oid_str:  # ifNumber
+                            result["iface_count"] = int(val)
+                    except Exception:
+                        pass
+                break  # satu iterasi cukup untuk getCmd
+
+        except Exception as e:
+            error_msg = f"SNMP error: {e}"
+            return None, error_msg
+
+        return result, ""
+
+    try:
+        data, error = await asyncio.wait_for(
+            asyncio.to_thread(_snmp_probe),
+            timeout=10,
+        )
+    except asyncio.TimeoutError:
+        return {"success": False, "error": "Timeout 10s — SNMP tidak merespon"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+    if data is None:
+        return {"success": False, "error": error or "SNMP gagal"}
+
+    sys_name = data.get("sys_name") or device.get("name", "?")
+    logger.info(
+        f"SNMP test OK [{device.get('name','?')} / {host}]: "
+        f"sysName={sys_name} community={community}"
+    )
+    return {
+        "success":     True,
+        "host":        host,
+        "community":   community,
+        "sys_name":    sys_name,
+        "sys_descr":   data.get("sys_descr", ""),
+        "sys_uptime":  data.get("sys_uptime", "-"),
+        "iface_count": data.get("iface_count", 0),
+        "message":     f"SNMP OK — {sys_name} ({data.get('iface_count', 0)} interfaces, uptime: {data.get('sys_uptime', '-')})",
     }

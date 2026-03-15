@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
-import { Plus, Trash2, Server, Wifi, WifiOff, Pencil, Zap, ExternalLink, Monitor } from "lucide-react";
+import { Plus, Trash2, Server, Wifi, WifiOff, Pencil, Zap, Monitor, Radio } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,7 +20,8 @@ export default function DevicesPage() {
   const [form, setForm] = useState({
     name: "", ip_address: "", winbox_address: "",
     api_mode: "rest", api_username: "admin", api_password: "",
-    api_port: "", use_https: false, api_ssl: true, api_plaintext_login: true, description: "",
+    api_port: "", use_https: false, api_ssl: true, api_plaintext_login: true,
+    description: "", snmp_community: "public",
   });
 
   const fetchDevices = useCallback(async () => {
@@ -35,7 +36,7 @@ export default function DevicesPage() {
 
   const openAdd = () => {
     setEditing(null);
-    setForm({ name: "", ip_address: "", winbox_address: "", api_mode: "rest", api_username: "admin", api_password: "", api_port: "", use_https: false, api_ssl: true, api_plaintext_login: true, description: "" });
+    setForm({ name: "", ip_address: "", winbox_address: "", api_mode: "rest", api_username: "admin", api_password: "", api_port: "", use_https: false, api_ssl: true, api_plaintext_login: true, description: "", snmp_community: "public" });
     setDialogOpen(true);
   };
 
@@ -50,6 +51,7 @@ export default function DevicesPage() {
       api_ssl: d.api_ssl !== undefined ? d.api_ssl : true,
       api_plaintext_login: d.api_plaintext_login !== undefined ? d.api_plaintext_login : true,
       description: d.description || "",
+      snmp_community: d.snmp_community || "public",
     });
     setDialogOpen(true);
   };
@@ -93,6 +95,22 @@ export default function DevicesPage() {
         toast.error(`API Failed: ${r.data.error || "connection error"}`);
       }
     } catch (e) { toast.error("API test failed"); }
+    setTesting("");
+  };
+
+  const handleTestSnmp = async (id) => {
+    setTesting(id + "_snmp");
+    try {
+      const r = await api.get(`/devices/${id}/test-snmp`);
+      if (r.data.success) {
+        toast.success(r.data.message, {
+          description: r.data.sys_descr ? r.data.sys_descr.substring(0, 80) : undefined,
+          duration: 6000,
+        });
+      } else {
+        toast.error(`SNMP Gagal: ${r.data.error}`, { duration: 8000 });
+      }
+    } catch (e) { toast.error("SNMP test error: " + (e.response?.data?.detail || e.message)); }
     setTesting("");
   };
 
@@ -146,6 +164,9 @@ export default function DevicesPage() {
               <div className="mt-3 sm:mt-4 pt-2 sm:pt-3 border-t border-border/50 flex flex-wrap gap-1">
                 <Button variant="outline" size="sm" className="text-[10px] sm:text-xs gap-1 h-6 sm:h-7 rounded-sm px-2" onClick={() => handleTestApi(d.id)} disabled={testing===d.id+"_api"} data-testid={`test-api-${d.name}`}>
                   <Zap className="w-3 h-3" />{testing===d.id+"_api"?"...":"Test API"}
+                </Button>
+                <Button variant="outline" size="sm" className="text-[10px] sm:text-xs gap-1 h-6 sm:h-7 rounded-sm px-2 text-cyan-500 border-cyan-500/30 hover:bg-cyan-500/10" onClick={() => handleTestSnmp(d.id)} disabled={testing===d.id+"_snmp"} data-testid={`test-snmp-${d.name}`}>
+                  <Radio className="w-3 h-3" />{testing===d.id+"_snmp"?"...":"SNMP"}
                 </Button>
                 <Button variant="outline" size="sm" className="text-[10px] sm:text-xs gap-1 h-6 sm:h-7 rounded-sm px-2 text-primary border-primary/30 hover:bg-primary/10" onClick={() => navigate(`/devices/${d.id}`)} data-testid={`detail-device-${d.name}`}>
                   <Zap className="w-3 h-3" />Detail
@@ -288,10 +309,50 @@ export default function DevicesPage() {
             </div>
             <div className="space-y-1.5"><Label className="text-xs text-muted-foreground">Description</Label>
               <Input value={form.description} onChange={e => setForm({...form, description:e.target.value})} className="rounded-sm bg-background" data-testid="device-form-description" /></div>
+
+            {/* SNMP Section */}
+            <div className="border border-border/50 rounded-sm p-3 space-y-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                <Radio className="w-3 h-3" /> SNMP (Hybrid Monitoring)
+              </p>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Community String</Label>
+                <Input
+                  value={form.snmp_community}
+                  onChange={e => setForm({...form, snmp_community: e.target.value})}
+                  className="rounded-sm bg-background font-mono text-xs"
+                  placeholder="public"
+                  data-testid="device-form-snmp-community"
+                />
+                <p className="text-[10px] text-muted-foreground/60">
+                  Digunakan untuk monitoring traffic via SNMP v2c. Default: <code className="bg-muted px-1 rounded">public</code>
+                </p>
+              </div>
+            </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)} className="rounded-sm" data-testid="device-form-cancel">Cancel</Button>
-            <Button onClick={handleSave} className="rounded-sm" data-testid="device-form-save">{editing?"Update":"Add Device"}</Button>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            {editing && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-sm gap-1 text-cyan-500 border-cyan-500/30 hover:bg-cyan-500/10"
+                onClick={() => handleTestSnmp(editing.id)}
+                disabled={testing === editing.id + "_snmp"}
+                data-testid="device-form-test-snmp"
+              >
+                <Radio className="w-3 h-3" />
+                {testing === editing.id + "_snmp" ? (
+                  <span className="flex items-center gap-1">
+                    <span className="animate-spin inline-block w-3 h-3 border border-current border-t-transparent rounded-full" />
+                    Testing...
+                  </span>
+                ) : "Test SNMP"}
+              </Button>
+            )}
+            <div className="flex gap-2 ml-auto">
+              <Button variant="outline" onClick={() => setDialogOpen(false)} className="rounded-sm" data-testid="device-form-cancel">Cancel</Button>
+              <Button onClick={handleSave} className="rounded-sm" data-testid="device-form-save">{editing?"Update":"Add Device"}</Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
