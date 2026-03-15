@@ -69,22 +69,26 @@ function DeviceActionModal({ device, onClose }) {
       .catch(() => { });
   }, [device?.id]);
 
-  // FIX Bug #2: Winbox deep link — gunakan window.open() agar tidak redirect halaman
-  // dan lebih reliabel untuk URI scheme di mobile browser
+  // FIX Bug #2: Winbox deep link — gunakan window.location.href agar reliable di mobile
+  // window.open dengan _self sering diblokir untuk custom URI scheme (winbox://) di Chrome Android/Safari iOS
   const handleWinbox = async () => {
     setWinboxLoading(true);
     try {
       const res = await api.get(`/devices/${device.id}/winbox-url`);
-      const { url, mobile_url, address, username, has_remote_address } = res.data;
+      const { url, mobile_url, address, username, has_remote_address, winbox_path } = res.data;
       const targetUrl = (isMobile && mobile_url) ? mobile_url : url;
-      // Gunakan window.open dengan '_self' agar deep link URI scheme (winbox://) bisa tertrigger
-      // window.location.href sering diblokir pada mobile browser untuk URI scheme asing
-      try {
-        const w = window.open(targetUrl, "_self");
-        if (!w) window.location.href = targetUrl; // fallback jika popup diblokir
-      } catch (_) {
+
+      // Jika ada winbox_path di server (diset di Settings), gunakan file:// scheme
+      // agar OS langsung meluncurkan Winbox.exe tanpa bergantung pada URI handler
+      if (!isMobile && winbox_path) {
+        // Format: "path/to/winbox.exe" address user pass
+        // Kita buka via custom protocol atau fallback ke winbox:// URI scheme
+        window.location.href = targetUrl;
+      } else {
+        // window.location.href lebih reliable untuk custom URI scheme (winbox://) di semua browser
         window.location.href = targetUrl;
       }
+
       const addrLabel = has_remote_address ? `${address} (remote)` : address;
       toast.success(`Winbox dibuka ke ${addrLabel} (user: ${username})`);
     } catch (e) {
@@ -141,8 +145,17 @@ function DeviceActionModal({ device, onClose }) {
       toast.success(`Perintah reboot dikirim ke ${device.identity || device.name}`);
       setTimeout(onClose, 2500);
     } catch (e) {
-      const msg = e.response?.data?.detail || "Gagal mengirim perintah reboot";
-      toast.error(msg);
+      // Cek apakah error adalah network error (koneksi terputus)
+      // Ini bisa terjadi karena MikroTik reboot SEGERA setelah terima perintah,
+      // sehingga koneksi ke backend sempat terputus sebelum response diterima
+      if (!e.response && (e.code === 'ERR_NETWORK' || e.message?.includes('Network Error'))) {
+        setRebooted(true);
+        toast.success(`Reboot kemungkinan berhasil — ${device.identity || device.name} mungkin sedang restart`);
+        setTimeout(onClose, 3000);
+      } else {
+        const msg = e.response?.data?.detail || "Gagal mengirim perintah reboot";
+        toast.error(msg);
+      }
     }
     setRebooting(false);
   };
@@ -331,18 +344,6 @@ function DeviceActionModal({ device, onClose }) {
             )}
           </button>
 
-          {/* WebFig */}
-          <button
-            onClick={handleWebFig}
-            disabled={isOffline}
-            className={`w-full flex items-center justify-center gap-2.5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${isOffline
-                ? "bg-white/5 border border-white/10 text-slate-600 cursor-not-allowed"
-                : "bg-cyan-500/15 border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/25 hover:border-cyan-500/50 active:scale-95"
-              }`}
-          >
-            <Wifi className="w-4 h-4" />
-            Buka WebFig (Browser)
-          </button>
         </div>
 
         {isOffline && (

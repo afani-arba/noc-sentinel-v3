@@ -1,11 +1,61 @@
 import { useState, useEffect } from "react";
 import api from "@/lib/api";
-import { Download, RefreshCw, CheckCircle2, Github, Terminal, Clock, Database, Wifi, WifiOff, Save, Info, Eye, EyeOff, AlertCircle, Cpu, Zap } from "lucide-react";
+import { Download, RefreshCw, CheckCircle2, Github, Terminal, Clock, Database, Wifi, WifiOff, Save, Info, Eye, EyeOff, AlertCircle, Cpu, Zap, Monitor } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+
+// ─── Winbox Path Section ─────────────────────────────────────────────────────
+function WinboxSection() {
+  const [winboxPath, setWinboxPath] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get("/system/winbox-config")
+      .then(r => setWinboxPath(r.data.winbox_path || ""))
+      .catch(() => {});
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.post("/system/save-winbox-config", { winbox_path: winboxPath });
+      toast.success("Path Winbox berhasil disimpan");
+    } catch (e) { toast.error(e.response?.data?.detail || "Gagal simpan"); }
+    setSaving(false);
+  };
+
+  return (
+    <div className="bg-card border border-border rounded-sm p-6">
+      <div className="flex items-center gap-2 mb-4">
+        <Monitor className="w-5 h-5 text-primary" />
+        <h2 className="text-lg font-semibold font-['Rajdhani']">Konfigurasi Winbox</h2>
+      </div>
+      <div className="space-y-3">
+        <div>
+          <Label className="text-xs text-muted-foreground mb-1 block">Path Executable Winbox (opsional)</Label>
+          <div className="flex gap-2">
+            <Input
+              value={winboxPath}
+              onChange={e => setWinboxPath(e.target.value)}
+              placeholder="C:\\Tools\\winbox64.exe"
+              className="h-8 text-xs rounded-sm font-mono flex-1"
+            />
+            <Button size="sm" className="rounded-sm h-8 text-xs gap-1" onClick={handleSave} disabled={saving}>
+              <Save className="w-3 h-3" />{saving ? "..." : "Simpan"}
+            </Button>
+          </div>
+        </div>
+        <p className="text-[10px] text-muted-foreground/70">
+          Isi path lengkap ke Winbox.exe di komputer ini (contoh: <code className="font-mono bg-secondary/40 px-1 rounded">C:\Tools\winbox64.exe</code>).
+          Jika dikosongkan, aplikasi akan menggunakan URI scheme <code className="font-mono bg-secondary/40 px-1 rounded">winbox://</code> standar.
+        </p>
+      </div>
+    </div>
+  );
+}
 
 // ─── InfluxDB Section ────────────────────────────────────────────────────────
 function InfluxDBSection() {
@@ -573,6 +623,9 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+
+      {/* Winbox Section */}
+      <WinboxSection />
 
       {/* InfluxDB Section */}
       <InfluxDBSection />

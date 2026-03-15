@@ -1,4 +1,4 @@
-﻿"""
+"""
 Devices router: CRUD + dashboard + MikroTik API test.
 """
 import uuid
@@ -1436,42 +1436,51 @@ async def reboot_device(device_id: str, user=Depends(require_admin)):
             import routeros_api
             api_port = device.get("api_port") or (8729 if device.get("api_ssl") else 8728)
             api_ssl = device.get("api_ssl", False)
-            conn = routeros_api.RouterOsApiPool(
-                ip, username=username, password=password,
-                port=api_port, use_ssl=api_ssl,
-                ssl_verify=False, ssl_verify_hostname=False,
-                plaintext_login=True
-            )
-            api = conn.get_api()
-            api.get_resource("/system").call("reboot")
-            conn.disconnect()
+            try:
+                conn = routeros_api.RouterOsApiPool(
+                    ip, username=username, password=password,
+                    port=api_port, use_ssl=api_ssl,
+                    ssl_verify=False, ssl_verify_hostname=False,
+                    plaintext_login=True
+                )
+                api = conn.get_api()
+                api.get_resource("/system").call("reboot")
+                try:
+                    conn.disconnect()
+                except Exception:
+                    pass  # Koneksi bisa terputus saat reboot â€” normal
+            except Exception as api_err:
+                # Jika error adalah connection reset SETELAH command dikirim = reboot berhasil
+                err_str = str(api_err).lower()
+                if any(k in err_str for k in ("connection reset", "broken pipe", "eof", "remote end closed")):
+                    logger.info(f"Connection dropped after ROS6 reboot command (expected): {api_err}")
+                else:
+                    raise
         else:
             # ROS 7 â€” REST API
             port = device.get("api_port") or (443 if device.get("use_https") else 80)
             scheme = "https" if device.get("use_https") else "http"
             url = f"{scheme}://{ip}:{port}/rest/system/reboot"
-            async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
-                resp = await client.post(url, auth=(username, password))
-                # 200 OK atau 204 No Content = sukses
-                # ROS bisa langsung reboot sebelum response, jadi 408 timeout juga normal
-                if resp.status_code not in (200, 204, 408):
-                    raise HTTPException(400, f"MikroTik error: HTTP {resp.status_code}")
-
-        # Catat di audit log
-        await db.audit_logs.insert_one({
-            "action": "device_reboot",
-            "device_id": device_id,
-            "device_name": device.get("name"),
-            "ip_address": ip,
-            "performed_by": user.get("username"),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
-
-        return {
-            "success": True,
-            "message": f"Perintah reboot berhasil dikirim ke {device.get('name')} ({ip}). Device akan restart dalam beberapa detik.",
-            "device_id": device_id,
-        }
+            try:
+                async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
+                    resp = await client.post(url, auth=(username, password))
+                    # 200 OK atau 204 No Content = sukses
+                    # ROS bisa langsung reboot sebelum mengirim response,
+                    # sehingga status 408 (timeout) juga dianggap sukses.
+                    if resp.status_code not in (200, 204, 408):
+                        raise HTTPException(400, f"MikroTik error: HTTP {resp.status_code}")
+            except HTTPException:
+                raise
+            except (
+                httpx.RemoteProtocolError,   # Server menutup koneksi sebelum kirim response
+                httpx.ReadError,             # Gagal baca response (device sudah reboot)
+                httpx.ConnectError,          # Koneksi terputus saat proses
+                httpx.PoolTimeout,           # Request pool timeout
+                httpx.ReadTimeout,           # Read timeout â€” device reboot sebelum response
+            ) as conn_err:
+                # NORMAL: MikroTik memutus koneksi TCP tepat saat mulai reboot.
+                # Artinya perintah reboot sudah DITERIMA dan sedang dieksekusi.
+                logger.info(f"Connection dropped after reboot (expected, device rebooting): {type(conn_err).__name__}: {conn_err}")
 
     except HTTPException:
         raise

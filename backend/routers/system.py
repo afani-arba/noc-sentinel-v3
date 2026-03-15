@@ -519,3 +519,44 @@ async def get_genieacs_config(user=Depends(require_admin)):
         "password_set": bool(_os.environ.get("GENIEACS_PASSWORD", "")),
     }
 
+
+# ── Winbox Path Configuration ─────────────────────────────────────────────────
+
+@router.get("/winbox-config")
+async def get_winbox_config(user=Depends(require_admin)):
+    """Return configured Winbox executable path."""
+    import os as _os
+    return {
+        "winbox_path": _os.environ.get("WINBOX_PATH", ""),
+    }
+
+
+@router.post("/save-winbox-config")
+async def save_winbox_config(data: dict, user=Depends(require_admin)):
+    """
+    Simpan path executable Winbox ke .env agar bisa dipakai saat generate URL.
+    Contoh path: C:\\Users\\user\\Desktop\\winbox64.exe
+    """
+    winbox_path = (data.get("winbox_path") or "").strip()
+    # Path boleh kosong (artinya gunakan default URI scheme winbox://)
+
+    backend_dir = Path(__file__).parent.parent
+    env_path = backend_dir / ".env"
+    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+
+    updated = False
+    new_lines = []
+    for line in lines:
+        if line.startswith("WINBOX_PATH="):
+            new_lines.append(f"WINBOX_PATH={winbox_path}")
+            updated = True
+        else:
+            new_lines.append(line)
+    if not updated:
+        new_lines.append(f"WINBOX_PATH={winbox_path}")
+
+    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    os.environ["WINBOX_PATH"] = winbox_path
+    logger.info(f"Winbox path saved: {winbox_path!r}")
+    return {"message": "Path Winbox disimpan.", "winbox_path": winbox_path}
+
