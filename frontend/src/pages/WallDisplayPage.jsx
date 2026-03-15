@@ -55,6 +55,8 @@ function DeviceActionModal({ device, onClose }) {
   const [rebooted, setRebooted] = useState(false);
   const [winboxLoading, setWinboxLoading] = useState(false);
   const [connInfo, setConnInfo] = useState(null);
+  // FIX Bug #1: Ganti window.confirm() (diblokir mobile) dengan state konfirmasi inline
+  const [confirmReboot, setConfirmReboot] = useState(false);
 
   // Deteksi mobile (Android / iPhone / iPad)
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -67,15 +69,22 @@ function DeviceActionModal({ device, onClose }) {
       .catch(() => { });
   }, [device?.id]);
 
+  // FIX Bug #2: Winbox deep link — gunakan window.open() agar tidak redirect halaman
+  // dan lebih reliabel untuk URI scheme di mobile browser
   const handleWinbox = async () => {
     setWinboxLoading(true);
     try {
       const res = await api.get(`/devices/${device.id}/winbox-url`);
       const { url, mobile_url, address, username, has_remote_address } = res.data;
-      // Di mobile, gunakan format mobile_url = winbox://address/user/pass
-      // Di desktop, gunakan format url = winbox://user:pass@address
       const targetUrl = (isMobile && mobile_url) ? mobile_url : url;
-      window.location.href = targetUrl;  // trigger deep link / custom URI scheme
+      // Gunakan window.open dengan '_self' agar deep link URI scheme (winbox://) bisa tertrigger
+      // window.location.href sering diblokir pada mobile browser untuk URI scheme asing
+      try {
+        const w = window.open(targetUrl, "_self");
+        if (!w) window.location.href = targetUrl; // fallback jika popup diblokir
+      } catch (_) {
+        window.location.href = targetUrl;
+      }
       const addrLabel = has_remote_address ? `${address} (remote)` : address;
       toast.success(`Winbox dibuka ke ${addrLabel} (user: ${username})`);
     } catch (e) {
@@ -88,19 +97,43 @@ function DeviceActionModal({ device, onClose }) {
     setWinboxLoading(false);
   };
 
+  // FIX Bug #3: WebFig — gunakan window.location.href di mobile (hindari popup blocker)
+  // Sertakan port yang benar di URL WebFig
   const handleWebFig = () => {
+    const useHttps = connInfo?.use_https || device.use_https;
+    const scheme = useHttps ? "https" : "http";
+    // Gunakan webfig port yang benar; default 80 (http) atau 443 (https)
+    const port = connInfo?.api_port || device.api_port;
+    // Hanya tampilkan port jika bukan default (80 untuk http, 443 untuk https)
+    const isDefaultPort = !port || (useHttps ? port === 443 : port === 80);
+    const webfigPort = isDefaultPort ? "" : `:${port}`;
+    // Alamat WebFig: gunakan ip_address (API address) bukan winbox_address
     const ip = device.ip_address;
-    const scheme = (connInfo?.use_https || device.use_https) ? "https" : "http";
-    window.open(`${scheme}://${ip}`, "_blank");
+    const webfigUrl = `${scheme}://${ip}${webfigPort}`;
     toast.info(`Membuka WebFig ke ${ip}...`);
+    if (isMobile) {
+      // Mobile: langsung navigate (hindari popup blocker)
+      window.location.href = webfigUrl;
+    } else {
+      // Desktop: buka di tab baru
+      const w = window.open(webfigUrl, "_blank");
+      if (!w) window.location.href = webfigUrl; // fallback jika popup diblokir
+    }
   };
 
   const handleBackdropClick = (e) => {
     if (e.target === e.currentTarget) onClose();
   };
 
+  // FIX Bug #1: handleReboot sekarang dua tahap — pertama set confirmReboot, lalu eksekusi
   const handleReboot = async () => {
-    if (!window.confirm(`Yakin ingin reboot device "${device.identity || device.name}" (${device.ip_address})?`)) return;
+    if (!confirmReboot) {
+      // Tampilkan konfirmasi inline (tidak pakai window.confirm yang diblokir mobile)
+      setConfirmReboot(true);
+      return;
+    }
+    // Eksekusi reboot
+    setConfirmReboot(false);
     setRebooting(true);
     try {
       await api.post(`/devices/${device.id}/reboot`);
@@ -232,7 +265,28 @@ function DeviceActionModal({ device, onClose }) {
 
         {/* Action Buttons */}
         <div className="space-y-2">
-          {/* Reboot */}
+          {/* Reboot — dua tahap: tombol → konfirmasi inline → eksekusi */}
+          {confirmReboot && !rebooting && !rebooted && (
+            <div className="rounded-xl bg-red-500/10 border border-red-500/40 p-3 space-y-2">
+              <p className="text-xs text-red-300 text-center font-semibold">
+                ⚠️ Yakin ingin reboot <span className="text-white">{device.identity || device.name}</span>?
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setConfirmReboot(false)}
+                  className="flex-1 py-2 rounded-lg text-xs font-semibold bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 active:scale-95 transition-all"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={handleReboot}
+                  className="flex-1 py-2 rounded-lg text-xs font-bold bg-red-500/25 border border-red-500/50 text-red-300 hover:bg-red-500/35 active:scale-95 transition-all"
+                >
+                  Ya, Reboot!
+                </button>
+              </div>
+            </div>
+          )}
           <button
             onClick={handleReboot}
             disabled={rebooting || rebooted || isOffline}
@@ -240,7 +294,9 @@ function DeviceActionModal({ device, onClose }) {
                 ? "bg-green-500/20 border border-green-500/40 text-green-400 cursor-default"
                 : isOffline
                   ? "bg-white/5 border border-white/10 text-slate-600 cursor-not-allowed"
-                  : "bg-red-500/15 border border-red-500/30 text-red-400 hover:bg-red-500/25 hover:border-red-500/50 active:scale-95"
+                  : confirmReboot
+                    ? "bg-red-500/25 border border-red-500/50 text-red-300 cursor-default"
+                    : "bg-red-500/15 border border-red-500/30 text-red-400 hover:bg-red-500/25 hover:border-red-500/50 active:scale-95"
               }`}
           >
             {rebooting ? (
