@@ -175,6 +175,13 @@ else
     warn "API health tidak merespon (backend mungkin masih starting)"
 fi
 
+# Pre-compute SNMP status (hindari nested quote hell)
+if "$VENV/bin/python" -c "import pysnmp" 2>/dev/null; then
+    SNMP_STATUS="aktif ✓"
+else
+    SNMP_STATUS="nonaktif — pip install pysnmp>=6.1.0"
+fi
+
 echo ""
 echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════════╗"
 echo    "║                  ✅ UPDATE SELESAI!                          ║"
@@ -184,7 +191,7 @@ echo -e "  ${BOLD}Commit  :${NC} $(git -C $APP_DIR rev-parse --short HEAD 2>/dev
 echo -e "  ${BOLD}Backend :${NC} $(systemctl is-active $SERVICE)"
 echo -e "  ${BOLD}Nginx   :${NC} $(systemctl is-active nginx 2>/dev/null || echo 'n/a')"
 echo -e "  ${BOLD}MongoDB :${NC} $(systemctl is-active mongod 2>/dev/null || echo 'n/a')"
-echo -e "  ${BOLD}SNMP    :${NC} $($VENV/bin/python -c 'import pysnmp; print(\"aktif\")' 2>/dev/null || echo 'nonaktif — pip install pysnmp')"
+echo -e "  ${BOLD}SNMP    :${NC} ${SNMP_STATUS}"
 echo ""
 echo -e "  ${YELLOW}➡ Aktifkan SNMP di MikroTik: /snmp set enabled=yes${NC}"
 echo -e "  ${YELLOW}➡ Buka browser → Ctrl+Shift+R untuk melihat perubahan${NC}"
