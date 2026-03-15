@@ -51,6 +51,19 @@ fi
 step "[2/4] Update Python packages..."
 "$VENV/bin/pip" install --upgrade pip -q
 "$VENV/bin/pip" install -r "$APP_DIR/backend/requirements.txt" -q
+
+# Force install pysnmp-lextudio (SNMP monitoring dependency)
+# Uninstall pysnmp lama jika ada, lalu install pysnmp-lextudio
+if "$VENV/bin/python" -c "import pysnmp" 2>/dev/null; then
+    ok "pysnmp tersedia di venv"
+else
+    warn "pysnmp belum ada — force install pysnmp-lextudio..."
+    # Hapus pysnmp lama jika ada (konflik dengan lextudio)
+    "$VENV/bin/pip" uninstall pysnmp -y -q 2>/dev/null || true
+    "$VENV/bin/pip" install 'pysnmp-lextudio>=1.1.0' --upgrade -q \
+        && ok "pysnmp-lextudio terinstall" \
+        || warn "pysnmp-lextudio gagal install (fitur SNMP nonaktif)"
+fi
 ok "Python packages OK"
 
 # ── 3. Build Frontend ────────────────────────────────────────────────────────
