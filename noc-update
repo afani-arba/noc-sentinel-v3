@@ -62,21 +62,43 @@ npm run build
 
 # ── 4. Restart Backend ───────────────────────────────────────────────────────
 step "[4/4] Restart Backend..."
+
+# Stop service dulu
 systemctl stop "$SERVICE" 2>/dev/null || true
 
-# Tunggu proses berhenti
+# Tunggu service benar-benar inactive (max 20 detik)
 i=0
-while systemctl is-active --quiet "$SERVICE" 2>/dev/null && [[ $i -lt 15 ]]; do
+while systemctl is-active --quiet "$SERVICE" 2>/dev/null && [[ $i -lt 20 ]]; do
     sleep 1; i=$((i+1))
 done
 
-# Bebaskan port 8000 jika masih ditempati
-fuser -k 8000/tcp 2>/dev/null || lsof -ti:8000 | xargs -r kill -9 2>/dev/null || true
-sleep 1
+# Matikan semua proses yang masih memegang port 8000 secara paksa
+set +e   # jangan abort jika kill tidak ada target
+PIDS=$(lsof -ti:8000 2>/dev/null)
+if [[ -n "$PIDS" ]]; then
+    echo "  Membunuh proses di port 8000: $PIDS"
+    kill -9 $PIDS 2>/dev/null
+fi
+fuser -k 8000/tcp 2>/dev/null
+set -e
+
+# Pastikan port benar-benar bebas sebelum start (max 15 detik)
+echo -n "  Menunggu port 8000 bebas"
+p=0
+while lsof -ti:8000 &>/dev/null && [[ $p -lt 15 ]]; do
+    echo -n "."; sleep 1; p=$((p+1))
+done
+echo ""
+
+if lsof -ti:8000 &>/dev/null; then
+    warn "Port 8000 masih busy! Coba force kill terakhir..."
+    fuser -k -KILL 8000/tcp 2>/dev/null || true
+    sleep 2
+fi
 
 systemctl daemon-reload
 systemctl start "$SERVICE"
-sleep 4
+sleep 5
 
 if systemctl is-active --quiet "$SERVICE"; then
     ok "Backend '$SERVICE': RUNNING ✔"
