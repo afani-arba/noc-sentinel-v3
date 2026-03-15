@@ -450,7 +450,42 @@ async def save_influxdb_config(data: dict, user=Depends(require_admin)):
 
 @router.get("/health")
 async def health():
-    return {"status": "ok"}
+    """
+    Health check endpoint.
+    Mengembalikan status sistem termasuk:
+    - snmp_enabled: True jika pysnmp-lextudio terinstall dan bisa di-import
+    - app_version:  git commit hash pendek (7 karakter)
+    - syslog_port:  port UDP syslog yang aktif
+    """
+    # Cek pysnmp secara live (tidak di-cache sehingga reflect state install terbaru)
+    try:
+        import importlib
+        pysnmp_mod = importlib.util.find_spec("pysnmp")
+        snmp_enabled = pysnmp_mod is not None
+        if snmp_enabled:
+            # Double-check dengan import actual
+            from pysnmp.hlapi import SnmpEngine  # noqa: F401
+    except Exception:
+        snmp_enabled = False
+
+    # Ambil git commit hash pendek
+    app_version = "unknown"
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, cwd=APP_DIR, timeout=3
+        )
+        if commit.returncode == 0:
+            app_version = commit.stdout.strip()
+    except Exception:
+        pass
+
+    return {
+        "status": "ok",
+        "snmp_enabled": snmp_enabled,
+        "app_version": app_version,
+        "syslog_port": int(os.environ.get("SYSLOG_PORT", "5140")),
+    }
 
 
 @router.post("/save-genieacs-config")

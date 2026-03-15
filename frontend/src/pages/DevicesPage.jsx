@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
-import { Plus, Trash2, Server, Wifi, WifiOff, Pencil, Zap, Monitor, Radio } from "lucide-react";
+import { useAuth } from "@/App";
+import { Plus, Trash2, Server, Wifi, WifiOff, Pencil, Zap, Monitor, Radio, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,6 +13,7 @@ import { toast } from "sonner";
 
 export default function DevicesPage() {
   const navigate = useNavigate();
+  const { snmpEnabled } = useAuth(); // null=belum dicek, true=OK, false=belum install
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -135,6 +137,21 @@ export default function DevicesPage() {
           <Button onClick={openAdd} size="sm" className="rounded-sm gap-2" data-testid="add-device-btn"><Plus className="w-4 h-4" /> <span className="hidden sm:inline">Add Device</span></Button>
         </div>
       </div>
+
+      {/* SNMP Status Banner — hanya tampil jika backend konfirmasi pysnmp BELUM terinstall */}
+      {snmpEnabled === false && (
+        <div className="flex items-start gap-3 p-3 rounded-sm border border-yellow-500/30 bg-yellow-500/5 text-yellow-400" role="alert">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <div className="text-xs leading-relaxed">
+            <span className="font-semibold">SNMP Hybrid Monitoring tidak aktif</span>
+            {" — "}
+            <code className="bg-yellow-500/10 px-1 rounded">pysnmp-lextudio</code> belum terinstall di server.
+            {" "}
+            Jalankan <code className="bg-yellow-500/10 px-1 rounded">sudo noc-update</code> untuk install otomatis.
+            Bandwidth monitoring menggunakan API fallback.
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="text-center text-muted-foreground py-12 text-sm">Loading devices...</div>
