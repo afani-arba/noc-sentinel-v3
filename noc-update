@@ -90,20 +90,40 @@ step "[3/5] Update Python packages..."
 "$VENV/bin/pip" install --upgrade pip -q
 "$VENV/bin/pip" install -r "$APP_DIR/backend/requirements.txt" -q
 
-# Force install pysnmp-lextudio jika belum ada
-# PENTING: Uninstall pysnmp lama dulu (konflik dengan pysnmp-lextudio)
-if "$VENV/bin/python" -c "from pysnmp.hlapi import SnmpEngine" 2>/dev/null; then
-    ok "pysnmp (lextudio) tersedia di venv ✓"
+# Verifikasi pysnmp tersedia (cek via snmp_compat bridge)
+# v3 pakai pysnmp>=7.0.0 (dengan snmp_compat.py bridge untuk backward compat)
+SNMP_STATUS="nonaktif"
+if "$VENV/bin/python" -c "
+import sys; sys.path.insert(0, '$APP_DIR/backend')
+try:
+    from snmp_compat import PYSNMP_AVAILABLE, PYSNMP_VERSION
+    if PYSNMP_AVAILABLE: sys.exit(0)
+    else: sys.exit(2)
+except: sys.exit(1)
+" 2>/dev/null; then
+    SNMP_VER=$("$VENV/bin/python" -c "
+import sys; sys.path.insert(0, '$APP_DIR/backend')
+from snmp_compat import PYSNMP_VERSION; print(PYSNMP_VERSION)
+" 2>/dev/null || echo "?")
+    ok "pysnmp v${SNMP_VER} tersedia (via snmp_compat) ✓"
+    SNMP_STATUS="aktif (v${SNMP_VER})"
 else
-    warn "pysnmp belum tersedia — install pysnmp-lextudio..."
+    warn "pysnmp belum tersedia — coba install pysnmp>=7 lalu fallback ke lextudio..."
     # Hapus semua versi pysnmp yang konflik
     "$VENV/bin/pip" uninstall pysnmp pysnmp-lextudio -y -q 2>/dev/null || true
-    # Install versi yang kompatibel
-    "$VENV/bin/pip" install 'pysnmp-lextudio>=1.1.0,<2.0.0' -q \
-        && ok "pysnmp-lextudio terinstall" \
-        || warn "pysnmp-lextudio gagal install (fitur SNMP nonaktif)"
+    # Coba pysnmp 7.x terlebih dahulu
+    if "$VENV/bin/pip" install 'pysnmp>=7.0.0' -q 2>/dev/null; then
+        ok "pysnmp 7.x terinstall ✓"
+        SNMP_STATUS="aktif (7.x)"
+    else
+        warn "pysnmp 7.x gagal, coba pysnmp-lextudio..."
+        "$VENV/bin/pip" install 'pysnmp-lextudio>=1.1.0,<2.0.0' -q \
+            && ok "pysnmp-lextudio terinstall ✓" \
+            && SNMP_STATUS="aktif (lextudio)" \
+            || warn "Semua pysnmp gagal install (fitur SNMP nonaktif)"
+    fi
 fi
-ok "Python packages OK"
+ok "Python packages OK — SNMP: $SNMP_STATUS"
 
 # ── 4. Build Frontend ────────────────────────────────────────────────────────
 step "[4/5] Build Frontend..."
