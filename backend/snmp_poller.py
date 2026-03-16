@@ -1,15 +1,11 @@
 """
-snmp_poller.py — Hybrid Monitoring SNMP Module
-===============================================
-Traffic interface via SNMP v2c, 64-bit counters (ifHCInOctets/Out).
+snmp_poller.py — SNMP v2c Traffic Monitor
+==========================================
+Uses pysnmp-lextudio >= 6.0.0 (from pysnmp.hlapi import ...)
+nextCmd walk: reliable, stops cleanly at OID subtree boundary.
 
-Fix 2026-03-16:
-  - snmp_compat.py sekarang import UdpTransportTarget dari sync module
-    (bukan async) → tidak ada type mismatch lagi → walk BERHASIL
-  - Ganti bulkCmd → nextCmd untuk walk (lebih reliable, stop lebih bersih)
-  - Exception log di WARNING (bukan DEBUG) agar kelihatan di produksi
-  - 3-level fallback: ifDescr → ifName → synthetic dari ifInOctets
-  - Delta 1-detik + SMA window=3
+Fix 2026-03-16: simplified entire stack, direct import, no asyncio.run().
+3-level fallback: ifDescr → ifName → synthetic.
 """
 import asyncio
 import logging
@@ -20,28 +16,27 @@ from typing import Dict, Optional
 logger = logging.getLogger(__name__)
 
 # ── OID Constants ─────────────────────────────────────────────────────────────
-OID_IF_DESCR         = "1.3.6.1.2.1.2.2.1.2"    # ifDescr  — paling universal
-OID_IF_NAME          = "1.3.6.1.2.1.31.1.1.1.1"  # ifName   — nama pendek MikroTik
+OID_IF_DESCR         = "1.3.6.1.2.1.2.2.1.2"    # ifDescr  (string)
+OID_IF_NAME          = "1.3.6.1.2.1.31.1.1.1.1"  # ifName   (string, MikroTik)
 OID_IF_HC_IN_OCTETS  = "1.3.6.1.2.1.31.1.1.1.6"  # ifHCInOctets  (64-bit)
 OID_IF_HC_OUT_OCTETS = "1.3.6.1.2.1.31.1.1.1.10" # ifHCOutOctets (64-bit)
 OID_IF_IN_OCTETS     = "1.3.6.1.2.1.2.2.1.10"    # ifInOctets    (32-bit)
 OID_IF_OUT_OCTETS    = "1.3.6.1.2.1.2.2.1.16"    # ifOutOctets   (32-bit)
 
 # ── SMA State ─────────────────────────────────────────────────────────────────
-_SMA_WINDOW = 3
-_sma_dl: Dict[str, Dict[str, deque]] = defaultdict(lambda: defaultdict(lambda: deque(maxlen=_SMA_WINDOW)))
-_sma_ul: Dict[str, Dict[str, deque]] = defaultdict(lambda: defaultdict(lambda: deque(maxlen=_SMA_WINDOW)))
-
-# ── 64-bit tracking per host ──────────────────────────────────────────────────
+_SMA_W = 3
+_sma_dl: Dict[str, Dict[str, deque]] = defaultdict(lambda: defaultdict(lambda: deque(maxlen=_SMA_W)))
+_sma_ul: Dict[str, Dict[str, deque]] = defaultdict(lambda: defaultdict(lambda: deque(maxlen=_SMA_W)))
 _is_64bit: Dict[str, bool] = {}
 
 
-def apply_sma(device_id: str, iface: str, dl_bps: int, ul_bps: int) -> tuple:
-    _sma_dl[device_id][iface].append(dl_bps)
-    _sma_ul[device_id][iface].append(ul_bps)
-    dl = int(sum(_sma_dl[device_id][iface]) / len(_sma_dl[device_id][iface]))
-    ul = int(sum(_sma_ul[device_id][iface]) / len(_sma_ul[device_id][iface]))
-    return dl, ul
+def apply_sma(device_id: str, iface: str, dl: int, ul: int) -> tuple:
+    _sma_dl[device_id][iface].append(dl)
+    _sma_ul[device_id][iface].append(ul)
+    return (
+        int(sum(_sma_dl[device_id][iface]) / len(_sma_dl[device_id][iface])),
+        int(sum(_sma_ul[device_id][iface]) / len(_sma_ul[device_id][iface])),
+    )
 
 
 def clear_sma_cache(device_id: str):
@@ -49,83 +44,87 @@ def clear_sma_cache(device_id: str):
     _sma_ul.pop(device_id, None)
 
 
-# ── Core SNMP Walk (synchronous) ──────────────────────────────────────────────
+# ── SNMP Walk (sync, nextCmd) ──────────────────────────────────────────────────
 
-def _snmp_walk(
-    host: str, community: str, oid: str,
-    timeout: int = 5, as_string: bool = True
-) -> Dict[int, object]:
+def _walk(host: str, community: str, oid: str,
+          timeout: int = 5, as_str: bool = True) -> dict:
     """
-    SNMP nextCmd walk untuk satu OID subtree.
-    Menggunakan nextCmd (bukan bulkCmd) karena lebih reliable dan predictable.
-    Return: {ifIndex: value} atau {} jika gagal.
+    Walk satu OID subtree via nextCmd (sync).
+    Return {ifIndex: value} — value berupa str atau int tergantung as_str.
 
-    KRITIS: snmp_compat.py sekarang import UdpTransportTarget dari
-    pysnmp.hlapi.v3arch.sync (SYNC class) — tidak perlu asyncio.run().
-    Transport ini compatible dengan nextCmd dari modul yang sama.
+    nextCmd dipilih karena:
+    - Lebih predictable: stop bersih saat keluar subtree
+    - Tidak butuh maxRepetitions
+    - Kompatibel semua versi pysnmp.hlapi
     """
     try:
-        from snmp_compat import (
+        from pysnmp.hlapi import (
             SnmpEngine, CommunityData, UdpTransportTarget, ContextData,
-            ObjectType, ObjectIdentity, nextCmd, PYSNMP_AVAILABLE
+            ObjectType, ObjectIdentity, nextCmd,
         )
-        if not PYSNMP_AVAILABLE:
-            return {}
     except ImportError:
+        logger.error("[SNMP] pysnmp tidak terinstall — pip install 'pysnmp-lextudio>=6.0.0'")
         return {}
 
-    result: Dict[int, object] = {}
+    result = {}
     base = oid.strip(".")
 
     try:
-        engine     = SnmpEngine()
+        engine    = SnmpEngine()
         community_ = CommunityData(community, mpModel=1)
-        transport  = UdpTransportTarget((host, 161), timeout, 1)
-        context    = ContextData()
+        transport = UdpTransportTarget((host, 161), timeout, 1)
+        context   = ContextData()
 
         for err_ind, err_st, _, var_binds in nextCmd(
             engine, community_, transport, context,
             ObjectType(ObjectIdentity(oid)),
             lexicographicMode=False,
         ):
+            # EndOfMib atau timeout — stop walk
             if err_ind:
-                # Bisa EndOfMib (normal) atau request timeout
-                logger.debug(f"[SNMP] nextCmd signal [{host}] OID={oid}: {err_ind}")
+                logger.debug(f"[SNMP] nextCmd stop [{host}] OID={oid}: {err_ind}")
                 break
             if err_st:
                 logger.warning(f"[SNMP] nextCmd error [{host}] OID={oid}: {err_st}")
                 break
 
             for oid_obj, val in var_binds:
-                # Ekstrak ifIndex dari OID akhir
-                oid_str = str(oid_obj).strip()
+                # Ekstrak ifIndex dari OID yang dikembalikan
+                oid_s = str(oid_obj).strip()
 
-                # Handle symbolic format: "IF-MIB::ifDescr.5" → 5
-                if "::" in oid_str:
-                    after = oid_str.split("::")[-1]   # "ifDescr.5"
-                    parts = after.split(".")
+                if "::" in oid_s:
+                    # Format symbolic: "IF-MIB::ifDescr.5" → index=5
+                    after = oid_s.split("::")[-1]   # "ifDescr.5"
+                    tail  = after.rsplit(".", 1)     # ["ifDescr", "5"]
+                    idx_s = tail[-1] if len(tail) > 1 else ""
                 else:
-                    # Numeric format: "1.3.6.1.2.1.2.2.1.2.5"
-                    oid_clean = oid_str.strip(".")
-                    if not oid_clean.startswith(base):
+                    # Format numeric: "1.3.6.1.2.1.2.2.1.2.5"
+                    oid_c = oid_s.strip(".")
+                    if not oid_c.startswith(base):
                         continue
-                    suffix = oid_clean[len(base):].lstrip(".")
-                    parts = suffix.split(".") if suffix else []
+                    suffix = oid_c[len(base):].lstrip(".")
+                    idx_s  = suffix.split(".")[0] if suffix else ""
 
-                if not parts:
+                if not idx_s:
                     continue
                 try:
-                    idx = int(parts[-1])
+                    idx = int(idx_s)
                 except ValueError:
                     continue
 
                 try:
-                    if as_string:
-                        # Handle OctetString: bisa berupa bytes representation
+                    if as_str:
+                        # prettyPrint handles OctetString correctly
                         v = val.prettyPrint() if hasattr(val, "prettyPrint") else str(val)
                         v = v.strip().strip("'\"")
-                        if v:
+                        if v and not v.startswith("0x"):
                             result[idx] = v
+                        elif v.startswith("0x"):
+                            # Hex bytes → decode as ASCII
+                            try:
+                                result[idx] = bytes.fromhex(v[2:]).decode("ascii", errors="ignore").strip()
+                            except Exception:
+                                result[idx] = v
                     else:
                         result[idx] = int(val)
                 except (ValueError, TypeError):
@@ -139,91 +138,81 @@ def _snmp_walk(
 
 # ── Interface Name Discovery ───────────────────────────────────────────────────
 
-def _snmp_get_ifnames(host: str, community: str, timeout: int = 5) -> Dict[int, str]:
+def _get_ifnames(host: str, community: str, timeout: int = 5) -> Dict[int, str]:
     """
-    Ambil {ifIndex: name} via SNMP, 3-level fallback:
-      1. ifDescr (1.3.6.1.2.1.2.2.1.2)      — paling universal
-      2. ifName  (1.3.6.1.2.1.31.1.1.1.1)   — MikroTik short name
-      3. Synthetic "if{n}" dari ifInOctets   — last resort
-
-    Log [SNMP DEBUG] di WARNING untuk troubleshoot realtime.
+    {ifIndex: interface_name} dengan 3-level fallback.
+    Log realtime di WARNING level.
     """
-    # Level 1: ifDescr
-    logger.warning(f"[SNMP DEBUG] {host}: walk ifDescr ({OID_IF_DESCR})...")
-    result = _snmp_walk(host, community, OID_IF_DESCR, timeout=timeout, as_string=True)
-    if result:
-        logger.warning(f"[SNMP DEBUG] {host}: ifDescr OK → {len(result)} ifaces: {list(result.values())[:6]}")
-        return result
+    # Level 1: ifDescr — paling universal (RFC 2863, tersedia di semua device)
+    logger.warning(f"[SNMP DEBUG] {host}: walk ifDescr...")
+    r = _walk(host, community, OID_IF_DESCR, timeout=timeout, as_str=True)
+    if r:
+        logger.warning(f"[SNMP DEBUG] {host}: ifDescr OK → {len(r)} ifaces: {list(r.values())[:5]}")
+        return r
 
-    logger.warning(f"[SNMP DEBUG] {host}: ifDescr kosong, coba ifName ({OID_IF_NAME})...")
+    logger.warning(f"[SNMP DEBUG] {host}: ifDescr kosong, coba ifName...")
 
-    # Level 2: ifName
-    result = _snmp_walk(host, community, OID_IF_NAME, timeout=timeout, as_string=True)
-    if result:
-        logger.warning(f"[SNMP DEBUG] {host}: ifName OK → {len(result)} ifaces: {list(result.values())[:6]}")
-        return result
+    # Level 2: ifName — nama pendek MikroTik (ether1, sfp1, bridge1)
+    r = _walk(host, community, OID_IF_NAME, timeout=timeout, as_str=True)
+    if r:
+        logger.warning(f"[SNMP DEBUG] {host}: ifName OK → {len(r)} ifaces: {list(r.values())[:5]}")
+        return r
 
     logger.warning(f"[SNMP DEBUG] {host}: ifName kosong, coba synthetic dari ifInOctets...")
 
-    # Level 3: Synthetic dari ifInOctets (numeric) — ambil index saja
-    octets = _snmp_walk(host, community, OID_IF_IN_OCTETS, timeout=timeout, as_string=False)
-    if octets:
-        synthetic = {idx: f"if{idx}" for idx in octets}
-        logger.warning(f"[SNMP DEBUG] {host}: synthetic OK → {len(synthetic)} ifaces: {list(synthetic.values())[:6]}")
-        return synthetic
+    # Level 3: Synthetic — walk ifInOctets, ambil index saja → "if{n}"
+    r = _walk(host, community, OID_IF_IN_OCTETS, timeout=timeout, as_str=False)
+    if r:
+        synth = {idx: f"if{idx}" for idx in r}
+        logger.warning(f"[SNMP DEBUG] {host}: synthetic OK → {len(synth)} ifaces")
+        return synth
 
     logger.error(
-        f"[SNMP DEBUG] {host}: SEMUA LEVEL GAGAL (0 interfaces). "
-        f"Cek: community string, SNMP access-list di device, dan port 161/udp."
+        f"[SNMP DEBUG] {host}: SEMUA LEVEL GAGAL. "
+        f"Cek community string dan SNMP access-list di device."
     )
     return {}
 
 
-# ── Numeric Counter Walk ───────────────────────────────────────────────────────
-
-def _snmp_walk_int(host: str, community: str, oid: str, timeout: int = 5) -> Dict[int, int]:
-    return _snmp_walk(host, community, oid, timeout=timeout, as_string=False)
-
-
 # ── Single Poll Cycle ──────────────────────────────────────────────────────────
 
-def _snmp_single_walk_sync(host: str, community: str, timeout: int = 6) -> Optional[Dict[str, Dict]]:
+def _single_walk(host: str, community: str, timeout: int = 6) -> Optional[Dict[str, Dict]]:
     """
-    Satu siklus: ambil ifNames + counter T1.
+    Satu siklus: ambil interface names + counters.
     Return {iface_name: {in_octets, out_octets}} atau None jika gagal.
     """
-    names = _snmp_get_ifnames(host, community, timeout=timeout)
+    names = _get_ifnames(host, community, timeout=timeout)
     if not names:
         return None
 
-    # Coba 64-bit HC counters
-    in_map  = _snmp_walk_int(host, community, OID_IF_HC_IN_OCTETS,  timeout=timeout)
-    out_map = _snmp_walk_int(host, community, OID_IF_HC_OUT_OCTETS, timeout=timeout)
-    using64 = bool(in_map)
+    # 64-bit HC counters
+    in_  = _walk(host, community, OID_IF_HC_IN_OCTETS,  timeout=timeout, as_str=False)
+    out_ = _walk(host, community, OID_IF_HC_OUT_OCTETS, timeout=timeout, as_str=False)
+    use64 = bool(in_)
 
-    # Fallback ke 32-bit
-    if not in_map:
+    # Fallback 32-bit
+    if not in_:
         logger.debug(f"[SNMP] 64-bit HC kosong [{host}], coba 32-bit...")
-        in_map  = _snmp_walk_int(host, community, OID_IF_IN_OCTETS,  timeout=timeout)
-        out_map = _snmp_walk_int(host, community, OID_IF_OUT_OCTETS, timeout=timeout)
+        in_  = _walk(host, community, OID_IF_IN_OCTETS,  timeout=timeout, as_str=False)
+        out_ = _walk(host, community, OID_IF_OUT_OCTETS, timeout=timeout, as_str=False)
 
-    if not in_map:
-        logger.warning(f"[SNMP DEBUG] {host}: counter OID juga kosong")
+    if not in_:
+        logger.warning(f"[SNMP DEBUG] {host}: counter walk juga kosong")
         return None
 
-    _is_64bit[host] = using64
+    _is_64bit[host] = use64
     logger.warning(
-        f"[SNMP DEBUG] {host}: T-walk OK — "
-        f"{len(names)} ifaces, {len(in_map)} counters, 64bit={using64}"
+        f"[SNMP DEBUG] {host}: cycle OK — "
+        f"{len(names)} ifaces, {len(in_)} counters, 64bit={use64}"
     )
 
     return {
-        name: {"in_octets": in_map.get(idx, 0), "out_octets": out_map.get(idx, 0)}
+        name: {"in_octets": in_.get(idx, 0), "out_octets": out_.get(idx, 0)}
         for idx, name in names.items()
     }
 
 
-# ── Main: Ambil Bandwidth Real-Time ───────────────────────────────────────────
+# ── Main: Bandwidth Real-Time ──────────────────────────────────────────────────
 
 async def get_snmp_traffic(
     host: str,
@@ -235,53 +224,48 @@ async def get_snmp_traffic(
 ) -> Dict[str, Dict]:
     """
     Delta 1-detik: T1 → sleep(1) → T2 → bps = (T2-T1)*8.
-    Return {iface_name: {download_bps, upload_bps, status, source}}.
     """
     if not host:
         return {}
     try:
-        t1_start = time.monotonic()
-        t1 = await asyncio.to_thread(_snmp_single_walk_sync, host, community, snmp_timeout)
+        t1 = await asyncio.to_thread(_single_walk, host, community, snmp_timeout)
         if not t1:
             return {}
 
         await asyncio.sleep(1)
 
-        t2 = await asyncio.to_thread(_snmp_single_walk_sync, host, community, snmp_timeout)
+        t2 = await asyncio.to_thread(_single_walk, host, community, snmp_timeout)
         if not t2:
             return {}
 
-        elapsed = max(time.monotonic() - t1_start, 0.5)
-        COUNTER_MAX = (2 ** 64) if _is_64bit.get(host, True) else (2 ** 32)
-        MAX_SANE = 400_000_000_000
+        CMAX    = (2 ** 64) if _is_64bit.get(host, True) else (2 ** 32)
+        MAX_BPS = 400_000_000_000
+        result  = {}
 
-        result = {}
-        for iface, t2d in t2.items():
+        for iface, d2 in t2.items():
             if iface_filter and iface not in iface_filter:
                 continue
-            t1d = t1.get(iface)
-            if not t1d:
+            d1 = t1.get(iface)
+            if not d1:
                 continue
 
-            di = t2d["in_octets"]  - t1d["in_octets"]
-            do = t2d["out_octets"] - t1d["out_octets"]
-            if di < 0: di += COUNTER_MAX
-            if do < 0: do += COUNTER_MAX
+            di = d2["in_octets"]  - d1["in_octets"]
+            do = d2["out_octets"] - d1["out_octets"]
+            if di < 0: di += CMAX
+            if do < 0: do += CMAX
 
-            dl = min(int(di * 8), MAX_SANE)
-            ul = min(int(do * 8), MAX_SANE)
+            dl = min(int(di * 8), MAX_BPS)
+            ul = min(int(do * 8), MAX_BPS)
 
             if apply_smoothing and device_id:
                 dl, ul = apply_sma(device_id, iface, dl, ul)
 
             result[iface] = {
-                "download_bps": dl,
-                "upload_bps":   ul,
-                "status":       "up",
-                "source":       "snmp",
+                "download_bps": dl, "upload_bps": ul,
+                "status": "up", "source": "snmp",
             }
 
-        logger.warning(f"[SNMP DEBUG] {host}: traffic OK — {len(result)} ifaces, elapsed={elapsed:.1f}s")
+        logger.warning(f"[SNMP DEBUG] {host}: traffic OK — {len(result)} ifaces active")
         return result
 
     except asyncio.CancelledError:
@@ -296,12 +280,10 @@ async def get_snmp_traffic(
 async def test_snmp_reachable(host: str, community: str = "public", timeout: int = 3) -> bool:
     def _test():
         try:
-            from snmp_compat import (
+            from pysnmp.hlapi import (
                 SnmpEngine, CommunityData, UdpTransportTarget,
-                ContextData, ObjectType, ObjectIdentity, getCmd, PYSNMP_AVAILABLE
+                ContextData, ObjectType, ObjectIdentity, getCmd,
             )
-            if not PYSNMP_AVAILABLE:
-                return False
             for err_ind, err_st, _, _ in getCmd(
                 SnmpEngine(),
                 CommunityData(community, mpModel=1),
