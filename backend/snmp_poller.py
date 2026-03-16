@@ -1,38 +1,39 @@
 """
 snmp_poller.py — SNMP v2c Traffic Monitor (Async API)
 ======================================================
-KRITIS: Gunakan pysnmp.hlapi.asyncio (ASYNC) bukan sync.
-pysnmp-lextudio 6.x mengintegrasikan ASYNC API sebagai primary.
-Sync nextCmd/bulkCmd TIDAK BEKERJA dengan lextudio 6.x.
+KRITIS: pakai pysnmp.hlapi.asyncio (ASYNC) — pysnmp-lextudio 6.x.
+Approach: GET per-index (1..max_index) via SATU SnmpEngine bersama.
+Identik dengan original noc-sentinel/snmp_service.py yang terbukti bekerja.
 
-Approach: GET per-index (1..max_index) mirip original noc-sentinel/snmp_service.py
-yang terbukti bekerja. Lebih reliable dari WALK karena tidak perlu OID iteration.
-
-Fix 2026-03-16: total rewrite pakai asyncio getCmd per-index.
+Bug sebelumnya (fix 2026-03-16):
+  _snmp_get_indexed membuat engine baru per-GET call + closeDispatcher() concurrent
+  → race condition merusak asyncio internal dispatcher
+  → semua GET return kosong dalam ~1ms meski device SNMP OK
+  Fix: satu SnmpEngine dibuat di _snmp_get_indexed, di-reuse semua get_one() calls.
 """
 import asyncio
 import logging
-import time
+import re
 from collections import defaultdict, deque
 from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 # ── OID Constants ─────────────────────────────────────────────────────────────
-OID_SYS_DESCR        = "1.3.6.1.2.1.1.1.0"       # sysDescr (device version)
-OID_SYS_UPTIME       = "1.3.6.1.2.1.1.3.0"       # sysUpTime
-OID_IF_DESCR         = "1.3.6.1.2.1.2.2.1.2"     # ifDescr.{n}
-OID_IF_NAME          = "1.3.6.1.2.1.31.1.1.1.1"  # ifName.{n}
-OID_IF_HC_IN_OCTETS  = "1.3.6.1.2.1.31.1.1.1.6"  # ifHCInOctets.{n}  (64-bit)
-OID_IF_HC_OUT_OCTETS = "1.3.6.1.2.1.31.1.1.1.10" # ifHCOutOctets.{n} (64-bit)
-OID_IF_IN_OCTETS     = "1.3.6.1.2.1.2.2.1.10"    # ifInOctets.{n}    (32-bit)
-OID_IF_OUT_OCTETS    = "1.3.6.1.2.1.2.2.1.16"    # ifOutOctets.{n}   (32-bit)
-OID_IF_OPER_STATUS   = "1.3.6.1.2.1.2.2.1.8"     # ifOperStatus.{n}
+OID_SYS_DESCR        = "1.3.6.1.2.1.1.1.0"
+OID_SYS_NAME         = "1.3.6.1.2.1.1.5.0"
+OID_SYS_UPTIME       = "1.3.6.1.2.1.1.3.0"
+OID_IF_DESCR         = "1.3.6.1.2.1.2.2.1.2"
+OID_IF_NAME          = "1.3.6.1.2.1.31.1.1.1.1"
+OID_IF_HC_IN_OCTETS  = "1.3.6.1.2.1.31.1.1.1.6"
+OID_IF_HC_OUT_OCTETS = "1.3.6.1.2.1.31.1.1.1.10"
+OID_IF_IN_OCTETS     = "1.3.6.1.2.1.2.2.1.10"
+OID_IF_OUT_OCTETS    = "1.3.6.1.2.1.2.2.1.16"
 
 # ── SMA State ─────────────────────────────────────────────────────────────────
 _SMA_W = 3
-_sma_dl: Dict[str, Dict[str, deque]] = defaultdict(lambda: defaultdict(lambda: deque(maxlen=_SMA_W)))
-_sma_ul: Dict[str, Dict[str, deque]] = defaultdict(lambda: defaultdict(lambda: deque(maxlen=_SMA_W)))
+_sma_dl: Dict = defaultdict(lambda: defaultdict(lambda: deque(maxlen=_SMA_W)))
+_sma_ul: Dict = defaultdict(lambda: defaultdict(lambda: deque(maxlen=_SMA_W)))
 _is_64bit: Dict[str, bool] = {}
 
 
@@ -50,15 +51,88 @@ def clear_sma_cache(device_id: str):
     _sma_ul.pop(device_id, None)
 
 
-# ── Core Async SNMP GET ────────────────────────────────────────────────────────
+# ── GET per-index walk (SATU engine bersama) ───────────────────────────────────
 
-async def _snmp_get(host: str, community: str, oid: str,
-                    port: int = 161, timeout: int = 3) -> Optional[str]:
+async def _snmp_get_indexed(host: str, community: str, base_oid: str,
+                             max_index: int = 64, timeout: int = 3,
+                             as_int: bool = False) -> dict:
     """
-    Single async SNMP GET untuk satu OID.
-    Menggunakan pysnmp.hlapi.asyncio persis seperti original noc-sentinel.
-    Return string value atau None jika gagal/tidak ada.
+    Walk via GET per-index menggunakan SATU SnmpEngine bersama.
+    Identik dengan original noc-sentinel/snmp_service.py:snmp_get_indexed().
+
+    KRITIS: engine dibuat SEKALI di sini, di-reuse semua concurrent get_one() calls.
+    Bukan satu engine per-GET — itu yang menyebabkan bug silent fail sebelumnya.
     """
+    try:
+        from pysnmp.hlapi.asyncio import (
+            getCmd, SnmpEngine, CommunityData,
+            UdpTransportTarget, ContextData,
+            ObjectType, ObjectIdentity,
+        )
+    except ImportError:
+        logger.error("[SNMP] pysnmp tidak terinstall — pip install pysnmp-lextudio==6.2.0")
+        return {}
+
+    engine = SnmpEngine()  # ← SATU engine, dibuat sekali untuk semua GETs
+    results = {}
+
+    async def get_one(idx: int):
+        oid = f"{base_oid}.{idx}"
+        try:
+            result = await getCmd(
+                engine,                               # reuse engine yang sama
+                CommunityData(community, mpModel=1),
+                UdpTransportTarget((host, 161), timeout=timeout, retries=0),
+                ContextData(),
+                ObjectType(ObjectIdentity(oid)),
+            )
+            err_ind, err_st, _, var_binds = result
+            if err_ind or err_st:
+                return None
+            for _, val in var_binds:
+                v = str(val)
+                if "NoSuchInstance" in v or "NoSuchObject" in v:
+                    return None
+                if as_int:
+                    try:
+                        return (idx, int(v))
+                    except (ValueError, TypeError):
+                        return None
+                return (idx, v.strip())
+        except Exception as e:
+            logger.debug(f"[SNMP] {host} idx={idx}: {e}")
+            return None
+
+    # Batch parallel: 8 request per batch (seperti original)
+    batch_size = 8
+    for batch_start in range(1, max_index + 1, batch_size):
+        batch_end = min(batch_start + batch_size, max_index + 1)
+        tasks = [get_one(i) for i in range(batch_start, batch_end)]
+        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        found_any = False
+        for r in batch_results:
+            if r and not isinstance(r, Exception):
+                results[int(r[0])] = r[1]
+                found_any = True
+
+        # Stop early jika batch kosong DAN sudah punya results (seperti original)
+        if not found_any and results:
+            break
+
+    try:
+        engine.closeDispatcher()
+    except Exception:
+        pass
+
+    return results
+
+
+# ── Single SNMP GET (untuk sysDescr etc) ──────────────────────────────────────
+
+async def _snmp_get_single(host: str, community: str, oid: str,
+                            port: int = 161, timeout: int = 3) -> Optional[str]:
+    """Single SNMP GET untuk satu OID penuh (misalnya sysDescr.0)."""
     try:
         from pysnmp.hlapi.asyncio import (
             getCmd, SnmpEngine, CommunityData,
@@ -77,81 +151,28 @@ async def _snmp_get(host: str, community: str, oid: str,
             engine.closeDispatcher()
         except Exception:
             pass
-
         err_ind, err_st, _, var_binds = result
-        if err_ind:
-            logger.warning(f"[SNMP] GET {host} OID={oid} err_ind={err_ind}")
+        if err_ind or err_st:
             return None
-        if err_st:
-            logger.warning(f"[SNMP] GET {host} OID={oid} err_st={err_st}")
-            return None
-
-        for oid_obj, val in var_binds:
+        for _, val in var_binds:
             v = str(val)
-            if "NoSuchInstance" in v or "NoSuchObject" in v or "endOfMib" in v:
+            if "NoSuchInstance" in v or "NoSuchObject" in v:
                 return None
             return v.strip()
-
     except ImportError:
-        logger.error("[SNMP] pysnmp tidak terinstall — pip install pysnmp-lextudio==6.2.0")
         return None
     except Exception as e:
-        logger.warning(f"[SNMP] GET {host} OID={oid} EXCEPTION {type(e).__name__}: {e}")
+        logger.warning(f"[SNMP] GET {host} {oid}: {e}")
         return None
-
-
-# ── GET per-index walk ─────────────────────────────────────────────────────────
-
-async def _snmp_get_indexed(host: str, community: str, base_oid: str,
-                             max_index: int = 64, timeout: int = 3,
-                             as_int: bool = False) -> Dict[int, object]:
-    """
-    Walk via GET per-index: coba OID.1 sampai OID.max_index.
-    Approach dari original noc-sentinel yang terbukti bekerja.
-
-    Batch parallel: 8 request per batch untuk efisiensi.
-    Stop early jika batch kosong dan sudah ada hasil.
-    """
-    results = {}
-
-    async def get_one(idx: int):
-        val = await _snmp_get(host, community, f"{base_oid}.{idx}", timeout=timeout)
-        if val is None:
-            return None
-        if as_int:
-            try:
-                return (idx, int(val))
-            except (ValueError, TypeError):
-                return None
-        return (idx, val)
-
-    batch_size = 8
-    for batch_start in range(1, max_index + 1, batch_size):
-        batch_end = min(batch_start + batch_size, max_index + 1)
-        tasks = [get_one(i) for i in range(batch_start, batch_end)]
-        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        found_any = False
-        for r in batch_results:
-            if r and not isinstance(r, Exception):
-                results[r[0]] = r[1]
-                found_any = True
-
-        # Stop early jika batch kosong dan sudah ada results (hemat waktu)
-        if not found_any and results:
-            break
-
-    return results
 
 
 # ── Interface Name Discovery ───────────────────────────────────────────────────
 
-async def _get_ifnames(host: str, community: str,
-                        timeout: int = 3) -> Dict[int, str]:
+async def _get_ifnames(host: str, community: str, timeout: int = 3) -> Dict[int, str]:
     """
     {ifIndex: name} dengan 3-level fallback.
-    Level 1: ifDescr — universal (RFC 2863)
-    Level 2: ifName  — MikroTik short name
+    Level 1: ifDescr — universal (RFC 2863), tersedia di semua device
+    Level 2: ifName  — MikroTik short name (ether1, bridge1, etc.)
     Level 3: Synthetic "if{n}" dari ifInOctets index
     """
     logger.warning(f"[SNMP DEBUG] {host}: walk ifDescr (GET per-index)...")
@@ -176,15 +197,13 @@ async def _get_ifnames(host: str, community: str,
     r = await _snmp_get_indexed(host, community, OID_IF_IN_OCTETS,
                                   timeout=timeout, as_int=True)
     if r:
-        synth = {idx: f"if{idx}" for idx in r}
-        logger.warning(f"[SNMP DEBUG] {host}: synthetic OK → {len(synth)} ifaces")
-        return synth
+        syn = {idx: f"if{idx}" for idx in r}
+        logger.warning(f"[SNMP DEBUG] {host}: synthetic OK → {len(syn)} ifaces")
+        return syn
 
     logger.error(
         f"[SNMP DEBUG] {host}: SEMUA LEVEL GAGAL. "
-        f"Cek: (1) community string di device, "
-        f"(2) SNMP enabled di IP Services, "
-        f"(3) port 161/UDP tidak diblokir firewall."
+        f"Cek: community string, SNMP enabled di IP Services, port 161/UDP."
     )
     return {}
 
@@ -192,32 +211,33 @@ async def _get_ifnames(host: str, community: str,
 # ── Single Poll Cycle ──────────────────────────────────────────────────────────
 
 async def _single_poll(host: str, community: str,
-                        timeout: int = 4) -> Optional[Dict[str, Dict]]:
+                        timeout: int = 4) -> Optional[Dict]:
     """
-    Satu siklus poll: ifnames + counters (parallel).
+    Satu siklus: ambil interface names + counters secara paralel.
     Return {iface_name: {in_octets, out_octets}} atau None jika gagal.
     """
     names = await _get_ifnames(host, community, timeout=timeout)
     if not names:
         return None
 
-    # Ambil semua counter parallel
-    in64_task  = _snmp_get_indexed(host, community, OID_IF_HC_IN_OCTETS,
-                                    timeout=timeout, as_int=True)
-    out64_task = _snmp_get_indexed(host, community, OID_IF_HC_OUT_OCTETS,
-                                    timeout=timeout, as_int=True)
-    in64, out64 = await asyncio.gather(in64_task, out64_task)
-
+    # Coba 64-bit HC counters dulu (parallel)
+    in64, out64 = await asyncio.gather(
+        _snmp_get_indexed(host, community, OID_IF_HC_IN_OCTETS,
+                          timeout=timeout, as_int=True),
+        _snmp_get_indexed(host, community, OID_IF_HC_OUT_OCTETS,
+                          timeout=timeout, as_int=True),
+    )
     use64 = bool(in64)
     in_map, out_map = in64, out64
 
     if not use64:
         logger.debug(f"[SNMP] 64-bit HC kosong [{host}], fallback 32-bit...")
-        in32_task  = _snmp_get_indexed(host, community, OID_IF_IN_OCTETS,
-                                        timeout=timeout, as_int=True)
-        out32_task = _snmp_get_indexed(host, community, OID_IF_OUT_OCTETS,
-                                        timeout=timeout, as_int=True)
-        in_map, out_map = await asyncio.gather(in32_task, out32_task)
+        in_map, out_map = await asyncio.gather(
+            _snmp_get_indexed(host, community, OID_IF_IN_OCTETS,
+                              timeout=timeout, as_int=True),
+            _snmp_get_indexed(host, community, OID_IF_OUT_OCTETS,
+                              timeout=timeout, as_int=True),
+        )
 
     if not in_map:
         logger.warning(f"[SNMP DEBUG] {host}: counter walk kosong")
@@ -238,41 +258,40 @@ async def _single_poll(host: str, community: str,
     }
 
 
-# ── Ambil versi device via sysDescr ───────────────────────────────────────────
+# ── Device Info via SNMP ───────────────────────────────────────────────────────
 
 async def get_device_snmp_info(host: str, community: str = "public",
                                 port: int = 161, timeout: int = 4) -> Dict:
     """
-    Ambil info device via SNMP: sysDescr (berisi versi RouterOS),
-    sysUpTime, dan jumlah interface.
-    Digunakan untuk menampilkan info device di UI.
+    Ambil info device: sysDescr (versi RouterOS), sysName, uptime, jumlah iface.
+    Gunakan untuk konfirmasi koneksi SNMP di UI.
     """
-    sys_descr, sys_uptime = await asyncio.gather(
-        _snmp_get(host, community, OID_SYS_DESCR, port=port, timeout=timeout),
-        _snmp_get(host, community, OID_SYS_UPTIME, port=port, timeout=timeout),
+    sys_descr, sys_name, sys_uptime = await asyncio.gather(
+        _snmp_get_single(host, community, OID_SYS_DESCR, port=port, timeout=timeout),
+        _snmp_get_single(host, community, OID_SYS_NAME,  port=port, timeout=timeout),
+        _snmp_get_single(host, community, OID_SYS_UPTIME, port=port, timeout=timeout),
     )
 
-    info = {"snmp_reachable": False, "sys_descr": "", "uptime_s": 0,
-            "ros_version": "", "interface_count": 0}
+    info = {
+        "snmp_reachable": bool(sys_descr),
+        "sys_descr":      sys_descr or "",
+        "sys_name":       sys_name  or "",
+        "uptime_s":       0,
+        "ros_version":    "",
+        "interface_count": 0,
+    }
 
     if sys_descr:
-        info["snmp_reachable"] = True
-        info["sys_descr"] = sys_descr.strip()
-
-        # Parse ROS version dari sysDescr: "RouterOS 7.16.2 ..."
-        import re
         m = re.search(r"(\d+\.\d+[\.\d]*)", sys_descr)
         if m:
             info["ros_version"] = m.group(1)
 
     if sys_uptime:
         try:
-            ticks = int(sys_uptime)
-            info["uptime_s"] = ticks // 100
+            info["uptime_s"] = int(sys_uptime) // 100
         except (ValueError, TypeError):
             pass
 
-    # Count interfaces
     if info["snmp_reachable"]:
         names = await _get_ifnames(host, community, timeout=timeout)
         info["interface_count"] = len(names)
@@ -290,10 +309,7 @@ async def get_snmp_traffic(
     snmp_timeout: int = 4,
     apply_smoothing: bool = True,
 ) -> Dict[str, Dict]:
-    """
-    Delta 1-detik: T1 → sleep(1) → T2 → bps = (T2-T1)*8.
-    Menggunakan async getCmd per-index (sama seperti original noc-sentinel).
-    """
+    """Delta 1-detik: T1 → sleep(1) → T2 → bps = (T2-T1)*8."""
     if not host:
         return {}
     try:
@@ -353,6 +369,6 @@ async def get_snmp_traffic(
 
 async def test_snmp_reachable(host: str, community: str = "public",
                                timeout: int = 3) -> bool:
-    """Test apakah SNMP v2c dapat dijangkau — cek sysDescr."""
-    result = await _snmp_get(host, community, OID_SYS_DESCR, timeout=timeout)
+    """Test koneksi SNMP via sysDescr.0."""
+    result = await _snmp_get_single(host, community, OID_SYS_DESCR, timeout=timeout)
     return result is not None
