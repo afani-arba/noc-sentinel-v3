@@ -31,6 +31,7 @@ class DeviceCreate(BaseModel):
     api_ssl: bool = True
     api_plaintext_login: bool = True
     description: str = ""
+    snmp_community: str = "public"  # FIX BUG #4: simpan SNMP community string ke device
     winbox_address: Optional[str] = None  # Alamat Winbox remote â€” opsional, isi jika berbeda dari ip_address
 
 
@@ -45,6 +46,7 @@ class DeviceUpdate(BaseModel):
     api_ssl: Optional[bool] = None
     api_plaintext_login: Optional[bool] = None
     description: Optional[str] = None
+    snmp_community: Optional[str] = None  # FIX BUG #4: support update SNMP community
     winbox_address: Optional[str] = None  # Alamat Winbox remote â€” opsional
 
 
@@ -105,16 +107,34 @@ async def create_device(data: DeviceCreate, user=Depends(require_admin)):
 @router.put("/devices/{device_id}")
 async def update_device(device_id: str, data: DeviceUpdate, user=Depends(require_admin)):
     db = get_db()
-    upd = {k: v for k, v in data.model_dump().items() if v is not None}
-    if not upd:
+    # FIX BUG #5: gunakan exclude_unset=True agar field yang tidak dikirim tidak ikut diupdate.
+    # Field yang DIKIRIM (termasuk null/None) tetap masuk ke update, sehingga winbox_address
+    # bisa dikosongkan eksplisit dengan mengirim null dari frontend.
+    raw = data.model_dump(exclude_unset=True)
+    if not raw:
         raise HTTPException(400, "Nothing to update")
-    r = await db.devices.update_one({"id": device_id}, {"$set": upd})
+
+    # Pisahkan field yang ingin di-null (unset) vs field biasa
+    upd_set = {k: v for k, v in raw.items() if v is not None}
+    upd_unset = {k: "" for k, v in raw.items() if v is None and k in ("winbox_address",)}
+
+    mongo_op: dict = {}
+    if upd_set:
+        mongo_op["$set"] = upd_set
+    if upd_unset:
+        # Gunakan $unset untuk nullify field opsional, atau $set ke "" agar tetap queryable
+        mongo_op.setdefault("$set", {}).update({k: None for k in upd_unset})
+
+    if not mongo_op:
+        raise HTTPException(400, "Nothing to update")
+
+    r = await db.devices.update_one({"id": device_id}, mongo_op)
     if r.matched_count == 0:
         raise HTTPException(404, "Device not found")
     # Audit log
     try:
         from routers.audit import log_action
-        fields = ", ".join(upd.keys())
+        fields = ", ".join(raw.keys())
         await log_action(action="UPDATE", resource="devices", resource_id=device_id,
                          details=f"Updated fields: {fields}",
                          username=user.get("username", ""), user_id=user.get("id", ""))
@@ -219,7 +239,10 @@ async def get_system_resource(device_id: str, user=Depends(get_current_user)):
         free_hdd = _i(raw.get("free-hdd-space") or raw.get("freeHddSpace") or 0)
 
         return {
-            "architecture_name": arch or "x86" if "x86" in (platform + board + cpu).lower() else arch,
+            # FIX BUG #3: wrong operator precedence in original: `arch or "x86" if ... else arch`
+            # Python evaluates that as `(arch) or ("x86" if ... else arch)` which can give wrong result.
+            # Correct: when arch is empty AND x86 detected, return "x86"; else return arch.
+            "architecture_name": (arch or "x86") if "x86" in (platform + board + cpu).lower() else arch,
             "board_name": board or platform or "",
             "version": version,
             "build_time": build_time,

@@ -39,17 +39,6 @@ _update_state = {
     "started_at": None,
 }
 
-# Project root: /opt/noc-sentinel  (parent of backend/)
-APP_DIR = str(Path(__file__).parent.parent.parent)
-BACKEND_DIR = str(Path(__file__).parent.parent)
-FRONTEND_DIR = str(Path(__file__).parent.parent.parent / "frontend")
-
-# Candidate paths
-VENV_PIP  = str(Path(BACKEND_DIR) / "venv" / "bin" / "pip")
-UPDATE_SH = str(Path(APP_DIR) / "update.sh")
-# Baca dari env agar bisa dikonfigurasi tanpa edit kode
-SERVICE_NAME = os.environ.get("NOC_SERVICE_NAME", "noc-backend")
-
 
 @router.get("/check-update")
 async def check_update(user=Depends(require_admin)):
@@ -337,11 +326,11 @@ async def app_info():
             "commit": commit.stdout.strip() if commit.returncode == 0 else "unknown",
             "message": msg.stdout.strip() if msg.returncode == 0 else "",
             "date": date.stdout.strip()[:19] if date.returncode == 0 else "",
-            "version": "v2.5",
+            "version": "v3.0",
             "service_name": svc_name,
         }
     except Exception:
-        return {"commit": "unknown", "message": "", "date": "", "version": "v2.5", "service_name": svc_name}
+        return {"commit": "unknown", "message": "", "date": "", "version": "v3.0", "service_name": svc_name}
 
 
 @router.get("/service-name")
