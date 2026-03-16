@@ -37,4 +37,6 @@ influxdb-client==1.50.0
 # SNMP v2c (Hybrid Monitoring — traffic via SNMP 64-bit counters)
 # pysnmp-lextudio = fork aktif pysnmp yang kompatibel dengan Python 3.12+
 # import path SAMA: from pysnmp.hlapi import ...
-pysnmp-lextudio>=1.1.0
+# CATATAN: jangan install pysnmp (versi lama) bersamaan — konflik!
+pysnmp-lextudio>=1.1.0,<2.0.0
+pyasn1>=0.5.0,<0.7.0

@@ -236,7 +236,26 @@ fi
 
 source venv/bin/activate
 pip install --upgrade pip setuptools wheel -q
+
+# Install dependencies utama (akan install pysnmp-lextudio dari requirements.txt)
+# Hapus dulu pysnmp lama (konflik dengan pysnmp-lextudio)
+pip uninstall pysnmp pysnmp-lextudio -y -q 2>/dev/null || true
 pip install -r requirements.txt -q
+
+# Verifikasi pysnmp-lextudio bisa di-import (bukan sekedar installed)
+if python -c "from pysnmp.hlapi import SnmpEngine" 2>/dev/null; then
+    print_ok "pysnmp-lextudio terinstall dan berfungsi ✓"
+else
+    # Coba install ulang dengan versi yang lebih spesifik
+    pip uninstall pysnmp pysnmp-lextudio pyasn1 -y -q 2>/dev/null || true
+    pip install 'pysnmp-lextudio>=1.1.0,<2.0.0' 'pyasn1>=0.5.0,<0.7.0' -q
+    if python -c "from pysnmp.hlapi import SnmpEngine" 2>/dev/null; then
+        print_ok "pysnmp-lextudio berhasil diinstall"
+    else
+        print_warn "pysnmp-lextudio gagal (SNMP monitoring tidak aktif — bisa install manual nanti)"
+    fi
+fi
+
 deactivate
 print_ok "Python packages terinstall"
 
