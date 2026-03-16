@@ -79,7 +79,11 @@ async def _snmp_get(host: str, community: str, oid: str,
             pass
 
         err_ind, err_st, _, var_binds = result
-        if err_ind or err_st:
+        if err_ind:
+            logger.warning(f"[SNMP] GET {host} OID={oid} err_ind={err_ind}")
+            return None
+        if err_st:
+            logger.warning(f"[SNMP] GET {host} OID={oid} err_st={err_st}")
             return None
 
         for oid_obj, val in var_binds:
@@ -92,7 +96,7 @@ async def _snmp_get(host: str, community: str, oid: str,
         logger.error("[SNMP] pysnmp tidak terinstall — pip install pysnmp-lextudio==6.2.0")
         return None
     except Exception as e:
-        logger.debug(f"[SNMP] GET {host} OID={oid}: {type(e).__name__}: {e}")
+        logger.warning(f"[SNMP] GET {host} OID={oid} EXCEPTION {type(e).__name__}: {e}")
         return None
 
 
