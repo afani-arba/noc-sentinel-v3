@@ -1683,7 +1683,7 @@ async def test_snmp(device_id: str, user=Depends(get_current_user)):
 
     # ── Async SNMP via snmp_poller (pysnmp.hlapi.asyncio) ────────────────────
     try:
-        from snmp_poller import get_device_snmp_info, _get_ifnames
+        from snmp_poller import get_device_snmp_info
     except ImportError as e:
         return {"success": False, "error": f"snmp_poller tidak tersedia: {e}"}
 

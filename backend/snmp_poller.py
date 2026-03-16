@@ -91,13 +91,16 @@ async def _snmp_walk(
     max_rows: int = 512,
 ) -> Dict[str, str]:
     """
-    SNMP Walk via nextCmd — satu roundtrip untuk seluruh sub-tree.
-    Return: { "base_oid.index": "value_str" }
+    SNMP Walk via sequential nextCmd() calls.
+    Return: { "full_oid_string": "value_str" }
 
-    Jauh lebih efisien dari 48x GET:
-    - 1 koneksi UDP vs 48 koneksi
-    - CPU MikroTik turun drastis
-    - Latency total ~4x lebih cepat
+    KRITIS: pysnmp-lextudio 6.x — nextCmd adalah COROUTINE biasa (bukan async generator).
+    Pattern yang SALAH: async for err_ind, ... in nextCmd(...)    ← return kosong!
+    Pattern yang BENAR: loop manual, current_oid bergerak maju tiap iterasi.
+
+    Contoh working manual test terbukti:
+      result = await getCmd(engine, ..., ObjectType(ObjectIdentity('1.3.6.1.2.1.2.2.1.2.1')))
+      → err_ind=None val=ether1  ✓
     """
     try:
         nextCmd, getCmd, SnmpEngine, CommunityData, UdpTransportTarget, ContextData, ObjectType, ObjectIdentity = _get_pysnmp()
@@ -107,36 +110,50 @@ async def _snmp_walk(
 
     engine = SnmpEngine()
     results: Dict[str, str] = {}
-    count = 0
+    current_oid = base_oid
 
     try:
-        async for err_ind, err_st, _, var_binds in nextCmd(
-            engine,
-            CommunityData(community, mpModel=1),
-            UdpTransportTarget((host, port), timeout=timeout, retries=1),
-            ContextData(),
-            ObjectType(ObjectIdentity(base_oid)),
-            lexicographicMode=False,   # stop saat keluar sub-tree
-        ):
+        for _ in range(max_rows):
+            # nextCmd di pysnmp-lextudio 6.x: await satu kali per langkah walk
+            result = await nextCmd(
+                engine,
+                CommunityData(community, mpModel=1),
+                UdpTransportTarget((host, port), timeout=timeout, retries=1),
+                ContextData(),
+                ObjectType(ObjectIdentity(current_oid)),
+            )
+            err_ind, err_st, _, var_binds = result
+
             if err_ind:
-                logger.debug(f"[SNMP Walk] {host} {base_oid}: {err_ind}")
+                logger.debug(f"[SNMP Walk] {host} {current_oid}: {err_ind}")
                 break
             if err_st:
                 logger.debug(f"[SNMP Walk] {host} err_st={err_st}")
                 break
+            if not var_binds:
+                break
 
+            advanced = False
             for oid_obj, val in var_binds:
                 oid_str = str(oid_obj)
                 val_str = str(val)
-                if "NoSuchInstance" in val_str or "NoSuchObject" in val_str:
-                    continue
-                results[oid_str] = val_str
-                count += 1
-                if count >= max_rows:
+
+                # Stop jika keluar dari sub-tree yang diminta
+                if not oid_str.startswith(base_oid):
                     break
 
-            if count >= max_rows:
-                break
+                if "NoSuchInstance" in val_str or "NoSuchObject" in val_str:
+                    break
+                if "endOfMibView" in val_str.lower():
+                    break
+
+                results[oid_str] = val_str
+                current_oid = oid_str  # maju ke OID berikutnya
+                advanced = True
+
+            if not advanced:
+                break  # tidak ada kemajuan → selesai
+
     except Exception as e:
         logger.debug(f"[SNMP Walk] {host} {base_oid}: exception {e}")
     finally:
@@ -146,6 +163,7 @@ async def _snmp_walk(
             pass
 
     return results
+
 
 
 async def _snmp_get_scalar(
