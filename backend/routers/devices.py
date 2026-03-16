@@ -1690,10 +1690,12 @@ async def test_snmp(device_id: str, user=Depends(get_current_user)):
         error_msg = ""
 
         try:
-            from pysnmp.hlapi import (
+            from snmp_compat import (
                 SnmpEngine, CommunityData, UdpTransportTarget,
-                ContextData, ObjectType, ObjectIdentity, getCmd, nextCmd
+                ContextData, ObjectType, ObjectIdentity, getCmd, PYSNMP_AVAILABLE
             )
+            if not PYSNMP_AVAILABLE:
+                return None, "pysnmp tidak terinstall di server"
         except ImportError:
             return None, "pysnmp tidak terinstall di server"
 

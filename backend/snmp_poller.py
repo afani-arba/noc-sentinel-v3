@@ -64,12 +64,12 @@ def _snmp_bulk_walk_sync(host: str, community: str, oid: str, timeout: int = 5, 
     Dijalankan di thread pool agar tidak blok event loop.
     """
     try:
-        from pysnmp.hlapi import (
-            SnmpEngine, CommunityData, UdpTransportTarget, ContextData,
-            ObjectType, ObjectIdentity, bulkCmd, Integer32
-        )
+        from snmp_compat import SnmpEngine, CommunityData, UdpTransportTarget, ContextData, ObjectType, ObjectIdentity, bulkCmd, PYSNMP_AVAILABLE
+        if not PYSNMP_AVAILABLE:
+            logger.error("pysnmp tidak terinstall! Jalankan: pip install pysnmp")
+            return {}
     except ImportError:
-        logger.error("pysnmp tidak terinstall! Jalankan: pip install pysnmp")
+        logger.error("snmp_compat tidak ditemukan")
         return {}
 
     result = {}
@@ -120,10 +120,9 @@ def _snmp_get_ifnames_sync(host: str, community: str, timeout: int = 5) -> Dict[
     Ambil mapping ifIndex → ifName via SNMP.
     """
     try:
-        from pysnmp.hlapi import (
-            SnmpEngine, CommunityData, UdpTransportTarget, ContextData,
-            ObjectType, ObjectIdentity, bulkCmd
-        )
+        from snmp_compat import SnmpEngine, CommunityData, UdpTransportTarget, ContextData, ObjectType, ObjectIdentity, bulkCmd, PYSNMP_AVAILABLE
+        if not PYSNMP_AVAILABLE:
+            return {}
     except ImportError:
         return {}
 

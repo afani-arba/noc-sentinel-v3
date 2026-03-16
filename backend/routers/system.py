@@ -446,14 +446,11 @@ async def health():
     - app_version:  git commit hash pendek (7 karakter)
     - syslog_port:  port UDP syslog yang aktif
     """
-    # Cek pysnmp secara live (tidak di-cache sehingga reflect state install terbaru)
+    # Cek pysnmp secara live menggunakan snmp_compat bridge
+    # (kompatibel dengan pysnmp 7.x baru maupun pysnmp-lextudio lama)
     try:
-        import importlib
-        pysnmp_mod = importlib.util.find_spec("pysnmp")
-        snmp_enabled = pysnmp_mod is not None
-        if snmp_enabled:
-            # Double-check dengan import actual
-            from pysnmp.hlapi import SnmpEngine  # noqa: F401
+        from snmp_compat import PYSNMP_AVAILABLE
+        snmp_enabled = PYSNMP_AVAILABLE
     except Exception:
         snmp_enabled = False
 
