@@ -23,7 +23,7 @@ export default function DevicesPage() {
     name: "", ip_address: "", winbox_address: "",
     api_mode: "rest", api_username: "admin", api_password: "",
     api_port: "", use_https: false, api_ssl: true, api_plaintext_login: true,
-    description: "", snmp_community: "public",
+    description: "", snmp_community: "public", snmp_version: "2c",
   });
 
   const fetchDevices = useCallback(async () => {
@@ -38,7 +38,7 @@ export default function DevicesPage() {
 
   const openAdd = () => {
     setEditing(null);
-    setForm({ name: "", ip_address: "", winbox_address: "", api_mode: "rest", api_username: "admin", api_password: "", api_port: "", use_https: false, api_ssl: true, api_plaintext_login: true, description: "", snmp_community: "public" });
+    setForm({ name: "", ip_address: "", winbox_address: "", api_mode: "rest", api_username: "admin", api_password: "", api_port: "", use_https: false, api_ssl: true, api_plaintext_login: true, description: "", snmp_community: "public", snmp_version: "2c" });
     setDialogOpen(true);
   };
 
@@ -54,6 +54,7 @@ export default function DevicesPage() {
       api_plaintext_login: d.api_plaintext_login !== undefined ? d.api_plaintext_login : true,
       description: d.description || "",
       snmp_community: d.snmp_community || "public",
+      snmp_version: d.snmp_version || "2c",
     });
     setDialogOpen(true);
   };
@@ -332,19 +333,36 @@ export default function DevicesPage() {
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
                 <Radio className="w-3 h-3" /> SNMP (Hybrid Monitoring)
               </p>
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Community String</Label>
-                <Input
-                  value={form.snmp_community}
-                  onChange={e => setForm({...form, snmp_community: e.target.value})}
-                  className="rounded-sm bg-background font-mono text-xs"
-                  placeholder="public"
-                  data-testid="device-form-snmp-community"
-                />
-                <p className="text-[10px] text-muted-foreground/60">
-                  Digunakan untuk monitoring traffic via SNMP v2c. Default: <code className="bg-muted px-1 rounded">public</code>
-                </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">SNMP Version</Label>
+                  <Select
+                    value={form.snmp_version || "2c"}
+                    onValueChange={v => setForm({...form, snmp_version: v})}
+                  >
+                    <SelectTrigger className="rounded-sm bg-background text-xs" data-testid="device-form-snmp-version">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1">SNMPv1</SelectItem>
+                      <SelectItem value="2c">SNMPv2c (default)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Community String</Label>
+                  <Input
+                    value={form.snmp_community}
+                    onChange={e => setForm({...form, snmp_community: e.target.value})}
+                    className="rounded-sm bg-background font-mono text-xs"
+                    placeholder="public"
+                    data-testid="device-form-snmp-community"
+                  />
+                </div>
               </div>
+              <p className="text-[10px] text-muted-foreground/60">
+                SNMP v2c direkomendasikan untuk monitoring traffic (ifHCInOctets 64-bit). Default community: <code className="bg-muted px-1 rounded">public</code>
+              </p>
             </div>
           </div>
           <DialogFooter className="flex-col sm:flex-row gap-2">

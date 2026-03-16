@@ -1,4 +1,4 @@
-"""
+﻿"""
 Devices router: CRUD + dashboard + MikroTik API test.
 """
 import uuid
@@ -31,8 +31,11 @@ class DeviceCreate(BaseModel):
     api_ssl: bool = True
     api_plaintext_login: bool = True
     description: str = ""
-    snmp_community: str = "public"  # FIX BUG #4: simpan SNMP community string ke device
-    winbox_address: Optional[str] = None  # Alamat Winbox remote â€” opsional, isi jika berbeda dari ip_address
+    snmp_community: str = "public"  # SNMP community string
+    snmp_version: str = "2c"        # SNMP version: "1" atau "2c"
+    winbox_address: Optional[str] = None  # Alamat Winbox remote — opsional
+
+
 
 
 class DeviceUpdate(BaseModel):
@@ -46,9 +49,9 @@ class DeviceUpdate(BaseModel):
     api_ssl: Optional[bool] = None
     api_plaintext_login: Optional[bool] = None
     description: Optional[str] = None
-    snmp_community: Optional[str] = None  # FIX BUG #4: support update SNMP community
-    winbox_address: Optional[str] = None  # Alamat Winbox remote â€” opsional
-
+    snmp_community: Optional[str] = None  # SNMP community string
+    snmp_version: Optional[str] = None    # SNMP version: "1" atau "2c"
+    winbox_address: Optional[str] = None  # Alamat Winbox remote - opsional
 
 def filter_devices_for_user(devices: list, user: dict) -> list:
     if user.get("role") == "administrator":
