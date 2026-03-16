@@ -1,8 +1,9 @@
 """
-snmp_compat.py — Simple bridge for pysnmp import compatibility
-=============================================================
-pysnmp-lextudio >= 6.0.0: from pysnmp.hlapi import ...  (sync, works perfectly)
-pysnmp >= 4.4: same import path
+snmp_compat.py — pysnmp availability check
+==========================================
+pysnmp-lextudio 6.x menggunakan ASYNC API: pysnmp.hlapi.asyncio
+Modul ini hanya untuk cek ketersediaan pysnmp.
+Import sebenarnya dilakukan langsung di snmp_poller.py.
 """
 import logging
 logger = logging.getLogger(__name__)
@@ -10,39 +11,22 @@ logger = logging.getLogger(__name__)
 PYSNMP_AVAILABLE = False
 PYSNMP_VERSION   = 0
 
-SnmpEngine = CommunityData = UdpTransportTarget = ContextData = None
-ObjectType = ObjectIdentity = bulkCmd = getCmd = nextCmd = Integer32 = None
-
 try:
-    from pysnmp.hlapi import (   # type: ignore[import]
-        SnmpEngine, CommunityData, UdpTransportTarget, ContextData,
-        ObjectType, ObjectIdentity, bulkCmd, getCmd, nextCmd,
+    from pysnmp.hlapi.asyncio import (   # type: ignore[import]
+        getCmd, SnmpEngine, CommunityData,
+        UdpTransportTarget, ContextData,
+        ObjectType, ObjectIdentity,
     )
     try:
-        from pysnmp.proto.rfc1902 import Integer32  # type: ignore[import]
-    except ImportError:
-        Integer32 = None
-
-    PYSNMP_AVAILABLE = True
-    # Deteksi versi
-    try:
         import pysnmp
-        ver_str = getattr(pysnmp, "__version__", "0")
+        ver_str = getattr(pysnmp, "__version__", "6")
         PYSNMP_VERSION = int(str(ver_str).split(".")[0])
     except Exception:
         PYSNMP_VERSION = 6
 
-    logger.warning(f"snmp_compat: pysnmp OK (v{PYSNMP_VERSION}, via pysnmp.hlapi)")
+    PYSNMP_AVAILABLE = True
+    logger.warning(f"snmp_compat: pysnmp-lextudio v{PYSNMP_VERSION} (hlapi.asyncio) OK")
 
 except ImportError as e:
     logger.warning(f"snmp_compat: pysnmp TIDAK TERINSTALL — {e}")
-
-
-def make_udp_transport(host: str, port: int = 161, timeout: int = 5, retries: int = 1):
-    """Buat UdpTransportTarget (sync constructor)."""
-    if not PYSNMP_AVAILABLE or UdpTransportTarget is None:
-        raise RuntimeError("pysnmp tidak terinstall")
-    try:
-        return UdpTransportTarget((host, port), timeout, retries)
-    except Exception:
-        return UdpTransportTarget((host, port), timeout=timeout, retries=retries)
+    logger.warning("snmp_compat: Install: pip install pyasn1==0.5.1 pysmi-lextudio==1.3.3 pysnmp-lextudio==6.2.0")

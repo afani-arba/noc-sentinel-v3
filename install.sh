@@ -36,31 +36,31 @@ ok "Backend stopped"
 step "[2/5] Git Pull..."
 cd "$APP_DIR"
 BEFORE=$(git rev-parse --short HEAD)
-git pull origin main 2>/dev/null || git pull origin master 2>/dev/null || warn "Git pull gagal — lanjut dengan kode lokal"
+git pull origin main 2>/dev/null || git pull origin master 2>/dev/null || warn "Git pull gagal"
 AFTER=$(git rev-parse --short HEAD)
-[[ "$BEFORE" != "$AFTER" ]] && ok "Updated: $BEFORE → $AFTER ($(git log -1 --format='%s'))" || warn "Tidak ada update (commit: $AFTER)"
+[[ "$BEFORE" != "$AFTER" ]] && ok "Updated: $BEFORE → $AFTER" || warn "Tidak ada update baru"
 
 # ── STEP 3: Python packages ────────────────────────────────────────────────────
-step "[3/5] Python packages + pysnmp..."
+step "[3/5] Python packages + pysnmp (lextudio async)..."
 
 [[ ! -f "$VENV/bin/pip" ]] && python3 -m venv "$VENV" && ok "venv dibuat"
 
 "$VENV/bin/pip" install --upgrade pip -q
 
-# Hapus pysnmp lama yang konflik sebelum install
-"$VENV/bin/pip" uninstall pysnmp pysnmp-lextudio -y -q 2>/dev/null || true
+# Hapus versi pysnmp lama yang konflik
+"$VENV/bin/pip" uninstall pysnmp pysnmp-lextudio pyasn1 pyasn1-modules pysmi pysmi-lextudio -y -q 2>/dev/null || true
 
-# Install semua dari requirements.txt (termasuk pysnmp-lextudio>=6.0.0)
+# Install dari requirements.txt (versi exact yang terbukti bekerja)
 "$VENV/bin/pip" install -r "$APP_DIR/backend/requirements.txt" -q
 
-# Verifikasi pysnmp bisa diimport
-if "$VENV/bin/python" -c "from pysnmp.hlapi import SnmpEngine, nextCmd; print('OK')" 2>/dev/null | grep -q "OK"; then
+# Verifikasi: test import pysnmp.hlapi.asyncio (ASYNC API, bukan sync!)
+if "$VENV/bin/python" -c "from pysnmp.hlapi.asyncio import getCmd, SnmpEngine; print('OK')" 2>/dev/null | grep -q "OK"; then
     VER=$("$VENV/bin/python" -c "import pysnmp; print(getattr(pysnmp,'__version__','?'))" 2>/dev/null || echo "?")
-    ok "pysnmp $VER — import OK ✓"
+    ok "pysnmp-lextudio $VER (asyncio API) — import OK ✓"
 else
-    warn "pysnmp gagal diimport! Coba paksa install lextudio..."
-    "$VENV/bin/pip" install 'pysnmp-lextudio>=6.0.0' -q \
-        && ok "pysnmp-lextudio berhasil ✓" \
+    warn "pysnmp gagal — paksa install lextudio 6.2.0..."
+    "$VENV/bin/pip" install pyasn1==0.5.1 pyasn1-modules==0.3.0 pysmi-lextudio==1.3.3 pysnmp-lextudio==6.2.0 -q \
+        && ok "pysnmp-lextudio 6.2.0 berhasil ✓" \
         || warn "pysnmp gagal total — SNMP nonaktif"
 fi
 
@@ -71,7 +71,7 @@ step "[4/5] Build Frontend..."
 cd "$APP_DIR/frontend"
 npm install --legacy-peer-deps --prefer-offline -q 2>/dev/null || npm install --legacy-peer-deps -q
 npm run build
-[[ -f "build/index.html" ]] && ok "Frontend build OK" || err "Build frontend gagal"
+[[ -f "build/index.html" ]] && ok "Frontend build OK" || err "Build failed"
 
 # ── STEP 5: Start ──────────────────────────────────────────────────────────────
 step "[5/5] Start Backend..."
@@ -91,11 +91,10 @@ systemctl is-active --quiet "$SERVICE" \
     || { journalctl -u "$SERVICE" -n 30 --no-pager; exit 1; }
 
 systemctl reload nginx 2>/dev/null && ok "Nginx di-reload" || true
-
 sleep 3
 curl -sf http://localhost:8000/api/health 2>/dev/null | grep -q "ok" \
     && ok "API health: OK ✔" \
-    || warn "API belum respond — cek: journalctl -u $SERVICE -f"
+    || warn "API belum respond"
 
 echo ""
 echo -e "${G}${BOLD}╔════════════════════════════════════════════╗${N}"

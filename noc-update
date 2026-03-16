@@ -89,21 +89,21 @@ fi
 step "[3/5] Update Python packages..."
 "$VENV/bin/pip" install --upgrade pip -q
 
-# Hapus pysnmp lama yang mungkin konflik sebelum install
-"$VENV/bin/pip" uninstall pysnmp pysnmp-lextudio -y -q 2>/dev/null || true
+# Hapus semua pysnmp variant lama yang konflik
+"$VENV/bin/pip" uninstall pysnmp pysnmp-lextudio pyasn1 pyasn1-modules pysmi pysmi-lextudio -y -q 2>/dev/null || true
 
-# Install dari requirements.txt (pysnmp-lextudio>=6.0.0)
+# Install dari requirements.txt (exact versions yang terbukti bekerja)
 "$VENV/bin/pip" install -r "$APP_DIR/backend/requirements.txt" -q
 
-# Verifikasi: test import langsung dari pysnmp.hlapi
-if "$VENV/bin/python" -c "from pysnmp.hlapi import SnmpEngine, nextCmd; print('OK')" 2>/dev/null | grep -q "OK"; then
+# Verifikasi: test import ASYNC API (pysnmp-lextudio 6.x pakai asyncio)
+if "$VENV/bin/python" -c "from pysnmp.hlapi.asyncio import getCmd, SnmpEngine; print('OK')" 2>/dev/null | grep -q "OK"; then
     VER=$("$VENV/bin/python" -c "import pysnmp; print(getattr(pysnmp,'__version__','?'))" 2>/dev/null || echo "?")
-    ok "pysnmp $VER — import OK ✓"
+    ok "pysnmp-lextudio $VER (asyncio) — import OK ✓"
 else
-    warn "pysnmp gagal diimport — paksa install lextudio..."
-    "$VENV/bin/pip" install 'pysnmp-lextudio>=6.0.0' -q \
-        && ok "pysnmp-lextudio berhasil ✓" \
-        || warn "pysnmp gagal — SNMP nonaktif"
+    warn "pysnmp gagal — paksa install exact versions..."
+    "$VENV/bin/pip" install pyasn1==0.5.1 pyasn1-modules==0.3.0 pysmi-lextudio==1.3.3 pysnmp-lextudio==6.2.0 -q \
+        && ok "pysnmp-lextudio 6.2.0 berhasil ✓" \
+        || warn "pysnmp gagal total — SNMP nonaktif"
 fi
 ok "Python packages OK"
 
