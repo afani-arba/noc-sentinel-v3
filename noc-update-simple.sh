@@ -29,13 +29,16 @@ echo "▶ 2/5  Install Python packages..."
 "$VENV/bin/pip" install -r "$APP_DIR/backend/requirements.txt" -q
 
 # Pastikan pysnmp-lextudio ada (SNMP Monitoring dependency)
-if ! "$VENV/bin/python" -c "import pysnmp" 2>/dev/null; then
-    warn "pysnmp belum ada — install pysnmp-lextudio..."
-    "$VENV/bin/pip" install 'pysnmp-lextudio>=1.1.0' -q \
+# Cek dengan import actual (bukan sekedar find_spec) untuk deteksi konflik
+if "$VENV/bin/python" -c "from pysnmp.hlapi import SnmpEngine" 2>/dev/null; then
+    ok "pysnmp (lextudio) tersedia ✓"
+else
+    warn "pysnmp belum tersedia — install ulang pysnmp-lextudio..."
+    # Hapus dulu semua versi pysnmp yang mungkin konflik
+    "$VENV/bin/pip" uninstall pysnmp pysnmp-lextudio -y -q 2>/dev/null || true
+    "$VENV/bin/pip" install 'pysnmp-lextudio>=1.1.0,<2.0.0' -q \
         && ok "pysnmp-lextudio terinstall" \
         || warn "pysnmp gagal install (fitur Test SNMP nonaktif)"
-else
-    ok "pysnmp tersedia"
 fi
 ok "Python packages OK"
 
