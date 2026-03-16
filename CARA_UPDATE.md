@@ -1,229 +1,141 @@
-# 📦 Cara Update Aplikasi NOC Sentinel v3
+# 📦 Cara Update NOC Sentinel v3
 
-Panduan lengkap untuk memperbarui NOC Sentinel v3 di server Ubuntu.
+> **Terakhir diperbarui:** 2026-03-16
+> **Commit bugfix:** `df67ddb` — 6 bug kritis diperbaiki
 
 ---
 
-## ⚡ Update Cepat (1 Perintah)
+## ✅ Metode 1 — One-Command Update (Rekomendasi)
 
-Cara paling mudah — jalankan script otomatis:
+Jalankan satu perintah ini di server:
 
 ```bash
-cd /opt/noc-sentinel-v3
-git pull origin main
-sudo bash update.sh
+sudo noc-update
 ```
 
 Script ini akan otomatis:
-- ✅ Cek & generate `JWT_SECRET` jika belum ada di `.env`
-- ✅ Pull code terbaru dari GitHub
-- ✅ Update Python packages
-- ✅ Build ulang frontend
-- ✅ Restart service backend
-- ✅ Verifikasi API berjalan normal
+1. **Hentikan backend** dan bebaskan port 8000 (`fuser -k 8000/tcp`)
+2. **Git pull** dari GitHub (`main` branch)
+3. **Update Python packages** dan pastikan `pysnmp-lextudio` ada
+4. **Build ulang frontend** (`npm run build`)
+5. **Start ulang backend** dan verifikasi health check
+
+> **Belum punya `noc-update`?** Install dulu:
+> ```bash
+> sudo bash /opt/noc-sentinel-v3/install-update.sh
+> ```
+> Cukup sekali saja. Setelah itu bisa pakai `sudo noc-update` kapan pun.
 
 ---
 
-## 🔧 Update Manual (Langkah per Langkah)
-
-Jika ingin kontrol penuh, ikuti langkah-langkah ini:
-
-### Langkah 0 — Pastikan `.env` Sudah Benar (WAJIB setelah update Maret 2026)
-
-> **PENTING:** Setelah update ini, aplikasi **tidak bisa start** jika `JWT_SECRET` belum diisi.
+## ✅ Metode 2 — Script Manual (tanpa install)
 
 ```bash
-# Buka file .env
-nano /opt/noc-sentinel-v3/backend/.env
-```
-
-Pastikan ada baris:
-```env
-# Buat secret baru jika belum ada:
-# python3 -c "import secrets; print(secrets.token_hex(32))"
-JWT_SECRET=isi_dengan_64_karakter_hex_acak
-
-# CORS: harus domain/IP spesifik, BUKAN "*"
-CORS_ORIGINS=http://192.168.x.x:3000
-```
-
-Jika belum ada `JWT_SECRET`, buat sekarang:
-```bash
-python3 -c "import secrets; print(secrets.token_hex(32))"
-# Salin output → tambahkan ke .env sebagai: JWT_SECRET=<output>
+sudo bash /opt/noc-sentinel-v3/noc-update-simple.sh
 ```
 
 ---
 
-### Langkah 1 — Pull Code Terbaru dari GitHub
+## ✅ Metode 3 — Langkah Manual (jika script gagal)
 
 ```bash
+# 1. Hentikan service dan bebaskan port
+sudo systemctl stop ARBAMonitoring
+fuser -k 8000/tcp 2>/dev/null || true
+sleep 2
+
+# 2. Pull kode terbaru
 cd /opt/noc-sentinel-v3
+sudo git pull origin main
 
-# Lihat perubahan yang akan di-download (opsional)
-git fetch origin
-git log HEAD..origin/main --oneline
+# 3. Update Python packages
+VENV="/opt/noc-sentinel-v3/backend/venv"
+[ -d "/opt/noc-sentinel-v3/backend/.venv" ] && VENV="/opt/noc-sentinel-v3/backend/.venv"
+sudo "$VENV/bin/pip" install -r backend/requirements.txt -q
 
-# Pull update
-git pull origin main
-```
+# Pastikan pysnmp ada (untuk monitoring SNMP)
+sudo "$VENV/bin/pip" install 'pysnmp-lextudio>=1.1.0' -q 2>/dev/null || true
 
-Jika muncul **conflict** (rare):
-```bash
-git stash        # simpan perubahan lokal sementara
-git pull origin main
-git stash pop    # kembalikan perubahan lokal
-```
-
----
-
-### Langkah 2 — Update Python Dependencies
-
-```bash
-cd /opt/noc-sentinel-v3/backend
-
-# Aktifkan virtual environment
-source venv/bin/activate
-
-# Install/update packages
-pip install -r requirements.txt -q
-
-# Keluar dari venv
-deactivate
-```
-
----
-
-### Langkah 3 — Build Frontend (UI)
-
-```bash
+# 4. Build frontend
 cd /opt/noc-sentinel-v3/frontend
+sudo npm install --legacy-peer-deps -q
+sudo npm run build
 
-# Install node packages (jika ada yang baru)
-npm install
+# 5. Start ulang service
+sudo systemctl daemon-reload
+sudo systemctl start ARBAMonitoring
+sleep 5
 
-# Build production
-npm run build
-
-# Verifikasi build berhasil
-ls -la build/index.html
+# 6. Cek status
+sudo systemctl status ARBAMonitoring
+curl -s http://localhost:8000/api/health
 ```
 
 ---
 
-### Langkah 4 — Restart Backend Service
+## 🔍 Verifikasi Setelah Update
 
-```bash
-# Restart service
-sudo systemctl restart nocsentinel
+Setelah update selesai, pastikan:
 
-# Cek status (harus "active (running)")
-sudo systemctl status nocsentinel
-
-# Jika gagal, lihat log error:
-sudo journalctl -u nocsentinel -n 50 --no-pager
-```
+| Cek | Perintah |
+|-----|----------|
+| Backend running | `sudo systemctl status ARBAMonitoring` |
+| API merespons | `curl http://localhost:8000/api/health` |
+| Versi benar | `curl http://localhost:8000/api/system/app-info` → harus `"version": "v3.0"` |
+| Log bersih | `sudo journalctl -u ARBAMonitoring -n 50` |
 
 ---
 
-### Langkah 5 — Reload Nginx (untuk Frontend)
+## 🌐 Setelah Update — Hard Refresh Browser
 
+Setelah update berhasil, lakukan **hard refresh** di browser:
+
+- **Chrome/Firefox (Desktop):** `Ctrl + Shift + R`
+- **Safari/Firefox (Mac):** `Cmd + Shift + R`
+- **Mobile:** Tutup tab → buka ulang
+
+---
+
+## 🐛 Bugs yang Diperbaiki (Commit `df67ddb`)
+
+| # | File | Deskripsi |
+|---|------|-----------|
+| 1 | `system.py` | Deklarasi variabel duplikat dihapus (VENV_PIP salah nilai) |
+| 2 | `mikrotik_api.py` | 108 baris dead code (method duplikat) dihapus |
+| 3 | `devices.py` | Operator precedence salah di `architecture_name` diperbaiki |
+| 4 | `devices.py` | **`snmp_community` tidak tersimpan** ke database — sekarang tersimpan |
+| 5 | `devices.py` | Tidak bisa kosongkan `winbox_address` — sekarang bisa (`null`) |
+| 6 | `system.py` | Versi hardcoded `v2.5` → `v3.0` |
+
+> **Bug #4 penting!** Jika sebelumnya SNMP community bukan `public`, device perlu
+> di-edit ulang di halaman Devices untuk menyimpan community string yang benar.
+
+---
+
+## ❓ Troubleshooting
+
+**Backend tidak mau start setelah update:**
 ```bash
-# Pastikan konfigurasi nginx benar
-sudo nginx -t
+# Lihat log detail
+sudo journalctl -u ARBAMonitoring -n 100 --no-pager
 
-# Reload (tidak disconnect user yang sedang aktif)
+# Paksa bunuh proses bertabrakan di port 8000
+sudo fuser -k 8000/tcp
+sudo fuser -k -KILL 8000/tcp
+sudo systemctl start ARBAMonitoring
+```
+
+**Port 8000 masih busy:**
+```bash
+sudo lsof -ti:8000 | xargs -r kill -9
+sudo systemctl start ARBAMonitoring
+```
+
+**Frontend masih tampil versi lama (cache):**
+```bash
+# Di server — hapus build lama
+sudo rm -rf /opt/noc-sentinel-v3/frontend/build
+cd /opt/noc-sentinel-v3/frontend
+sudo npm run build
 sudo systemctl reload nginx
 ```
-
----
-
-### Langkah 6 — Verifikasi Aplikasi Berjalan
-
-```bash
-# Test API backend
-curl -s http://localhost:8000/api/health
-
-# Harus return: {"status":"ok","service":"NOC-Sentinel","version":"3.0.0"}
-```
-
-Buka browser → **`Ctrl+Shift+R`** (hard refresh) untuk membersihkan cache.
-
----
-
-## 🚨 Troubleshooting
-
-### Backend Gagal Start Setelah Update
-
-**Gejala:** `sudo systemctl status nocsentinel` menunjukkan "failed"
-
-**Cek log:**
-```bash
-sudo journalctl -u nocsentinel -n 50 --no-pager
-```
-
-**Solusi berdasarkan error:**
-
-| Error di Log | Penyebab | Solusi |
-|---|---|---|
-| `RuntimeError: JWT_SECRET... must be set` | `JWT_SECRET` belum di-set di `.env` | Generate dan tambahkan ke `.env` (lihat Langkah 0) |
-| `Connection refused` (MongoDB) | MongoDB tidak jalan | `sudo systemctl start mongod` |
-| `ModuleNotFoundError` | Package Python belum diinstall | Ulangi Langkah 2 |
-| `Address already in use` | Port 8000 terpakai proses lain | `sudo fuser -k 8000/tcp` lalu restart |
-
----
-
-### Frontend Tidak Update (Tampilan Lama)
-
-1. Hard refresh browser: **`Ctrl+Shift+R`** atau **`Cmd+Shift+R`** (Mac)
-2. Jika masih lama, clear cache browser sepenuhnya
-3. Pastikan `npm run build` sudah berhasil (ada file `build/index.html`)
-
----
-
-### CORS Error di Browser (`blocked by CORS policy`)
-
-Pastikan `.env` sudah diisi:
-```env
-CORS_ORIGINS=http://ip-server-anda:3000
-```
-Tidak boleh menggunakan `*` karena tidak kompatibel dengan autentikasi cookie.
-
-Setelah ubah `.env`, restart:
-```bash
-sudo systemctl restart nocsentinel
-```
-
----
-
-## 📋 Cheat Sheet Perintah Berguna
-
-```bash
-# Status semua service
-sudo systemctl status nocsentinel mongod nginx
-
-# Lihat log backend real-time
-sudo journalctl -u nocsentinel -f
-
-# Restart semua service (jika ada masalah)
-sudo systemctl restart nocsentinel mongod nginx
-
-# Cek commit yang sedang berjalan
-cd /opt/noc-sentinel-v3 && git log -5 --oneline
-
-# Rollback ke commit sebelumnya
-cd /opt/noc-sentinel-v3
-git log --oneline -10          # pilih commit yang mau di-rollback ke sini
-git checkout <commit-hash>     # rollback (detached HEAD)
-# atau
-git revert HEAD                # buat commit "undo"
-sudo systemctl restart nocsentinel
-```
-
----
-
-## 📅 Riwayat Update
-
-| Tanggal | Versi | Perubahan |
-|---------|-------|-----------|
-| 2026-03-13 | v3.1 | Perbaikan 17 bug kritis: ping ke device, CORS fix, task GC, route conflict `/stats/overview`, SLA heatmap, limit device 100→1000, JWT_SECRET wajib, dll |
