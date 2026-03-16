@@ -75,11 +75,9 @@ def _snmp_bulk_walk_sync(host: str, community: str, oid: str, timeout: int = 5, 
     result = {}
     try:
         engine = SnmpEngine()
-        transport = UdpTransportTarget(
-            (host, 161),
-            timeout=timeout,
-            retries=retries,
-        )
+        # Gunakan positional args agar kompatibel dengan pysnmp 7.x
+        # (keyword args menyebabkan 'multiple values for timeout' di v7.x)
+        transport = UdpTransportTarget((host, 161), timeout, retries)
         community_data = CommunityData(community, mpModel=1)  # v2c
 
         for error_indication, error_status, error_index, var_binds in bulkCmd(
@@ -129,7 +127,7 @@ def _snmp_get_ifnames_sync(host: str, community: str, timeout: int = 5) -> Dict[
     result = {}
     try:
         engine = SnmpEngine()
-        transport = UdpTransportTarget((host, 161), timeout=timeout, retries=1)
+        transport = UdpTransportTarget((host, 161), timeout, 1)
         community_data = CommunityData(community, mpModel=1)
 
         for error_indication, error_status, _, var_binds in bulkCmd(

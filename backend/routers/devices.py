@@ -1701,7 +1701,7 @@ async def test_snmp(device_id: str, user=Depends(get_current_user)):
 
         try:
             engine = SnmpEngine()
-            transport = UdpTransportTarget((host, 161), timeout=4, retries=1)
+            transport = UdpTransportTarget((host, 161), 4, 1)  # positional for pysnmp 7.x
             comm = CommunityData(community, mpModel=1)  # SNMP v2c
 
             oids = [
