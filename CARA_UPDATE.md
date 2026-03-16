@@ -1,7 +1,31 @@
 # 📦 Cara Update NOC Sentinel v3
 
 > **Terakhir diperbarui:** 2026-03-16
-> **Commit bugfix:** `df67ddb` — 6 bug kritis diperbaiki
+> **Commit terbaru:** `2ed5890` — Fix SNMP pysnmp-lextudio conflict (ROOT CAUSE)
+
+---
+
+## 🚨 SNMP Tidak Aktif / Selalu Gagal? — Perbaiki Langsung Sekarang
+
+Jalankan perintah ini **satu per satu** di server untuk memperbaiki SNMP sekarang juga:
+
+```bash
+# Deteksi venv yang aktif
+VENV="/opt/noc-sentinel-v3/backend/venv"
+[ -d "/opt/noc-sentinel-v3/backend/.venv" ] && VENV="/opt/noc-sentinel-v3/backend/.venv"
+
+# Hapus semua versi pysnmp yang konflik, lalu install ulang bersih
+sudo "$VENV/bin/pip" uninstall pysnmp pysnmp-lextudio pyasn1 -y
+sudo "$VENV/bin/pip" install 'pysnmp-lextudio>=1.1.0,<2.0.0' 'pyasn1>=0.5.0,<0.7.0'
+
+# Verifikasi — harus output: SNMP OK
+sudo "$VENV/bin/python" -c "from pysnmp.hlapi import SnmpEngine; print('SNMP OK ✓')"
+
+# Restart backend agar perubahan aktif
+sudo fuser -k 8000/tcp 2>/dev/null; sudo systemctl restart ARBAMonitoring
+```
+
+Setelah selesai, **hard refresh browser** (`Ctrl+Shift+R`) — banner SNMP akan hilang.
 
 ---
 
