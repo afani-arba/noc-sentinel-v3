@@ -29,10 +29,15 @@ OID_IF_IN_OCTETS  = "1.3.6.1.2.1.2.2.1.10"  # ifInOctets (32-bit)
 OID_IF_OUT_OCTETS = "1.3.6.1.2.1.2.2.1.16"  # ifOutOctets (32-bit)
 
 # ── SMA (Simple Moving Average) State ─────────────────────────────────────────
-# {device_id: {iface_name: deque([bps1, bps2, bps3], maxlen=3)}}
-_SMA_WINDOW = 3
+# {device_id: {iface_name: deque([bps1, ..., bps5], maxlen=5)}}
+# Window = 5 → mulus di grafik tanpa terlalu lag
+_SMA_WINDOW = 5
 _sma_dl_cache: Dict[str, Dict[str, deque]] = defaultdict(lambda: defaultdict(lambda: deque(maxlen=_SMA_WINDOW)))
 _sma_ul_cache: Dict[str, Dict[str, deque]] = defaultdict(lambda: defaultdict(lambda: deque(maxlen=_SMA_WINDOW)))
+
+# ── Track apakah device menggunakan 32-bit atau 64-bit OID ────────────────────
+# {host: True/False} — True = 64-bit HC counter
+_is_64bit: Dict[str, bool] = {}
 
 
 def apply_sma(device_id: str, iface: str, dl_bps: int, ul_bps: int) -> tuple:
@@ -85,7 +90,7 @@ def _snmp_bulk_walk_sync(host: str, community: str, oid: str, timeout: int = 5, 
             transport,
             ContextData(),
             0,   # nonRepeaters
-            25,  # maxRepetitions
+            50,  # maxRepetitions=50 untuk BulkWalk yg lebih efisien (10x lebih cepat dari GetNext)
             ObjectType(ObjectIdentity(oid)),
             lexicographicMode=False,  # hanya ambil subtree OID tsb
         ):
@@ -157,8 +162,9 @@ def _snmp_get_ifnames_sync(host: str, community: str, timeout: int = 5) -> Dict[
 def _snmp_single_walk_sync(host: str, community: str, timeout: int = 6) -> Optional[Dict[str, Dict]]:
     """
     Satu siklus SNMP walk: ambil ifName + ifHCIn + ifHCOut secara bersamaan.
-    Return: {iface_name: {in_octets: int, out_octets: int}} atau None jika gagal.
+    Return: {iface_name: {in_octets: int, out_octets: int, is_64bit: bool}} atau None jika gagal.
     Mencoba 64-bit HC counters dahulu, fallback ke 32-bit jika tidak ada.
+    Track apakah device ini 64-bit atau 32-bit agar counter wrap dihitung benar.
     """
     names  = _snmp_get_ifnames_sync(host, community, timeout=timeout)
     if not names:
@@ -168,6 +174,7 @@ def _snmp_single_walk_sync(host: str, community: str, timeout: int = 6) -> Optio
     # Coba 64-bit HC counters
     in_map  = _snmp_bulk_walk_sync(host, community, OID_IF_HC_IN_OCTETS,  timeout=timeout)
     out_map = _snmp_bulk_walk_sync(host, community, OID_IF_HC_OUT_OCTETS, timeout=timeout)
+    using_64bit = bool(in_map)
 
     # Jika HC counter kosong → fallback ke 32-bit
     if not in_map:
@@ -177,6 +184,9 @@ def _snmp_single_walk_sync(host: str, community: str, timeout: int = 6) -> Optio
 
     if not in_map:
         return None
+
+    # Simpan info 64-bit untuk host ini (dipakai di wrap-around detection)
+    _is_64bit[host] = using_64bit
 
     combined = {}
     for idx, name in names.items():
@@ -255,18 +265,19 @@ async def get_snmp_traffic(
             t1_in  = t1_data.get("in_octets", 0)
             t1_out = t1_data.get("out_octets", 0)
 
-            # Handle 64-bit counter wrap-around (sangat jarang untuk window 1 detik)
-            MAX_64BIT = 2 ** 64
-            MAX_32BIT = 2 ** 32
+            # Handle counter wrap-around
+            # Gunakan MAX yang tepat: 64-bit untuk HC counters, 32-bit untuk fallback
+            use_64bit = _is_64bit.get(host, True)
+            COUNTER_MAX = (2 ** 64) if use_64bit else (2 ** 32)
 
             delta_in  = t2_in  - t1_in
             delta_out = t2_out - t1_out
 
-            # Wrap-around detection
+            # Wrap-around: jika delta negatif, counter sudah wrap
             if delta_in < 0:
-                delta_in = (MAX_64BIT + delta_in) if (t1_in > MAX_32BIT) else (MAX_32BIT + delta_in)
+                delta_in = COUNTER_MAX + delta_in
             if delta_out < 0:
-                delta_out = (MAX_64BIT + delta_out) if (t1_out > MAX_32BIT) else (MAX_32BIT + delta_out)
+                delta_out = COUNTER_MAX + delta_out
 
             # Convert octets/s → bits/s
             dl_bps = int(delta_in  * 8)
@@ -308,18 +319,19 @@ async def test_snmp_reachable(host: str, community: str = "public", timeout: int
     """
     Test apakah SNMP v2c dapat dijangkau di host.
     Cukup cek satu OID sederhana: sysDescr (1.3.6.1.2.1.1.1.0)
+    Menggunakan snmp_compat bridge agar kompatibel dengan pysnmp 7.x.
     """
     def _test():
         try:
-            from pysnmp.hlapi import (
-                SnmpEngine, CommunityData, UdpTransportTarget,
-                ContextData, ObjectType, ObjectIdentity, getCmd
-            )
+            from snmp_compat import SnmpEngine, CommunityData, ContextData, ObjectType, ObjectIdentity, getCmd, PYSNMP_AVAILABLE, make_udp_transport
+            if not PYSNMP_AVAILABLE:
+                return False
             engine = SnmpEngine()
+            transport = make_udp_transport(host, 161, timeout, 0)
             for err_ind, err_st, _, vb in getCmd(
                 engine,
                 CommunityData(community, mpModel=1),
-                UdpTransportTarget((host, 161), timeout=timeout, retries=0),
+                transport,
                 ContextData(),
                 ObjectType(ObjectIdentity("1.3.6.1.2.1.1.1.0")),
             ):
