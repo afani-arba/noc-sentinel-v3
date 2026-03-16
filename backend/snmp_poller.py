@@ -64,7 +64,7 @@ def _snmp_bulk_walk_sync(host: str, community: str, oid: str, timeout: int = 5, 
     Dijalankan di thread pool agar tidak blok event loop.
     """
     try:
-        from snmp_compat import SnmpEngine, CommunityData, UdpTransportTarget, ContextData, ObjectType, ObjectIdentity, bulkCmd, PYSNMP_AVAILABLE
+        from snmp_compat import SnmpEngine, CommunityData, ContextData, ObjectType, ObjectIdentity, bulkCmd, PYSNMP_AVAILABLE, make_udp_transport
         if not PYSNMP_AVAILABLE:
             logger.error("pysnmp tidak terinstall! Jalankan: pip install pysnmp")
             return {}
@@ -75,9 +75,8 @@ def _snmp_bulk_walk_sync(host: str, community: str, oid: str, timeout: int = 5, 
     result = {}
     try:
         engine = SnmpEngine()
-        # Gunakan positional args agar kompatibel dengan pysnmp 7.x
-        # (keyword args menyebabkan 'multiple values for timeout' di v7.x)
-        transport = UdpTransportTarget((host, 161), timeout, retries)
+        # make_udp_transport() handles pysnmp 7.x .create() dan pysnmp<7 langsung
+        transport = make_udp_transport(host, 161, timeout, retries)
         community_data = CommunityData(community, mpModel=1)  # v2c
 
         for error_indication, error_status, error_index, var_binds in bulkCmd(
@@ -118,7 +117,7 @@ def _snmp_get_ifnames_sync(host: str, community: str, timeout: int = 5) -> Dict[
     Ambil mapping ifIndex → ifName via SNMP.
     """
     try:
-        from snmp_compat import SnmpEngine, CommunityData, UdpTransportTarget, ContextData, ObjectType, ObjectIdentity, bulkCmd, PYSNMP_AVAILABLE
+        from snmp_compat import SnmpEngine, CommunityData, ContextData, ObjectType, ObjectIdentity, bulkCmd, PYSNMP_AVAILABLE, make_udp_transport
         if not PYSNMP_AVAILABLE:
             return {}
     except ImportError:
@@ -127,7 +126,7 @@ def _snmp_get_ifnames_sync(host: str, community: str, timeout: int = 5) -> Dict[
     result = {}
     try:
         engine = SnmpEngine()
-        transport = UdpTransportTarget((host, 161), timeout, 1)
+        transport = make_udp_transport(host, 161, timeout, 1)
         community_data = CommunityData(community, mpModel=1)
 
         for error_indication, error_status, _, var_binds in bulkCmd(
