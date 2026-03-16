@@ -793,13 +793,16 @@ async def poll_single_device(device: dict) -> dict:
 
     # ── Simpan ke traffic_history ──────────────────────────────────────────────
     # download_mbps / upload_mbps = konversi bps → Mbps untuk grafik
+    # Guard max(0, ...) agar nilai negatif tidak pernah tersimpan ke DB
+    safe_dl = max(0, eff_dl)
+    safe_ul = max(0, eff_ul)
     snapshot = {
         "device_id":      did,
         "timestamp":      now,
         "bandwidth":      bw,
         "isp_bandwidth":  isp_bw,
-        "download_mbps":  round(eff_dl / 1_000_000, 3),
-        "upload_mbps":    round(eff_ul / 1_000_000, 3),
+        "download_mbps":  round(safe_dl / 1_000_000, 3),
+        "upload_mbps":    round(safe_ul / 1_000_000, 3),
         "cpu":            result.get("cpu", 0),
         "memory_percent": result.get("memory", {}).get("percent", 0),
         "ping_ms":        round(real_ping_ms, 1),
