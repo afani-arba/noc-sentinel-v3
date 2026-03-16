@@ -112,8 +112,11 @@ async def _get_traffic_snmp(
     device_id: str,
 ) -> dict:
     """
-    Ambil bandwidth via SNMP v2c 64-bit (primary).
-    Return {} jika SNMP tidak tersedia → caller akan fallback ke API.
+    Ambil bandwidth via BulkWalk + precision delta timestamp.
+    Return {} jika SNMP tidak tersedia → caller fallback ke API.
+
+    STRICT: return value ini adalah SATU-SATUNYA source traffic.
+    Caller (poll_single_device) TIDAK BOLEH mix dengan API traffic jika return non-empty.
     """
     try:
         from snmp_poller import get_snmp_traffic
@@ -125,11 +128,9 @@ async def _get_traffic_snmp(
     if not host:
         return {}
 
-    # Prioritas: ISP interfaces selalu masuk, sisanya hingga 64 iface
-    isp_set      = set(isp_detected)
-    isp_if       = [n for n in running_ifaces if n in isp_set]
-    rest_if      = [n for n in running_ifaces if n not in isp_set]
-    iface_filter = isp_if + rest_if[:max(0, 64 - len(isp_if))]
+    # iface_filter: None → BulkWalk ambil SEMUA interface, filter di snmp_poller
+    # Tidak perlu slicing di sini — nextCmd walk lebih efisien dari GET per-index
+    iface_filter = running_ifaces if running_ifaces else None
 
     try:
         bw = await asyncio.wait_for(
@@ -137,16 +138,18 @@ async def _get_traffic_snmp(
                 host=host,
                 community=community,
                 device_id=device_id,
-                iface_filter=iface_filter if iface_filter else None,
+                iface_filter=iface_filter,
                 snmp_timeout=5,
                 apply_smoothing=True,
             ),
-            timeout=15,
+            timeout=20,  # BulkWalk kebutuhan waktu: 2x walk + delta sleep ~1s
         )
         if bw:
+            # Deteksi source dari hasil (snmp_hc atau snmp_32)
+            sample_src = next(iter(bw.values()), {}).get("source", "snmp")
             logger.info(
                 f"SNMP OK [{device.get('name','?')}]: "
-                f"{len(bw)} ifaces community={community}"
+                f"{len(bw)} ifaces source={sample_src} community={community}"
             )
         return bw
     except asyncio.TimeoutError:
@@ -155,6 +158,7 @@ async def _get_traffic_snmp(
     except Exception as e:
         logger.debug(f"SNMP error [{device.get('name','?')}]: {e}")
         return {}
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -511,9 +515,12 @@ async def poll_via_hybrid(device: dict) -> dict:
             )
 
             if bw_precomputed:
-                poll_source = "snmp"
+                # Source: snmp_hc (64-bit HC) atau snmp_32 (32-bit fallback)
+                # Ambil dari sample item pertama — semua item punya source yang sama
+                sample = next(iter(bw_precomputed.values()), {})
+                poll_source = sample.get("source", "snmp_hc")
             else:
-                # Fallback: API traffic (monitor-traffic ROS7 atau delta bytes ROS6)
+                # STRICT: fallback ke API traffic HANYA jika SNMP benar-benar gagal
                 bw_precomputed, iface_stats_raw, isp_from_api, isp_comments = \
                     await _get_traffic_api_fallback(
                         mt, device, running_ifaces, isp_detected, api_mode
@@ -522,6 +529,7 @@ async def poll_via_hybrid(device: dict) -> dict:
                     "api_rest_fallback" if api_mode == "rest"
                     else "api_delta_ros6"
                 ) if (bw_precomputed or iface_stats_raw) else "none"
+
 
         mode_label = f"{api_mode}_hybrid"
         logger.info(
