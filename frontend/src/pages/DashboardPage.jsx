@@ -4,7 +4,7 @@ import useDeviceEvents from "@/hooks/useDeviceEvents";
 import {
   Server, ArrowDown, ArrowUp, Cpu, HardDrive, Activity, Monitor, Network,
   AlertTriangle, AlertCircle, Info, CheckCircle2, RefreshCw, Thermometer, Zap, Battery,
-  Layers, CircuitBoard, Radio, GitCompare, Wifi, TrendingUp
+  Layers, CircuitBoard, Radio, GitCompare, Wifi, TrendingUp, Shield
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
@@ -45,6 +45,9 @@ export default function DashboardPage() {
   const [comparePeriod, setComparePeriod] = useState("week");
   const [showCompare, setShowCompare] = useState(false);
   
+  // WireGuard Status
+  const [wgStatus, setWgStatus] = useState(null);
+
   // Jitter removed from Heatmap View
 
   // ━━━ SSE Real-time ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -173,6 +176,15 @@ export default function DashboardPage() {
 
   useEffect(() => { fetchTrafficHistory(); }, [fetchTrafficHistory]);
 
+  // Fetch WG Status
+  useEffect(() => {
+    api.get("/wireguard/status").then(r => setWgStatus(r.data)).catch(() => {});
+    const wgIv = setInterval(() => {
+      api.get("/wireguard/status").then(r => setWgStatus(r.data)).catch(() => {});
+    }, 10000);
+    return () => clearInterval(wgIv);
+  }, []);
+
   // v3 — Top Talkers
   useEffect(() => {
     api.get("/dashboard/top-talkers", { params: { range: topTalkersRange, limit: 10 } })
@@ -228,12 +240,22 @@ export default function DashboardPage() {
             <h1 className="text-xl sm:text-2xl md:text-3xl font-bold font-['Rajdhani'] tracking-tight">Dashboard</h1>
             <p className="text-xs sm:text-sm text-muted-foreground">Real-time network monitoring</p>
           </div>
-          {/* SSE Live / Polling badge */}
-          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-sm border text-[10px] font-mono font-semibold transition-all ${
-            sseConnected
-              ? "bg-green-500/10 border-green-500/20 text-green-400"
-              : "bg-secondary/30 border-border text-muted-foreground"
-          }`}>
+          <div className="flex items-center gap-2">
+            {/* WG Status Badge */}
+            {wgStatus && wgStatus.status !== "disabled" && (
+              <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-sm border text-[10px] font-mono font-semibold transition-all ${
+                wgStatus.status === "online" ? "bg-purple-500/10 border-purple-500/20 text-purple-400" : "bg-red-500/10 border-red-500/20 text-red-400"
+              }`} title={wgStatus.status === "online" ? `WG Endpoint: ${wgStatus.endpoint}\nLatest Handshake: ${new Date(wgStatus.latest_handshake * 1000).toLocaleString()}` : "WireGuard Disconnected"}>
+                <Shield className="w-2.5 h-2.5" /> WG {wgStatus.status.toUpperCase()}
+              </div>
+            )}
+            
+            {/* SSE Live / Polling badge */}
+            <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-sm border text-[10px] font-mono font-semibold transition-all ${
+              sseConnected
+                ? "bg-green-500/10 border-green-500/20 text-green-400"
+                : "bg-secondary/30 border-border text-muted-foreground"
+            }`}>
             <div className={`w-1.5 h-1.5 rounded-full ${
               sseConnected ? "bg-green-500 animate-pulse" : "bg-muted-foreground"
             }`} />
@@ -247,7 +269,8 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
-        <div className="grid grid-cols-2 sm:flex sm:flex-row gap-2 sm:gap-3 sm:items-end">
+      </div>
+      <div className="grid grid-cols-2 sm:flex sm:flex-row gap-2 sm:gap-3 sm:items-end">
           <div className="space-y-1">
             <label className="text-[10px] text-muted-foreground uppercase tracking-widest flex items-center gap-1"><Monitor className="w-3 h-3" /> Device</label>
             <Select value={selectedDevice} onValueChange={setSelectedDevice}>

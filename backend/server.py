@@ -58,6 +58,7 @@ from routers.events import router as events_router
 from routers.scheduler import router as scheduler_router
 from routers.speedtest import router as speedtest_router
 from routers.routing_alerts import router as routing_alerts_router
+from routers.wireguard import router as wireguard_router
 
 # ── Background task references (FIX BUG #3: simpan reference agar tidak di-GC) ──
 _background_tasks: list = []
@@ -112,6 +113,22 @@ async def lifespan(app: FastAPI):
     session_task = asyncio.create_task(session_cache_loop())
     _background_tasks.append(session_task)
     logger.info("Session cache service started (PPPoE & Hotspot count, interval=1h)")
+
+    # Start WireGuard tunnel if enabled
+    try:
+        from core.db import get_db
+        db = get_db()
+        wg_cfg = await db.settings.find_one({"_id": "wireguard_config"})
+        if wg_cfg and wg_cfg.get("enabled"):
+            import core.wireguard_service as wg_svc
+            logger.info("WireGuard Client enabled in DB, trying to wg-quick up wg0...")
+            ok, out = wg_svc.wg_up()
+            if ok:
+                logger.info("WireGuard wg0 started successfully on boot.")
+            else:
+                logger.warning(f"Failed to start WireGuard on boot: {out}")
+    except Exception as e:
+        logger.error(f"Error checking WireGuard startup config: {e}")
 
     logger.info("NOC-Sentinel ready!")
 
@@ -177,6 +194,7 @@ api.include_router(events_router)
 api.include_router(scheduler_router)
 api.include_router(speedtest_router)
 api.include_router(routing_alerts_router)
+api.include_router(wireguard_router)
 app.include_router(api)
 
 
