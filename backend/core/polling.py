@@ -86,10 +86,21 @@ async def poll_via_api(device: dict, fetch_system: bool) -> dict:
         # Kita gunakan metode khusus yang berjalan dalam SATU koneksi TCP
         res_dict = await mt.get_polling_data(fetch_system)
     else:
-        # Kumpulkan task API (traffic stats dan ping itu Wajib)
+        # 1. Ambil ifaces terlebih dahulu untuk mencari antarmuka ISP1
+        ifaces_raw = await mt.list_interfaces()
+        
+        isp1_name = ""
+        for iface in ifaces_raw:
+            if not isinstance(iface, dict): continue
+            name = iface.get("name", "")
+            comment = str(iface.get("comment", "") or "").lower()
+            if "isp1" in name.lower() or "1" in comment:
+                isp1_name = name
+                break
+        
+        # 2. Kumpulkan task API lainnya 
         tasks = {
-            "ifaces": mt.list_interfaces(),
-            "ping": mt.ping_host("8.8.8.8", count=3)
+            "ping": mt.ping_host("8.8.8.8", count=3, interface=isp1_name)
         }
         
         # Selective Polling: Hanya ambil sistem berat setiap x detik
@@ -102,6 +113,7 @@ async def poll_via_api(device: dict, fetch_system: bool) -> dict:
         # ROS7 REST API mendukung HTTP connection pool (bisa serempak)
         results = await asyncio.gather(*(tasks.values()), return_exceptions=True)
         res_dict = dict(zip(tasks.keys(), results))
+        res_dict["ifaces"] = ifaces_raw
     
     ifaces_raw = res_dict.get("ifaces", [])
     if isinstance(ifaces_raw, Exception): ifaces_raw = []
@@ -139,7 +151,12 @@ async def poll_via_api(device: dict, fetch_system: bool) -> dict:
         status = "down" if disabled else ("up" if running else "down")
         is_virtual = itype in _VIRTUAL_IFACE_TYPES or name.lower().startswith(_VIRTUAL_IFACE_PREFIXES) or name.startswith("<")
         
-        if any(kw in comment for kw in _ISP_KEYWORDS):
+        # Deteksi ISP1 secara spesifik berdasarkan nama "isp1" atau comment mengandung "1"
+        is_isp1 = False
+        if "isp1" in name.lower() or "1" in comment:
+            is_isp1 = True
+
+        if any(kw in comment for kw in _ISP_KEYWORDS) or is_isp1:
             isp_detected.append(name)
             
         interfaces.append({
@@ -150,6 +167,7 @@ async def poll_via_api(device: dict, fetch_system: bool) -> dict:
             "speed":   0,
             "virtual": is_virtual,
             "is_sfp":  is_sfp,
+            "is_isp1": is_isp1,
         })
         
         if not is_virtual:

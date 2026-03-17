@@ -660,13 +660,16 @@ class MikroTikRestAPI(MikroTikBase):
             return []
 
     # ── Ping (ROS 7.x REST API) ──
-    async def ping_host(self, address: str = "8.8.8.8", count: int = 4):
+    async def ping_host(self, address: str = "8.8.8.8", count: int = 4, interface: str = ""):
         """
         Melakukan ping dari router ke target address via /rest/tool/ping.
         Mengembalikan list of dict response ping.
         """
         try:
-            items = await self._async_req("POST", "tool/ping", {"address": address, "count": count})
+            payload = {"address": address, "count": count}
+            if interface:
+                payload["interface"] = interface
+            items = await self._async_req("POST", "tool/ping", payload)
             return items if isinstance(items, list) else [items] if items else []
         except Exception as e:
             logger.debug(f"ping_host REST gagal ke {address}: {e}")
@@ -1172,9 +1175,23 @@ class MikroTikLegacyAPI(MikroTikBase):
 
             ifaces = safe_get("/interface")
             data["ifaces"] = self._normalize_items(ifaces) if isinstance(ifaces, list) else ifaces
+            
+            # Cari nama interface ISP1
+            isp1_name = ""
+            if isinstance(ifaces, list):
+                for iface in ifaces:
+                    if not isinstance(iface, dict): continue
+                    name = iface.get("name", "")
+                    comment = str(iface.get("comment", "") or "").lower()
+                    if "isp1" in name.lower() or "1" in comment:
+                        isp1_name = name
+                        break
 
             try:
-                ping_res = api.get_resource("/").call("ping", {"address": "8.8.8.8", "count": "3"})
+                args = {"address": "8.8.8.8", "count": "3"}
+                if isp1_name:
+                    args["interface"] = isp1_name
+                ping_res = api.get_resource("/").call("ping", args)
                 data["ping"] = self._normalize_items(ping_res) if isinstance(ping_res, list) else ping_res
             except Exception as e:
                 data["ping"] = e
@@ -1228,7 +1245,7 @@ class MikroTikLegacyAPI(MikroTikBase):
         return await asyncio.to_thread(self._get_polling_data_sync, fetch_system)
 
     # ── Ping (ROS 6.x API Protocol) ──
-    async def ping_host(self, address: str = "8.8.8.8", count: int = 4):
+    async def ping_host(self, address: str = "8.8.8.8", count: int = 4, interface: str = ""):
         """
         Melakukan ping dari router ke target address via command /ping.
         Mengembalikan list of dict response ping.
@@ -1236,7 +1253,10 @@ class MikroTikLegacyAPI(MikroTikBase):
         try:
             def cb(api):
                 resource = api.get_resource("/")
-                return resource.call("ping", {"address": address, "count": str(count)})
+                args = {"address": address, "count": str(count)}
+                if interface:
+                    args["interface"] = interface
+                return resource.call("ping", args)
             
             items = await asyncio.to_thread(self._execute, cb)
             return self._normalize_items(items) if items else []
