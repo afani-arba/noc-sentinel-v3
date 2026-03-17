@@ -455,9 +455,12 @@ export default function WallDisplayPage() {
         for (const d of devs) {
           const hist = next[d.id] || [];
           next[d.id] = [...hist, {
+            time: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
             dl: parseFloat((d.download_mbps || 0).toFixed(2)),
             ul: parseFloat((d.upload_mbps || 0).toFixed(2)),
-          }].slice(-20);
+            ping: d.ping_ms || 0,
+            jitter: d.jitter_ms || 0,
+          }].slice(-60);
         }
         return next;
       });
