@@ -43,8 +43,9 @@ export default function LatencyHeatmap({ data = [], dataKey = "ping" }) {
       return { grid: [], maxCount: 0, timeLabels: [] };
     }
 
-    // Filter out rows with 0 ping/jitter if they represent "offline"
-    const validData = data.filter((d) => d[dataKey] && d[dataKey] > 0);
+    // Filter out rows where ping is 0 (offline representation)
+    // Jitter can legitimately be 0, but if ping is 0, the device is offline.
+    const validData = data.filter((d) => d.ping && d.ping > 0 && d[dataKey] !== undefined && d[dataKey] !== null);
 
     if (validData.length === 0) {
       return { grid: [], maxCount: 0, timeLabels: [] };
