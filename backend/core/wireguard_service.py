@@ -125,3 +125,21 @@ def get_wg_status() -> Dict[str, Any]:
         logger.error(f"Error parsing wg show dump: {e}")
         
     return state
+
+def get_pubkey_from_privkey(private_key: str) -> str:
+    """
+    Generate public key from private key using 'wg pubkey' command.
+    """
+    if not private_key:
+        return ""
+    try:
+        p = subprocess.Popen(['wg', 'pubkey'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        stdout, stderr = p.communicate(input=private_key)
+        if p.returncode == 0:
+            return stdout.strip()
+        else:
+            logger.error(f"Failed to generate pubkey: {stderr.strip()}")
+            return ""
+    except Exception as e:
+        logger.error(f"Exception generating pubkey: {e}")
+        return ""

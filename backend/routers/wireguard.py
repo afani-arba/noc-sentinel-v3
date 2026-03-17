@@ -27,9 +27,12 @@ async def get_wireguard_config():
     db = get_db()
     curr = await db.settings.find_one({"_id": "wireguard_config"})
     if not curr:
-        return WGConfigSchema().dict()
-    
-    curr.pop("_id", None)
+        curr = WGConfigSchema().dict()
+    else:
+        curr.pop("_id", None)
+        
+    # Generate local public key from private key if exists
+    curr["local_public_key"] = wg_svc.get_pubkey_from_privkey(curr.get("private_key", ""))
     return curr
 
 @router.put("/config", dependencies=[]) # Todo: add require_admin
