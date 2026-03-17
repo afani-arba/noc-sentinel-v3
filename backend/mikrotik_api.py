@@ -10,12 +10,11 @@ Factory:
   discover_device(device) → auto-detect mode dan simpan ke DB
 """
 import ssl
-import requests
+import httpx
 import asyncio
 import logging
 import urllib3
 import routeros_api
-from requests.adapters import HTTPAdapter
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger(__name__)
@@ -48,17 +47,14 @@ def parse_host_port(ip_address: str, default_port: int = None):
     return ip_address, default_port
 
 
-# ── Custom SSL Adapter for MikroTik ROS 7.x ──────────────────────────────────
-# MikroTik ROS 7.x uses TLS ciphers/versions that OpenSSL 3.x rejects by default.
-# SECLEVEL=0 allows ALL ciphers; MINIMUM_SUPPORTED allows TLS 1.0/1.1/1.2/1.3.
-# OP_LEGACY_SERVER_CONNECT: OpenSSL 3.x bridging flag for legacy server hello.
-# This fixes: "sslv3 alert handshake failure" / "Cipher is (NONE)" errors.
+# ── Global HTTPX Client Pool ───────────────────────────────────────────────
+# Untuk persistent connections (keep-alive) dan mencegah overhead koneksi ulang.
+_httpx_clients = {}
 
-class MikroTikSSLAdapter(HTTPAdapter):
-    """Custom HTTPS adapter with maximal SSL permissiveness for MikroTik ROS 7.x."""
-
-    def _make_ssl_ctx(self):
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+def _get_httpx_client(base_url: str, use_ssl: bool) -> httpx.AsyncClient:
+    key = (base_url, use_ssl)
+    if key not in _httpx_clients:
+        ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
         try:
@@ -73,22 +69,13 @@ class MikroTikSSLAdapter(HTTPAdapter):
             ctx.options |= ssl.OP_LEGACY_SERVER_CONNECT
         except AttributeError:
             pass
-        return ctx
-
-    def init_poolmanager(self, *args, **kwargs):
-        kwargs["ssl_context"] = self._make_ssl_ctx()
-        return super().init_poolmanager(*args, **kwargs)
-
-    def proxy_manager_for(self, proxy, **proxy_kwargs):
-        proxy_kwargs["ssl_context"] = self._make_ssl_ctx()
-        return super().proxy_manager_for(proxy, **proxy_kwargs)
-
-
-def _make_session() -> requests.Session:
-    """Create a requests.Session with MikroTik-compatible SSL settings."""
-    session = requests.Session()
-    session.mount("https://", MikroTikSSLAdapter())
-    return session
+            
+        _httpx_clients[key] = httpx.AsyncClient(
+            verify=ctx if use_ssl else False,
+            timeout=httpx.Timeout(30.0),
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
+        )
+    return _httpx_clients[key]
 
 
 
@@ -144,16 +131,18 @@ class MikroTikRestAPI(MikroTikBase):
         self.verify = False
         self.timeout = 30
 
-    def _request(self, method, path, data=None, timeout=None):
+    async def _async_req(self, method, path, data=None, timeout=None):
         url = f"{self.base_url}/{path}"
         req_timeout = timeout if timeout is not None else self.timeout
+        client = _get_httpx_client(self.base_url, self.use_ssl)
+        
         logger.info(f"REST API request: {method} {url} (timeout={req_timeout}s)")
         try:
-            # Use custom session with MikroTik-compatible SSL ciphers
-            session = _make_session()
-            resp = session.request(method, url, auth=self.auth, json=data,
-                                   verify=False, timeout=req_timeout)
+            resp = await client.request(
+                method, url, auth=self.auth, json=data, timeout=req_timeout
+            )
             logger.info(f"REST API response: {resp.status_code}")
+            
             if resp.status_code == 401:
                 raise Exception("Authentication failed - check API username/password")
             if resp.status_code == 400:
@@ -161,32 +150,27 @@ class MikroTikRestAPI(MikroTikBase):
                 raise Exception(f"Bad request: {detail.get('detail', detail.get('message', resp.text))}")
             if resp.status_code == 404:
                 raise Exception(f"Endpoint tidak ditemukan (404): {path} - pastikan RouterOS mendukung endpoint ini")
+                
             resp.raise_for_status()
             return resp.json() if resp.content else {}
-        except requests.exceptions.SSLError as e:
-            logger.error(f"SSL Error: {e}")
-            err = str(e)
-            if "handshake" in err.lower() or "cipher" in err.lower() or "alert" in err.lower():
-                raise Exception(f"SSL Handshake gagal ke {self.host}:{self.port} - cipher mismatch antara server dan MikroTik. Coba ganti ke HTTP (port 80) di konfigurasi device.")
-            raise Exception(f"SSL Error - pastikan pilih protokol yang benar (HTTP/HTTPS)")
-        except requests.exceptions.ConnectionError as e:
+            
+        except httpx.ConnectError as e:
             logger.error(f"Connection Error to {url}: {e}")
             error_msg = str(e)
-            if "Connection refused" in error_msg:
+            if "refused" in error_msg.lower():
                 raise Exception(f"Connection refused - pastikan www service aktif di port {self.port} dan tidak ada firewall yang memblokir")
-            elif "No route to host" in error_msg:
+            elif "route to host" in error_msg.lower():
                 raise Exception(f"No route to host - periksa IP address dan jaringan")
+            elif "ssl" in error_msg.lower() or "handshake" in error_msg.lower():
+                raise Exception(f"SSL Handshake gagal ke {self.host}:{self.port}. Coba ganti ke HTTP (port 80) di konfigurasi device.")
             else:
                 raise Exception(f"Tidak dapat terhubung ke {self.host}:{self.port} - pastikan: 1) www service aktif, 2) port {self.port} tidak diblokir firewall, 3) IP server monitoring diizinkan di MikroTik")
-        except requests.exceptions.Timeout:
+        except httpx.TimeoutException:
             raise Exception(f"Connection timeout ke {self.host}:{self.port} - periksa: 1) Firewall MikroTik, 2) www service address restriction, 3) Koneksi jaringan")
         except Exception as e:
             if any(k in str(e) for k in ["Authentication", "Bad request", "Cannot connect", "timeout", "SSL Error", "Connection refused", "No route"]):
                 raise
             raise Exception(f"REST API error: {e}")
-
-    async def _async_req(self, method, path, data=None, timeout=None):
-        return await asyncio.to_thread(self._request, method, path, data, timeout)
 
     async def test_connection(self):
         """
@@ -412,6 +396,62 @@ class MikroTikRestAPI(MikroTikBase):
             return result
         except Exception:
             return {}
+
+    async def get_all_interface_stats(self):
+        """
+        ROS 7: Ambil stats interface fisik (rx-byte, tx-byte) + deteksi ISP interface.
+        Return: {
+            'stats':          {iface_name: {rx-bytes: int, tx-bytes: int, virtual: bool}},
+            'isp_interfaces': [nama-nama interface ISP/WAN yang terdeteksi]
+        }
+        """
+        _SKIP_TYPES = {
+            "bridge", "vlan", "pppoe-out", "pppoe-in", "l2tp", "pptp",
+            "ovpn-client", "ovpn-server", "sstp-client", "sstp-server",
+            "gre", "eoip", "eoipv6", "veth", "wireguard", "loopback",
+            "6to4", "ipip", "ipip6", "dummy"
+        }
+        _SKIP_PREFIXES = ("lo", "docker", "veth", "tun", "tap", "<")
+        _ISP_KEYWORDS = (
+            "isp", *[f"isp{i}" for i in range(1, 21)],
+            "wan", *[f"wan{i}" for i in range(1, 21)],
+            "input", *[f"input{i}" for i in range(1, 21)],
+            "uplink", "upstream", "internet", "gateway",
+        )
+        try:
+            items = await self._async_req("GET", "interface")
+            if not isinstance(items, list):
+                return {"stats": {}, "isp_interfaces": [], "isp_comments": {}}
+
+            stats = {}
+            isp_ifaces = []
+            isp_comments = {}
+
+            for item in items:
+                name = item.get("name", "")
+                itype = str(item.get("type", "")).lower()
+                if not name:
+                    continue
+
+                raw_comment = str(item.get("comment", "") or "")
+                comment = raw_comment.lower()
+                if any(kw in comment for kw in _ISP_KEYWORDS):
+                    isp_ifaces.append(name)
+                    isp_comments[name] = raw_comment
+
+                is_virtual = itype in _SKIP_TYPES or name.lower().startswith(_SKIP_PREFIXES)
+                if is_virtual:
+                    continue
+
+                stats[name] = {
+                    "rx-bytes": int(item.get("rx-byte", 0) or 0),
+                    "tx-bytes": int(item.get("tx-byte", 0) or 0),
+                }
+
+            return {"stats": stats, "isp_interfaces": isp_ifaces, "isp_comments": isp_comments}
+        except Exception as e:
+            logger.debug(f"get_all_interface_stats REST gagal: {e}")
+            return {"stats": {}, "isp_interfaces": [], "isp_comments": {}}
 
     # ── IP Address List ──
     async def list_ip_addresses(self):

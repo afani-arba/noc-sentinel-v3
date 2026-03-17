@@ -41,35 +41,7 @@ function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem("noc_token"));
   const [loading, setLoading] = useState(true);
-  const [snmpEnabled, setSnmpEnabled] = useState(null); // null = belum dicek
 
-  // ── Version-aware localStorage cache bust ──────────────────────────────────
-  // Setiap kali app_version dari backend berubah, hapus semua key 'noc_snmp_*'
-  // agar status error lama tidak tersisa.
-  useEffect(() => {
-    const checkHealth = async () => {
-      try {
-        const res = await api.get("/system/health");
-        const { snmp_enabled, app_version } = res.data;
-
-        // Cache-bust: jika versi berubah, hapus semua status SNMP lama dari localStorage
-        const storedVersion = localStorage.getItem("noc_app_version");
-        if (app_version && storedVersion !== app_version) {
-          // Hapus semua key yang berhubungan dengan status SNMP
-          Object.keys(localStorage)
-            .filter(k => k.startsWith("noc_snmp_"))
-            .forEach(k => localStorage.removeItem(k));
-          localStorage.setItem("noc_app_version", app_version);
-        }
-
-        setSnmpEnabled(snmp_enabled === true);
-      } catch {
-        // Backend tidak bisa dicapai — asumsikan SNMP unknown (null)
-        setSnmpEnabled(null);
-      }
-    };
-    checkHealth();
-  }, []);
 
   const fetchUser = useCallback(async () => {
     if (!token) {
@@ -110,7 +82,7 @@ function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, loading, snmpEnabled }}>
+    <AuthContext.Provider value={{ user, token, login, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );

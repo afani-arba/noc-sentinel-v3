@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
-import { useAuth } from "@/App";
 import { Plus, Trash2, Server, Wifi, WifiOff, Pencil, Zap, Monitor, Radio, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +12,6 @@ import { toast } from "sonner";
 
 export default function DevicesPage() {
   const navigate = useNavigate();
-  const { snmpEnabled } = useAuth(); // null=belum dicek, true=OK, false=belum install
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -23,7 +21,7 @@ export default function DevicesPage() {
     name: "", ip_address: "", winbox_address: "",
     api_mode: "rest", api_username: "admin", api_password: "",
     api_port: "", use_https: false, api_ssl: true, api_plaintext_login: true,
-    description: "", snmp_community: "public", snmp_version: "2c",
+    description: "",
   });
 
   const fetchDevices = useCallback(async () => {
@@ -38,7 +36,7 @@ export default function DevicesPage() {
 
   const openAdd = () => {
     setEditing(null);
-    setForm({ name: "", ip_address: "", winbox_address: "", api_mode: "rest", api_username: "admin", api_password: "", api_port: "", use_https: false, api_ssl: true, api_plaintext_login: true, description: "", snmp_community: "public", snmp_version: "2c" });
+    setForm({ name: "", ip_address: "", winbox_address: "", api_mode: "rest", api_username: "admin", api_password: "", api_port: "", use_https: false, api_ssl: true, api_plaintext_login: true, description: "" });
     setDialogOpen(true);
   };
 
@@ -53,8 +51,6 @@ export default function DevicesPage() {
       api_ssl: d.api_ssl !== undefined ? d.api_ssl : true,
       api_plaintext_login: d.api_plaintext_login !== undefined ? d.api_plaintext_login : true,
       description: d.description || "",
-      snmp_community: d.snmp_community || "public",
-      snmp_version: d.snmp_version || "2c",
     });
     setDialogOpen(true);
   };
@@ -101,21 +97,6 @@ export default function DevicesPage() {
     setTesting("");
   };
 
-  const handleTestSnmp = async (id) => {
-    setTesting(id + "_snmp");
-    try {
-      const r = await api.get(`/devices/${id}/test-snmp`);
-      if (r.data.success) {
-        toast.success(r.data.message, {
-          description: r.data.sys_descr ? r.data.sys_descr.substring(0, 80) : undefined,
-          duration: 6000,
-        });
-      } else {
-        toast.error(`SNMP Gagal: ${r.data.error}`, { duration: 8000 });
-      }
-    } catch (e) { toast.error("SNMP test error: " + (e.response?.data?.detail || e.message)); }
-    setTesting("");
-  };
 
   const handlePoll = async (id) => {
     setTesting(id + "_poll");
@@ -139,20 +120,7 @@ export default function DevicesPage() {
         </div>
       </div>
 
-      {/* SNMP Status Banner — hanya tampil jika backend konfirmasi pysnmp BELUM terinstall */}
-      {snmpEnabled === false && (
-        <div className="flex items-start gap-3 p-3 rounded-sm border border-yellow-500/30 bg-yellow-500/5 text-yellow-400" role="alert">
-          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-          <div className="text-xs leading-relaxed">
-            <span className="font-semibold">SNMP Hybrid Monitoring tidak aktif</span>
-            {" — "}
-            <code className="bg-yellow-500/10 px-1 rounded">pysnmp-lextudio</code> belum terinstall di server.
-            {" "}
-            Jalankan <code className="bg-yellow-500/10 px-1 rounded">sudo noc-update</code> untuk install otomatis.
-            Bandwidth monitoring menggunakan API fallback.
-          </div>
-        </div>
-      )}
+
 
       {loading ? (
         <div className="text-center text-muted-foreground py-12 text-sm">Loading devices...</div>
@@ -183,9 +151,7 @@ export default function DevicesPage() {
                 <Button variant="outline" size="sm" className="text-[10px] sm:text-xs gap-1 h-6 sm:h-7 rounded-sm px-2" onClick={() => handleTestApi(d.id)} disabled={testing===d.id+"_api"} data-testid={`test-api-${d.name}`}>
                   <Zap className="w-3 h-3" />{testing===d.id+"_api"?"...":"Test API"}
                 </Button>
-                <Button variant="outline" size="sm" className="text-[10px] sm:text-xs gap-1 h-6 sm:h-7 rounded-sm px-2 text-cyan-500 border-cyan-500/30 hover:bg-cyan-500/10" onClick={() => handleTestSnmp(d.id)} disabled={testing===d.id+"_snmp"} data-testid={`test-snmp-${d.name}`}>
-                  <Radio className="w-3 h-3" />{testing===d.id+"_snmp"?"...":"SNMP"}
-                </Button>
+
                 <Button variant="outline" size="sm" className="text-[10px] sm:text-xs gap-1 h-6 sm:h-7 rounded-sm px-2 text-primary border-primary/30 hover:bg-primary/10" onClick={() => navigate(`/devices/${d.id}`)} data-testid={`detail-device-${d.name}`}>
                   <Zap className="w-3 h-3" />Detail
                 </Button>
@@ -328,62 +294,10 @@ export default function DevicesPage() {
             <div className="space-y-1.5"><Label className="text-xs text-muted-foreground">Description</Label>
               <Input value={form.description} onChange={e => setForm({...form, description:e.target.value})} className="rounded-sm bg-background" data-testid="device-form-description" /></div>
 
-            {/* SNMP Section */}
-            <div className="border border-border/50 rounded-sm p-3 space-y-3">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                <Radio className="w-3 h-3" /> SNMP (Hybrid Monitoring)
-              </p>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">SNMP Version</Label>
-                  <Select
-                    value={form.snmp_version || "2c"}
-                    onValueChange={v => setForm({...form, snmp_version: v})}
-                  >
-                    <SelectTrigger className="rounded-sm bg-background text-xs" data-testid="device-form-snmp-version">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="1">SNMPv1</SelectItem>
-                      <SelectItem value="2c">SNMPv2c (default)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Community String</Label>
-                  <Input
-                    value={form.snmp_community}
-                    onChange={e => setForm({...form, snmp_community: e.target.value})}
-                    className="rounded-sm bg-background font-mono text-xs"
-                    placeholder="public"
-                    data-testid="device-form-snmp-community"
-                  />
-                </div>
-              </div>
-              <p className="text-[10px] text-muted-foreground/60">
-                SNMP v2c direkomendasikan untuk monitoring traffic (ifHCInOctets 64-bit). Default community: <code className="bg-muted px-1 rounded">public</code>
-              </p>
-            </div>
+
           </div>
           <DialogFooter className="flex-col sm:flex-row gap-2">
-            {editing && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="rounded-sm gap-1 text-cyan-500 border-cyan-500/30 hover:bg-cyan-500/10"
-                onClick={() => handleTestSnmp(editing.id)}
-                disabled={testing === editing.id + "_snmp"}
-                data-testid="device-form-test-snmp"
-              >
-                <Radio className="w-3 h-3" />
-                {testing === editing.id + "_snmp" ? (
-                  <span className="flex items-center gap-1">
-                    <span className="animate-spin inline-block w-3 h-3 border border-current border-t-transparent rounded-full" />
-                    Testing...
-                  </span>
-                ) : "Test SNMP"}
-              </Button>
-            )}
+
             <div className="flex gap-2 ml-auto">
               <Button variant="outline" onClick={() => setDialogOpen(false)} className="rounded-sm" data-testid="device-form-cancel">Cancel</Button>
               <Button onClick={handleSave} className="rounded-sm" data-testid="device-form-save">{editing?"Update":"Add Device"}</Button>

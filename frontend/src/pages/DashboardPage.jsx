@@ -318,7 +318,7 @@ export default function DashboardPage() {
       {noData && devices.length === 0 ? (
         <div className="bg-card border border-border rounded-sm p-12 text-center"><Server className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" /><p className="text-muted-foreground">No devices configured</p><p className="text-xs text-muted-foreground mt-1">Add a MikroTik device in the Devices page to start monitoring</p></div>
       ) : noData ? (
-        <div className="bg-card border border-border rounded-sm p-12 text-center"><Activity className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" /><p className="text-muted-foreground">Waiting for data...</p><p className="text-xs text-muted-foreground mt-1">SNMP polling runs every 30 seconds. Traffic data will appear after 2 polling cycles.</p></div>
+        <div className="bg-card border border-border rounded-sm p-12 text-center"><Activity className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" /><p className="text-muted-foreground">Waiting for data...</p><p className="text-xs text-muted-foreground mt-1">Polling runs every few seconds. Traffic data will appear after 2 polling cycles.</p></div>
       ) : (
         <>
           {/* Traffic Chart */}
