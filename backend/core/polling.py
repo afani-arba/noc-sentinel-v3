@@ -94,13 +94,17 @@ async def poll_via_api(device: dict, fetch_system: bool) -> dict:
             if not isinstance(iface, dict): continue
             name = iface.get("name", "")
             comment = str(iface.get("comment", "") or "").lower()
-            if "isp1" in name.lower() or "1" in comment:
+            # Strict ISP1 detection: name contains 'isp1' OR comment literally contains 'isp1'
+            # Avoid "1 in comment" which matches any string with digit '1'
+            name_l = name.lower()
+            if "isp1" in name_l or "isp1" in comment or comment == "1":
                 isp1_name = name
                 break
         
-        # 2. Kumpulkan task API lainnya 
+        # 2. Ping tanpa interface (lebih aman, semua versi ROS7 support ini)
+        # Interface hanya dipakai jika kita yakin nama-nya benar
         tasks = {
-            "ping": mt.ping_host("8.8.8.8", count=3, interface=isp1_name)
+            "ping": mt.ping_host("8.8.8.8", count=3, interface="")
         }
         
         # Selective Polling: Hanya ambil sistem berat setiap x detik
