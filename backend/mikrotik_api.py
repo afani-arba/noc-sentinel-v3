@@ -491,6 +491,19 @@ class MikroTikRestAPI(MikroTikBase):
         except Exception:
             return []
 
+    # ── BGP ──
+    async def list_bgp_peers(self):
+        try:
+            return await self._async_req("GET", "routing/bgp/connection")
+        except Exception:
+            return []
+
+    async def list_bgp_sessions(self):
+        try:
+            return await self._async_req("GET", "routing/bgp/session")
+        except Exception:
+            return []
+
     # ── IP Routes ──
     async def list_ip_routes(self, limit: int = 200):
         try:
