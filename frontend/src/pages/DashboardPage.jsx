@@ -4,7 +4,7 @@ import useDeviceEvents from "@/hooks/useDeviceEvents";
 import {
   Server, ArrowDown, ArrowUp, Cpu, HardDrive, Activity, Monitor, Network,
   AlertTriangle, AlertCircle, Info, CheckCircle2, RefreshCw, Thermometer, Zap, Battery,
-  Layers, CircuitBoard, Radio, GitCompare, Wifi, TrendingUp, Shield
+  Layers, CircuitBoard, Radio, GitCompare, Wifi, TrendingUp, Shield, Tag
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
@@ -313,6 +313,7 @@ export default function DashboardPage() {
       {sysResource && selectedDevice !== "all" && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
           {[
+            { label: "Identity", value: sysResource.identity || "—", icon: Tag },
             { label: "Architecture", value: sysResource.architecture_name || "—", icon: Layers },
             { label: "Board Name", value: sysResource.board_name || "—", icon: CircuitBoard },
             { label: "ROS Version", value: sysResource.version || "—", icon: Monitor },

@@ -86,6 +86,7 @@ class MikroTikBase:
 
     # ── Polling/Monitoring — default aman (return kosong) ──
     # Subclass yang tidak implement tidak akan menyebabkan AttributeError
+    async def get_system_identity(self): return ""
     async def get_system_resource(self): return {}
     async def get_system_health(self):   return {}  # Override di subclass
     async def list_interfaces(self):     return []
@@ -223,6 +224,14 @@ class MikroTikRestAPI(MikroTikBase):
 
 
     # ── System Resource (ROS 7.x REST API) ──
+    async def get_system_identity(self):
+        """Ambil nama router dari /rest/system/identity."""
+        try:
+            r = await self._async_req("GET", "system/identity")
+            return r.get("name", "") if isinstance(r, dict) else ""
+        except Exception:
+            return ""
+
     async def get_system_resource(self):
         """Ambil CPU, memory, uptime dari /rest/system/resource."""
         try:
@@ -894,6 +903,14 @@ class MikroTikLegacyAPI(MikroTikBase):
             return []
 
     # ── System Resource ──
+    async def get_system_identity(self):
+        """Ambil nama router dari /system/identity."""
+        try:
+            items = await asyncio.to_thread(self._list_resource, "/system/identity")
+            return items[0].get("name", "") if items else ""
+        except Exception:
+            return ""
+
     async def get_system_resource(self):
         """Ambil CPU, memory, uptime dari /system/resource."""
         try:

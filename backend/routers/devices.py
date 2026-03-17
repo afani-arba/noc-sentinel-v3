@@ -208,6 +208,7 @@ async def get_system_resource(device_id: str, user=Depends(get_current_user)):
     try:
         client = get_api_client(device)
         raw = await client.get_system_resource()
+        identity = await client.get_system_identity()
 
         logger.info(f"system-resource raw for {device_id}: {list(raw.keys()) if isinstance(raw, dict) else type(raw)}")
 
@@ -241,6 +242,7 @@ async def get_system_resource(device_id: str, user=Depends(get_current_user)):
             # FIX BUG #3: wrong operator precedence in original: `arch or "x86" if ... else arch`
             # Python evaluates that as `(arch) or ("x86" if ... else arch)` which can give wrong result.
             # Correct: when arch is empty AND x86 detected, return "x86"; else return arch.
+            "identity": identity,
             "architecture_name": (arch or "x86") if "x86" in (platform + board + cpu).lower() else arch,
             "board_name": board or platform or "",
             "version": version,
