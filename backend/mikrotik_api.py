@@ -339,6 +339,22 @@ class MikroTikRestAPI(MikroTikBase):
         except Exception:
             return []
 
+    async def list_pppoe_active(self):
+        """Ambil list PPPoE active di RouterOS 7."""
+        try:
+            items = await self._async_req("GET", "ppp/active")
+            return items if isinstance(items, list) else []
+        except Exception:
+            return []
+
+    async def list_hotspot_active(self):
+        """Ambil list Hotspot active di RouterOS 7."""
+        try:
+            items = await self._async_req("GET", "ip/hotspot/active")
+            return items if isinstance(items, list) else []
+        except Exception:
+            return []
+
     async def get_isp_interfaces(self):
         """
         Return list of interface names that are marked as ISP/WAN/INPUT uplinks
@@ -1111,6 +1127,86 @@ class MikroTikLegacyAPI(MikroTikBase):
             return self._normalize_items(items)
         except Exception:
             return []
+
+    # ── Session Counters ──
+    async def list_pppoe_active(self):
+        try:
+            items = await asyncio.to_thread(self._list_resource, "/ppp/active")
+            return self._normalize_items(items)
+        except Exception:
+            return []
+
+    async def list_hotspot_active(self):
+        try:
+            items = await asyncio.to_thread(self._list_resource, "/ip/hotspot/active")
+            return self._normalize_items(items)
+        except Exception:
+            return []
+
+    # ── Bulk Polling (ROS6 Optimization) ──
+    def _get_polling_data_sync(self, fetch_system: bool):
+        """Execute all polling API commands in a single persistent TCP connection."""
+        pool = self._get_connection()
+        try:
+            api = pool.get_api()
+            data = {}
+            
+            def safe_get(path):
+                try:
+                    return api.get_resource(path).get()
+                except Exception as e:
+                    return e
+
+            ifaces = safe_get("/interface")
+            data["ifaces"] = self._normalize_items(ifaces) if isinstance(ifaces, list) else ifaces
+
+            if fetch_system:
+                sys = safe_get("/system/resource")
+                data["sys"] = sys[0] if isinstance(sys, list) and sys else (sys if isinstance(sys, Exception) else {})
+                
+                health = safe_get("/system/health")
+                if isinstance(health, list):
+                    # Format standard kesehatan ROS6
+                    result = {"voltage": 0, "cpu_temp": 0, "board_temp": 0, "power": 0, "fans": {}, "current": 0}
+                    def _f(v):
+                        try:
+                            return float(str(v).replace('C', '').replace('V', '').replace('W', '').replace('RPM', '').replace('A', '').strip())
+                        except:
+                            return 0
+                    for item in health:
+                        name = item.get("name", "").lower()
+                        value = item.get("value", "")
+                        typ = item.get("type", "").upper()
+                        if "voltage" in name:
+                            if result["voltage"] == 0: result["voltage"] = _f(value)
+                        elif "temperature" in name:
+                            if "cpu" in name: result["cpu_temp"] = _f(value)
+                            else: result["board_temp"] = _f(value)
+                        elif typ == "W": result["power"] = _f(value)
+                        elif typ == "RPM": result["fans"][name] = int(_f(value))
+                        elif typ == "":
+                            if "fan" in name: result["fans"][name] = int(_f(value))
+                            elif "volt" in name:
+                                if result["voltage"] == 0: result["voltage"] = _f(value)
+                    data["health"] = result
+                else:
+                    data["health"] = health
+
+                pppoe = safe_get("/ppp/active")
+                data["pppoe"] = self._normalize_items(pppoe) if isinstance(pppoe, list) else pppoe
+
+                hotspot = safe_get("/ip/hotspot/active")
+                data["hotspot"] = self._normalize_items(hotspot) if isinstance(hotspot, list) else hotspot
+                
+            return data
+        finally:
+            try:
+                pool.disconnect()
+            except Exception:
+                pass
+
+    async def get_polling_data(self, fetch_system: bool):
+        return await asyncio.to_thread(self._get_polling_data_sync, fetch_system)
 
 
 # Backward compatibility alias

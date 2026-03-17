@@ -65,31 +65,37 @@ async def wallboard_status(user=Depends(get_current_user)):
 
         if last_bw:
             bw = last_bw.get("bandwidth") or {}
+            
+            # Helper to deduplicate interface summations
+            parsed_ifaces = set()
 
             # ── PRIORITAS 1: isp_bandwidth (field baru, paling akurat) ────────
             # Diisi oleh polling.py berdasarkan comment "ISP1..20/WAN/INPUT" di MikroTik
             isp_bw_stored = last_bw.get("isp_bandwidth") or {}
             if isp_bw_stored:
-                for iface_bw in isp_bw_stored.values():
-                    if isinstance(iface_bw, dict):
+                for iface_name, iface_bw in isp_bw_stored.items():
+                    if isinstance(iface_bw, dict) and iface_name not in parsed_ifaces:
                         download_bps += iface_bw.get("download_bps", 0)
                         upload_bps   += iface_bw.get("upload_bps",   0)
+                        parsed_ifaces.add(iface_name)
 
             # ── PRIORITAS 2: Fallback — filter bw dengan isp_interfaces ──────
             elif bw and isp_interfaces:
                 for iface in isp_interfaces:
                     iface_bw = bw.get(iface, {})
-                    if isinstance(iface_bw, dict):
+                    if isinstance(iface_bw, dict) and iface not in parsed_ifaces:
                         download_bps += iface_bw.get("download_bps", 0)
                         upload_bps   += iface_bw.get("upload_bps",   0)
+                        parsed_ifaces.add(iface)
 
             # ── PRIORITAS 3: Fallback — sum semua interface fisik saja ────────
             # (Digunakan jika MikroTik belum diberi comment ISP/WAN/INPUT)
             elif bw:
                 for iface_name, iface_bw in bw.items():
-                    if isinstance(iface_bw, dict) and is_physical(iface_name):
+                    if isinstance(iface_bw, dict) and is_physical(iface_name) and iface_name not in parsed_ifaces:
                         download_bps += iface_bw.get("download_bps", 0)
                         upload_bps   += iface_bw.get("upload_bps",   0)
+                        parsed_ifaces.add(iface_name)
 
 
         # Determine alert level

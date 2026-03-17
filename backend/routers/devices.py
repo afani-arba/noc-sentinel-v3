@@ -390,19 +390,31 @@ async def dashboard_stats(device_id: str = "", interface: str = "", user=Depends
             time_label = local_time.strftime("%H:%M")
         except Exception:
             time_label = ""
-        bw = h.get("bandwidth") or {}
-        if bw:
-            # New format: bandwidth = {iface: {download_bps, upload_bps}}
-            if interface and interface != "all":
-                ib = bw.get(interface, {})
-                dl, ul = ib.get("download_bps", 0), ib.get("upload_bps", 0)
-            else:
-                dl = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
-                ul = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
+        bw     = h.get("bandwidth") or {}
+        isp_bw = h.get("isp_bandwidth") or {}
+        
+        if interface and interface != "all":
+            ib = bw.get(interface, {})
+            dl, ul = ib.get("download_bps", 0), ib.get("upload_bps", 0)
         else:
-            # Old format: top-level download_mbps / upload_mbps (in Mbps, not bps)
-            dl = (h.get("download_mbps") or 0) * 1_000_000
-            ul = (h.get("upload_mbps")   or 0) * 1_000_000
+            if isp_bw:
+                dl = sum(v.get("download_bps", 0) for v in isp_bw.values() if isinstance(v, dict))
+                ul = sum(v.get("upload_bps",   0) for v in isp_bw.values() if isinstance(v, dict))
+            elif bw and device and device.get("isp_interfaces"):
+                dl = sum(bw.get(i, {}).get("download_bps", 0) for i in device["isp_interfaces"] if isinstance(bw.get(i), dict))
+                ul = sum(bw.get(i, {}).get("upload_bps",   0) for i in device["isp_interfaces"] if isinstance(bw.get(i), dict))
+            elif bw:
+                VIRTUAL_PREFIXES = (
+                    "bridge", "vlan", "lo", "loopback", "ovpn", "pppoe-", "pptp",
+                    "l2tp", "eoip", "gre", "wireguard", "wg", "veth", "docker",
+                    "ip6tnl", "sit", "tun", "tap", "dummy",
+                )
+                dl = sum(v.get("download_bps", 0) for k, v in bw.items() if isinstance(v, dict) and not any(k.lower().startswith(p) for p in VIRTUAL_PREFIXES))
+                ul = sum(v.get("upload_bps",   0) for k, v in bw.items() if isinstance(v, dict) and not any(k.lower().startswith(p) for p in VIRTUAL_PREFIXES))
+            else:
+                dl = (h.get("download_mbps") or 0) * 1_000_000
+                ul = (h.get("upload_mbps")   or 0) * 1_000_000
+                
         traffic_data.append({
             "time": time_label, "download": round(dl / 1_000_000, 2), "upload": round(ul / 1_000_000, 2),
             "ping": h.get("ping_ms", 0), "jitter": h.get("jitter_ms", 0)
@@ -1514,11 +1526,21 @@ async def reboot_device(device_id: str, user=Depends(require_admin)):
         if api_mode == "api":
             # ROS 6 â€” RouterOS API Socket
             import routeros_api
-            api_port = device.get("api_port") or (8729 if device.get("api_ssl") else 8728)
+            def _parse_ip(target, default_port):
+                if ":" in target:
+                    try:
+                        pts = target.split(":", 1)
+                        return pts[0], int(pts[1])
+                    except:
+                        pass
+                return target, default_port
+            
+            clean_ip, extracted_port = _parse_ip(ip, 8728)
+            api_port = device.get("api_port") or (8729 if device.get("api_ssl") else extracted_port)
             api_ssl = device.get("api_ssl", False)
             try:
                 conn = routeros_api.RouterOsApiPool(
-                    ip, username=username, password=password,
+                    clean_ip, username=username, password=password,
                     port=api_port, use_ssl=api_ssl,
                     ssl_verify=False, ssl_verify_hostname=False,
                     plaintext_login=True
@@ -1538,9 +1560,20 @@ async def reboot_device(device_id: str, user=Depends(require_admin)):
                     raise
         else:
             # ROS 7 â€” REST API
-            port = device.get("api_port") or (443 if device.get("use_https") else 80)
+            def _parse_ip(target, default_port):
+                if ":" in target:
+                    try:
+                        pts = target.split(":", 1)
+                        return pts[0], int(pts[1])
+                    except:
+                        pass
+                return target, default_port
+            
+            # Prevent appending port if the database ip_address already contains one (e.g. R.Kumpeh bug)
+            clean_ip, default_port = _parse_ip(ip, 80)
+            port = device.get("api_port") or (443 if device.get("use_https") else default_port)
             scheme = "https" if device.get("use_https") else "http"
-            url = f"{scheme}://{ip}:{port}/rest/system/reboot"
+            url = f"{scheme}://{clean_ip}:{port}/rest/system/reboot"
             try:
                 async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
                     resp = await client.post(url, auth=(username, password))

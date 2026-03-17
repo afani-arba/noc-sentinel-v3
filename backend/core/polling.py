@@ -81,25 +81,26 @@ async def poll_via_api(device: dict, fetch_system: bool) -> dict:
     api_mode = device.get("api_mode", "rest")
     dev_name = device.get("name", device.get("ip_address", "?"))
     
-    # Kumpulkan task API (traffic stats itu Wajib)
-    tasks = {
-        "ifaces": mt.list_interfaces()
-    }
-    
-    # Selective Polling: Hanya ambil sistem berat setiap x detik
-    if fetch_system:
-        tasks["sys"]     = mt.get_system_resource()
-        tasks["health"]  = mt.get_system_health()
-        if api_mode == "api":
-            tasks["pppoe"]   = asyncio.to_thread(mt._list_resource, "/ppp/active")
-            tasks["hotspot"] = asyncio.to_thread(mt._list_resource, "/ip/hotspot/active")
-        else:
+    if api_mode == "api":
+        # ROS6 (Legacy API) tidak mentolerir banyak koneksi bersamaan.
+        # Kita gunakan metode khusus yang berjalan dalam SATU koneksi TCP
+        res_dict = await mt.get_polling_data(fetch_system)
+    else:
+        # Kumpulkan task API (traffic stats itu Wajib)
+        tasks = {
+            "ifaces": mt.list_interfaces()
+        }
+        
+        # Selective Polling: Hanya ambil sistem berat setiap x detik
+        if fetch_system:
+            tasks["sys"]     = mt.get_system_resource()
+            tasks["health"]  = mt.get_system_health()
             tasks["pppoe"]   = mt.list_pppoe_active()
             tasks["hotspot"] = mt.list_hotspot_active()
 
-    # Eksekusi BERSAMAAN
-    results = await asyncio.gather(*(tasks.values()), return_exceptions=True)
-    res_dict = dict(zip(tasks.keys(), results))
+        # ROS7 REST API mendukung HTTP connection pool (bisa serempak)
+        results = await asyncio.gather(*(tasks.values()), return_exceptions=True)
+        res_dict = dict(zip(tasks.keys(), results))
     
     ifaces_raw = res_dict.get("ifaces", [])
     if isinstance(ifaces_raw, Exception): ifaces_raw = []
@@ -284,7 +285,7 @@ async def poll_single_device(device: dict) -> dict:
         ping_data = ping_res or {"reachable": False, "avg": 0, "jitter": 0, "loss": 100}
         real_ping_ms = ping_data.get("avg", 0)
         
-        result = await asyncio.wait_for(poll_via_api(device, fetch_system), timeout=7.0)
+        result = await asyncio.wait_for(poll_via_api(device, fetch_system), timeout=25.0)
         result["ping"] = ping_data
         
         if fetch_system and result["reachable"]:

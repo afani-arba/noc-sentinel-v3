@@ -715,19 +715,19 @@ export default function WallDisplayPage() {
         </div>
 
         {/* ── Right Panel: Active Alerts only ── */}
-        <div className="w-full lg:w-64 flex-shrink-0 flex flex-col gap-3">
+        <div className="w-full lg:w-64 flex-shrink-0 flex flex-col gap-3 min-h-0">
           {/* Active Alerts */}
           <div
-            className="rounded-xl border p-4 flex-1"
+            className="rounded-xl border p-4 flex flex-col min-h-0"
             style={{
               background: "rgba(255,255,255,0.03)",
               borderColor: "rgba(99,179,237,0.2)",
             }}
           >
-            <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-widest mb-3 flex items-center gap-2">
+            <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-widest mb-3 flex items-center gap-2 flex-shrink-0">
               <AlertTriangle className="w-3.5 h-3.5 text-yellow-400" /> Active Alerts
             </h3>
-            <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+            <div className="space-y-2 overflow-y-auto flex-1 pr-1 custom-scrollbar">
               {devices.filter(d => d.alert_level !== "normal").length === 0 ? (
                 <div className="flex items-center gap-2 text-green-400 text-xs">
                   <CheckCircle2 className="w-4 h-4" /> All systems normal
@@ -755,7 +755,7 @@ export default function WallDisplayPage() {
           </div>
 
           {/* Refresh indicator */}
-          <div className="flex items-center justify-center gap-2 text-slate-600 text-[10px]">
+          <div className="flex items-center justify-center gap-2 text-slate-600 text-[10px] flex-shrink-0">
             <RefreshCw className="w-3 h-3 animate-spin" style={{ animationDuration: "3s" }} />
             Auto-refresh every 5s
           </div>
