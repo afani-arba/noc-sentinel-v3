@@ -353,12 +353,12 @@ export default function BandwidthPage() {
                 <AreaChart data={history} margin={{ left: -10, right: 10, top: 10, bottom: 0 }}>
                   <defs>
                     <linearGradient id="dlGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
+                      <stop offset="5%" stopColor="#eab308" stopOpacity={0.5} />
+                      <stop offset="95%" stopColor="#eab308" stopOpacity={0.05} />
                     </linearGradient>
                     <linearGradient id="ulGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#f43f5e" stopOpacity={0} />
+                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.5} />
+                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0.05} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
@@ -383,22 +383,22 @@ export default function BandwidthPage() {
                      wrapperStyle={{ fontSize: "11px", color: "#94a3b8" }}
                   />
                   <Area
-                    type="monotone"
+                    type="linear"
                     dataKey="download"
-                    name="Inbound"
-                    stroke="#0ea5e9"
-                    strokeWidth={2}
+                    name="Download"
+                    stroke="#eab308"
+                    strokeWidth={1.5}
                     fill="url(#dlGrad)"
                     dot={false}
                     activeDot={{ r: 4 }}
                     isAnimationActive={false}
                   />
                   <Area
-                    type="monotone"
+                    type="linear"
                     dataKey="upload"
-                    name="Outbound"
-                    stroke="#f43f5e"
-                    strokeWidth={2}
+                    name="Upload"
+                    stroke="#22c55e"
+                    strokeWidth={1.5}
                     fill="url(#ulGrad)"
                     dot={false}
                     activeDot={{ r: 4 }}

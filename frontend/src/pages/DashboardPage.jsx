@@ -346,8 +346,8 @@ export default function DashboardPage() {
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={td} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <defs>
-                    <linearGradient id="gDl" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.4} /><stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} /></linearGradient>
-                    <linearGradient id="gUl" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#f43f5e" stopOpacity={0.4} /><stop offset="95%" stopColor="#f43f5e" stopOpacity={0} /></linearGradient>
+                    <linearGradient id="gDl" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#eab308" stopOpacity={0.6} /><stop offset="95%" stopColor="#eab308" stopOpacity={0.1} /></linearGradient>
+                    <linearGradient id="gUl" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#22c55e" stopOpacity={0.6} /><stop offset="95%" stopColor="#22c55e" stopOpacity={0.1} /></linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
                   <XAxis dataKey="time" tick={{ fill: "#a1a1aa", fontSize: 10 }} tickLine={false} axisLine={false} />
@@ -355,15 +355,15 @@ export default function DashboardPage() {
                       if (val >= 1000) return `${(val/1000).toFixed(1)} Gbps`;
                       return `${val} Mbps`;
                   }} />
-                  <Tooltip {...ttStyle} formatter={(v, n) => [`${Number(v).toFixed(2)} Mbps`, n === "download" ? "Inbound" : "Outbound"]} />
-                  <Area type="monotone" dataKey="download" stroke="#0ea5e9" fill="url(#gDl)" strokeWidth={2} name="Inbound" activeDot={{ r: 4 }} />
-                  <Area type="monotone" dataKey="upload" stroke="#f43f5e" fill="url(#gUl)" strokeWidth={2} name="Outbound" activeDot={{ r: 4 }} />
+                  <Tooltip {...ttStyle} formatter={(v, n) => [`${Number(v).toFixed(2)} Mbps`, n === "download" ? "Download" : "Upload"]} />
+                  <Area type="linear" dataKey="download" stroke="#eab308" fill="url(#gDl)" strokeWidth={1.5} name="Download" activeDot={{ r: 4 }} />
+                  <Area type="linear" dataKey="upload" stroke="#22c55e" fill="url(#gUl)" strokeWidth={1.5} name="Upload" activeDot={{ r: 4 }} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
             <div className="flex items-center justify-center gap-4 sm:gap-6 mt-2 sm:mt-3 text-[10px] sm:text-xs text-muted-foreground">
-              <div className="flex items-center gap-1 sm:gap-2"><div className="w-3 h-[2px] bg-sky-500" /> Inbound</div>
-              <div className="flex items-center gap-1 sm:gap-2"><div className="w-3 h-[2px] bg-rose-500" /> Outbound</div>
+              <div className="flex items-center gap-1 sm:gap-2"><div className="w-3 h-[2px] bg-yellow-500" /> Download</div>
+              <div className="flex items-center gap-1 sm:gap-2"><div className="w-3 h-[2px] bg-green-500" /> Upload</div>
             </div>
           </div>
 
