@@ -322,12 +322,12 @@ export default function DeviceDetailPage() {
             <AreaChart data={history} margin={{ top: 8, right: 8, left: -4, bottom: 28 }}>
               <defs>
                 <linearGradient id="gDl2" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#eab308" stopOpacity={0.5} />
-                  <stop offset="95%" stopColor="#eab308" stopOpacity={0.05} />
+                  <stop offset="5%" stopColor="#ef4444" stopOpacity={0.5} />
+                  <stop offset="95%" stopColor="#ef4444" stopOpacity={0.05} />
                 </linearGradient>
                 <linearGradient id="gUl2" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#22c55e" stopOpacity={0.5} />
-                  <stop offset="95%" stopColor="#22c55e" stopOpacity={0.05} />
+                  <stop offset="5%" stopColor="#f97316" stopOpacity={0.5} />
+                  <stop offset="95%" stopColor="#f97316" stopOpacity={0.05} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
@@ -335,8 +335,8 @@ export default function DeviceDetailPage() {
               <YAxis tick={{ fontSize: 9, fill: "#64748b" }} tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(1)} Gbps` : v >= 1 ? `${v.toFixed(0)} Mbps` : `${(v*1000).toFixed(0)} Kbps`} width={50} tickLine={false} axisLine={false} />
               <Tooltip {...ttStyle} formatter={(v, n) => [formatBwTooltip(v), n === "download_mbps" ? "Download" : "Upload"]} />
               <Legend wrapperStyle={{ fontSize: "10px", paddingTop: "6px" }} formatter={v => v === "download_mbps" ? "Download" : "Upload"} />
-              <Area type="linear" dataKey="download_mbps" stroke="#eab308" strokeWidth={1.5} fill="url(#gDl2)" dot={false} activeDot={{ r: 4 }} name="download_mbps" />
-              <Area type="linear" dataKey="upload_mbps" stroke="#22c55e" strokeWidth={1.5} fill="url(#gUl2)" dot={false} activeDot={{ r: 4 }} name="upload_mbps" />
+              <Area type="linear" dataKey="download_mbps" stroke="#ef4444" strokeWidth={1.5} fill="url(#gDl2)" dot={false} activeDot={{ r: 4 }} name="download_mbps" />
+              <Area type="linear" dataKey="upload_mbps" stroke="#f97316" strokeWidth={1.5} fill="url(#gUl2)" dot={false} activeDot={{ r: 4 }} name="upload_mbps" />
               <Brush
                 dataKey="time"
                 height={18}

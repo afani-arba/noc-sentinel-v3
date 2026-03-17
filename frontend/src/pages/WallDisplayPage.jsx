@@ -712,12 +712,12 @@ export default function WallDisplayPage() {
                               <AreaChart data={hist} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
                                 <defs>
                                   <linearGradient id={`dl_${d.id}`} x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#eab308" stopOpacity={0.5} />
-                                    <stop offset="95%" stopColor="#eab308" stopOpacity={0} />
+                                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.5} />
+                                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
                                   </linearGradient>
                                   <linearGradient id={`ul_${d.id}`} x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.5} />
-                                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                                    <stop offset="5%" stopColor="#f97316" stopOpacity={0.5} />
+                                    <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
                                   </linearGradient>
                                 </defs>
                                 <Tooltip
@@ -725,8 +725,8 @@ export default function WallDisplayPage() {
                                   formatter={(v, name) => [`${formatBw(v)}`, name === "dl" ? "Download" : "Upload"]}
                                   labelFormatter={() => ""}
                                 />
-                                <Area type="linear" dataKey="dl" stroke="#eab308" fill={`url(#dl_${d.id})`} strokeWidth={1} dot={false} name="dl" activeDot={{ r: 3 }} />
-                                <Area type="linear" dataKey="ul" stroke="#22c55e" fill={`url(#ul_${d.id})`} strokeWidth={1} dot={false} name="ul" activeDot={{ r: 3 }} />
+                                <Area type="linear" dataKey="dl" stroke="#ef4444" fill={`url(#dl_${d.id})`} strokeWidth={1} dot={false} name="dl" activeDot={{ r: 3 }} />
+                                <Area type="linear" dataKey="ul" stroke="#f97316" fill={`url(#ul_${d.id})`} strokeWidth={1} dot={false} name="ul" activeDot={{ r: 3 }} />
                               </AreaChart>
                             </ResponsiveContainer>
                           </div>

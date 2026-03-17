@@ -353,12 +353,12 @@ export default function BandwidthPage() {
                 <AreaChart data={history} margin={{ left: -10, right: 10, top: 10, bottom: 0 }}>
                   <defs>
                     <linearGradient id="dlGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#eab308" stopOpacity={0.5} />
-                      <stop offset="95%" stopColor="#eab308" stopOpacity={0.05} />
+                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.5} />
+                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0.05} />
                     </linearGradient>
                     <linearGradient id="ulGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.5} />
-                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0.05} />
+                      <stop offset="5%" stopColor="#f97316" stopOpacity={0.5} />
+                      <stop offset="95%" stopColor="#f97316" stopOpacity={0.05} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
@@ -386,7 +386,7 @@ export default function BandwidthPage() {
                     type="linear"
                     dataKey="download"
                     name="Download"
-                    stroke="#eab308"
+                    stroke="#ef4444"
                     strokeWidth={1.5}
                     fill="url(#dlGrad)"
                     dot={false}
@@ -397,7 +397,7 @@ export default function BandwidthPage() {
                     type="linear"
                     dataKey="upload"
                     name="Upload"
-                    stroke="#22c55e"
+                    stroke="#f97316"
                     strokeWidth={1.5}
                     fill="url(#ulGrad)"
                     dot={false}
