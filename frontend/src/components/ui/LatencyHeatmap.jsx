@@ -99,9 +99,14 @@ export default function LatencyHeatmap({ data = [], dataKey = "ping" }) {
       const rowIdx = Y_BUCKETS.findIndex((b) => val >= b.min && val < b.max);
       
       if (rowIdx !== -1) {
-        matrix[rowIdx][colIdx] += 1;
-        if (matrix[rowIdx][colIdx] > currentMaxCount) {
-          currentMaxCount = matrix[rowIdx][colIdx];
+        // TAMPILAN BARU: Isi semua cell dari bawah (Y_BUCKETS.length - 1) 
+        // ke atas sampai rowIdx (batas nilai ping saat ini)
+        // Ini membuat data yang renggang (aggregated history) terlihat solid seperti Bar Chart
+        for (let r = Y_BUCKETS.length - 1; r >= rowIdx; r--) {
+          matrix[r][colIdx] += 1;
+          if (matrix[r][colIdx] > currentMaxCount) {
+            currentMaxCount = matrix[r][colIdx];
+          }
         }
       }
     });

@@ -47,7 +47,6 @@ export default function DashboardPage() {
   
   // Latency Heatmap View Mode
   const [latencyView, setLatencyView] = useState("ping");
-  const [liveLatency, setLiveLatency] = useState([]); // Live rolling history for Heatmap
 
   // ━━━ SSE Real-time ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   const { devices: sseDevices, summary: sseSummary, connected: sseConnected, lastUpdate: sseLastUpdate } = useDeviceEvents();
@@ -145,25 +144,8 @@ export default function DashboardPage() {
 
       setStats(data);
 
-      // Update live latency rolling history (Max 60 points) exactly like Wall Display
-      const avgP = data.avg_ping || 0;
-      const avgJ = data.avg_jitter || 0;
-      setLiveLatency(prev => {
-        const now = new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-        return [...prev, {
-          time: now,
-          ping: avgP,
-          jitter: avgJ
-        }].slice(-60);
-      });
-
     } catch (e) { console.error(e); }
     setLoading(false);
-  }, [selectedDevice, selectedInterface]);
-
-  // Reset live history on view change to prevent mixing data from different devices
-  useEffect(() => {
-    setLiveLatency([]);
   }, [selectedDevice, selectedInterface]);
 
   const fetchTrafficHistory = useCallback(async () => {
@@ -421,17 +403,17 @@ export default function DashboardPage() {
                 </div>
               </div>
             </div>
-            {liveLatency.length === 0 ? (
+            {td.length === 0 ? (
               <div className="h-48 flex items-center justify-center bg-secondary/20 rounded-sm border border-dashed border-border">
                 <div className="text-center">
                   <Activity className="w-8 h-8 mx-auto mb-2 text-muted-foreground/30" />
-                  <p className="text-sm text-muted-foreground">Menunggu data latency live...</p>
-                  <p className="text-xs text-muted-foreground/70 mt-1">Data latency akan muncul pada siklus polling berikutnya (setiap 30 detik).</p>
+                  <p className="text-sm text-muted-foreground">Menunggu data latency...</p>
+                  <p className="text-xs text-muted-foreground/70 mt-1">Data latency akan tersedia setelah beberapa siklus polling selesai.</p>
                 </div>
               </div>
             ) : (
               <div className="h-40 sm:h-48 w-full pt-2">
-                <LatencyHeatmap data={liveLatency} dataKey={latencyView} />
+                <LatencyHeatmap data={td} dataKey={latencyView} />
               </div>
             )}
           </div>
