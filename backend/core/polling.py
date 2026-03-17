@@ -130,6 +130,7 @@ async def poll_via_api(device: dict, fetch_system: bool) -> dict:
     interfaces = []
     running_ifaces = []
     isp_detected = []
+    out_detected = []
     iface_stats_raw = {}
     
     _ISP_KEYWORDS = (
@@ -137,6 +138,11 @@ async def poll_via_api(device: dict, fetch_system: bool) -> dict:
         "wan", *[f"wan{i}" for i in range(1, 21)],
         "input", *[f"input{i}" for i in range(1, 21)],
         "uplink", "upstream", "internet", "gateway",
+    )
+    _OUT_KEYWORDS = (
+        "out", *[f"out{i}" for i in range(1, 21)],
+        "output", *[f"output{i}" for i in range(1, 21)],
+        "downlink", "lan", "local"
     )
 
     for iface in ifaces_raw:
@@ -162,6 +168,9 @@ async def poll_via_api(device: dict, fetch_system: bool) -> dict:
 
         if any(kw in comment for kw in _ISP_KEYWORDS) or is_isp1:
             isp_detected.append(name)
+            
+        if any(kw in comment for kw in _OUT_KEYWORDS) or "out" in name.lower():
+            out_detected.append(name)
             
         interfaces.append({
             "index":   iface.get(".id", ""),
@@ -330,6 +339,7 @@ async def poll_via_api(device: dict, fetch_system: bool) -> dict:
         "iface_stats_raw": iface_stats_raw,
         "running_ifaces":  running_ifaces,
         "isp_detected":    isp_detected,
+        "out_detected":    out_detected,
         "pppoe_active":    pppoe_active,
         "hotspot_active":  hotspot_active,
         "system_fetched":  fetch_system
@@ -444,6 +454,14 @@ async def poll_single_device(device: dict) -> dict:
 
     isp_for_bw = isp_in_poll or device.get("isp_interfaces", [])
 
+    # ── OUT Interface List Update ─────────────────────────────────────────────
+    out_in_poll = result.get("out_detected", [])
+    if out_in_poll and result["reachable"]:
+        if set(out_in_poll) != set(device.get("out_interfaces", [])):
+            await db.devices.update_one({"id": did}, {"$set": {"out_interfaces": out_in_poll}})
+
+    out_for_bw = out_in_poll or device.get("out_interfaces", [])
+
     # ── ICMP Ping ─────────────────────────────────────────────────────────────
     ping_data = result.get("ping", {})
     real_ping_ms = ping_data.get("avg", 0) or 0
@@ -530,11 +548,20 @@ async def poll_single_device(device: dict) -> dict:
     # Namun data snapshot selalu up to date di DB trafik snapshot.
     mem = result.get("memory")
     mem_dict = mem if isinstance(mem, dict) else {}
+    
+    # Kumpulkan out_bandwidth
+    out_bw = {}
+    for iname in out_for_bw:
+        d = bw.get(iname)
+        if isinstance(d, dict):
+            out_bw[iname] = d
+            
     history_record = {
         "device_id":      did,
         "timestamp":      now_iso,
         "bandwidth":      bw,
         "isp_bandwidth":  isp_bw,
+        "out_bandwidth":  out_bw,
         "download_mbps":  round(float(max(0, int(eff_dl))) / 1000000.0, 3),
         "upload_mbps":    round(float(max(0, int(eff_ul))) / 1000000.0, 3),
         "cpu":            int(result.get("cpu", 0) or 0),

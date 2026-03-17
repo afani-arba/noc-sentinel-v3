@@ -906,24 +906,12 @@ async def traffic_history_out_range(
             {"$addFields": {
                 "ts_ms": {"$toLong": {"$dateFromString": {"dateString": "$timestamp"}}},
                 "out_dl": {"$reduce": {
-                    "input": {
-                        "$filter": {
-                            "input": {"$objectToArray": {"$ifNull": ["$bandwidth", {}]}},
-                            "as": "item",
-                            "cond": {"$regexMatch": {"input": "$$item.k", "regex": "OUT", "options": "i"}}
-                        }
-                    },
+                    "input": {"$objectToArray": {"$ifNull": ["$out_bandwidth", {}]}},
                     "initialValue": 0,
                     "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.download_bps", 0]}]}
                 }},
                 "out_ul": {"$reduce": {
-                    "input": {
-                        "$filter": {
-                            "input": {"$objectToArray": {"$ifNull": ["$bandwidth", {}]}},
-                            "as": "item",
-                            "cond": {"$regexMatch": {"input": "$$item.k", "regex": "OUT", "options": "i"}}
-                        }
-                    },
+                    "input": {"$objectToArray": {"$ifNull": ["$out_bandwidth", {}]}},
                     "initialValue": 0,
                     "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.upload_bps", 0]}]}
                 }},
