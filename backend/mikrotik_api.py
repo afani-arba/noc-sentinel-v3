@@ -669,10 +669,17 @@ class MikroTikRestAPI(MikroTikBase):
             payload = {"address": address, "count": str(count)}
             if interface:
                 payload["interface"] = interface
+            
+            logger.error(f"DEBUG PING PAYLOAD: {payload}")
             items = await self._async_req("POST", "ping", payload)
+            logger.error(f"DEBUG PING SUCCESS ITEMS: {items}")
+            
             return items if isinstance(items, list) else [items] if items else []
         except Exception as e:
-            logger.debug(f"ping_host REST gagal ke {address}: {e}")
+            logger.error(f"ping_host REST gagal ke {address}: {e}")
+            # print error class handling
+            if hasattr(e, 'response') and hasattr(e.response, 'text'):
+                logger.error(f"REST PING BODY: {e.response.text}")
             return []
 
 
