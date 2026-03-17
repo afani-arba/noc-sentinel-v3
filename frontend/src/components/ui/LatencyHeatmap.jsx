@@ -7,7 +7,8 @@ import { Info } from "lucide-react";
  */
 
 // Y-Axis Buckets (from top to bottom visually)
-const Y_BUCKETS = [
+// Y-Axis Buckets for Ping (from top to bottom visually)
+const PING_BUCKETS = [
   { label: "1 min",  min: 20000, max: Infinity },
   { label: "20 s",   min: 5000,  max: 20000 },
   { label: "5 s",    min: 1000,  max: 5000 },
@@ -15,6 +16,17 @@ const Y_BUCKETS = [
   { label: "250 ms", min: 50,    max: 250 },
   { label: "50 ms",  min: 10,    max: 50 },
   { label: "10 ms",  min: 0,     max: 10 },
+];
+
+// Y-Axis Buckets for Jitter (smaller scale)
+const JITTER_BUCKETS = [
+  { label: "1 s",    min: 1000, max: Infinity },
+  { label: "250 ms", min: 250,  max: 1000 },
+  { label: "50 ms",  min: 50,   max: 250 },
+  { label: "20 ms",  min: 20,   max: 50 },
+  { label: "10 ms",  min: 10,   max: 20 },
+  { label: "5 ms",   min: 2,    max: 10 },
+  { label: "1 ms",   min: 0,    max: 2 },
 ];
 
 // Number of X-Axis Time columns (Visual Grid Width)
@@ -38,14 +50,16 @@ function getHeatColor(intensity) {
 export default function LatencyHeatmap({ data = [], dataKey = "ping" }) {
   const [hoveredCell, setHoveredCell] = useState(null);
 
+  const Y_BUCKETS = dataKey === "jitter" ? JITTER_BUCKETS : PING_BUCKETS;
+
   const { grid, maxCount, timeLabels } = useMemo(() => {
     if (!data || data.length === 0) {
       return { grid: [], maxCount: 0, timeLabels: [] };
     }
 
-    // Filter out rows where ping is 0 (offline representation)
-    // Jitter can legitimately be 0, but if ping is 0, the device is offline.
-    const validData = data.filter((d) => d.ping && d.ping > 0 && d[dataKey] !== undefined && d[dataKey] !== null);
+    // Filter out rows where data is totally invalid
+    // Jitter can legitimately be 0, and Ping can technically be 0 or very near 0 
+    const validData = data.filter((d) => d[dataKey] !== undefined && d[dataKey] !== null);
 
     if (validData.length === 0) {
       return { grid: [], maxCount: 0, timeLabels: [] };
@@ -101,7 +115,7 @@ export default function LatencyHeatmap({ data = [], dataKey = "ping" }) {
 
       rawData.forEach((valStr) => {
         const val = parseFloat(valStr || 0);
-        if (val <= 0) return; // Ignore 0 or negative pings (offline/errors)
+        if (val < 0) return; // Ignore negative pings (offline/errors), but allow 0 (e.g. 0.0 Jitter)
 
         const rowIdx = Y_BUCKETS.findIndex((b) => val >= b.min && val < b.max);
         
