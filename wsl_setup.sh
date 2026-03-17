@@ -97,12 +97,14 @@ if ! command -v mongod &>/dev/null; then
     curl -fsSL https://www.mongodb.org/static/pgp/server-6.0.asc | \
         gpg --dearmor -o /usr/share/keyrings/mongodb-server-6.0.gpg 2>/dev/null
 
-    # Untuk Ubuntu 22.04 LTS jammy, fallback ke focal repository
+    # Gunakan repository sesuai codename Ubuntu (jammy/focal)
+    OS_CODE=$(lsb_release -cs 2>/dev/null || echo "jammy")
     echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-6.0.gpg ] \
-https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/6.0 multiverse" \
+https://repo.mongodb.org/apt/ubuntu ${OS_CODE}/mongodb-org/6.0 multiverse" \
         | tee /etc/apt/sources.list.d/mongodb-org-6.0.list > /dev/null
 
     apt-get update -qq
+    apt-get --fix-broken install -y -qq
     apt-get install -y -qq mongodb-org
     print_ok "MongoDB 6.0 installed"
 fi
