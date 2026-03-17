@@ -319,24 +319,24 @@ export default function DeviceDetailPage() {
       <ChartCard title="Bandwidth History" icon={Activity} iconColor="text-blue-400" height={280}>
         {history.length === 0 ? <NoData /> : (
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={history} margin={{ top: 8, right: 8, left: -10, bottom: 28 }}>
+            <AreaChart data={history} margin={{ top: 8, right: 8, left: -4, bottom: 28 }}>
               <defs>
                 <linearGradient id="gDl2" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                  <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.4} />
+                  <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
                 </linearGradient>
                 <linearGradient id="gUl2" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                  <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.4} />
+                  <stop offset="95%" stopColor="#f43f5e" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="2 4" stroke="rgba(255,255,255,0.04)" />
-              <XAxis dataKey="time" tick={{ fontSize: 9, fill: "#475569" }} interval="preserveStartEnd" minTickGap={40} />
-              <YAxis tick={{ fontSize: 9, fill: "#475569" }} tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}G` : v >= 1 ? `${v.toFixed(0)}M` : `${(v*1000).toFixed(0)}K`} width={42} />
-              <Tooltip {...ttStyle} formatter={(v, n) => [formatBwTooltip(v), n === "download_mbps" ? "⬇ Download" : "⬆ Upload"]} />
-              <Legend wrapperStyle={{ fontSize: "10px", paddingTop: "2px" }} formatter={v => v === "download_mbps" ? "Download" : "Upload"} />
-              <Area type="monotone" dataKey="download_mbps" stroke="#3b82f6" strokeWidth={1.5} fill="url(#gDl2)" dot={false} activeDot={{ r: 3 }} />
-              <Area type="monotone" dataKey="upload_mbps" stroke="#10b981" strokeWidth={1.5} fill="url(#gUl2)" dot={false} activeDot={{ r: 3 }} />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+              <XAxis dataKey="time" tick={{ fontSize: 9, fill: "#64748b" }} interval="preserveStartEnd" minTickGap={40} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fontSize: 9, fill: "#64748b" }} tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(1)} Gbps` : v >= 1 ? `${v.toFixed(0)} Mbps` : `${(v*1000).toFixed(0)} Kbps`} width={50} tickLine={false} axisLine={false} />
+              <Tooltip {...ttStyle} formatter={(v, n) => [formatBwTooltip(v), n === "download_mbps" ? "Inbound" : "Outbound"]} />
+              <Legend wrapperStyle={{ fontSize: "10px", paddingTop: "6px" }} formatter={v => v === "download_mbps" ? "Inbound" : "Outbound"} />
+              <Area type="monotone" dataKey="download_mbps" stroke="#0ea5e9" strokeWidth={2} fill="url(#gDl2)" dot={false} activeDot={{ r: 4 }} name="download_mbps" />
+              <Area type="monotone" dataKey="upload_mbps" stroke="#f43f5e" strokeWidth={2} fill="url(#gUl2)" dot={false} activeDot={{ r: 4 }} name="upload_mbps" />
               <Brush
                 dataKey="time"
                 height={18}

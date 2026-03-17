@@ -344,20 +344,26 @@ export default function DashboardPage() {
             </div>
             <div className="h-48 sm:h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={td}>
+                <AreaChart data={td} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <defs>
-                    <linearGradient id="gDl" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} /><stop offset="95%" stopColor="#3b82f6" stopOpacity={0} /></linearGradient>
-                    <linearGradient id="gUl" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#10b981" stopOpacity={0.3} /><stop offset="95%" stopColor="#10b981" stopOpacity={0} /></linearGradient>
+                    <linearGradient id="gDl" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.4} /><stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} /></linearGradient>
+                    <linearGradient id="gUl" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#f43f5e" stopOpacity={0.4} /><stop offset="95%" stopColor="#f43f5e" stopOpacity={0} /></linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" /><XAxis dataKey="time" tick={{ fill: "#a1a1aa", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#27272a" }} /><YAxis tick={{ fill: "#a1a1aa", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#27272a" }} width={40} /><Tooltip {...ttStyle} />
-                  <Area type="monotone" dataKey="download" stroke="#3b82f6" fill="url(#gDl)" strokeWidth={2} name="Download (Mbps)" />
-                  <Area type="monotone" dataKey="upload" stroke="#10b981" fill="url(#gUl)" strokeWidth={2} name="Upload (Mbps)" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                  <XAxis dataKey="time" tick={{ fill: "#a1a1aa", fontSize: 10 }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fill: "#a1a1aa", fontSize: 10 }} tickLine={false} axisLine={false} width={80} tickFormatter={(val) => {
+                      if (val >= 1000) return `${(val/1000).toFixed(1)} Gbps`;
+                      return `${val} Mbps`;
+                  }} />
+                  <Tooltip {...ttStyle} formatter={(v, n) => [`${Number(v).toFixed(2)} Mbps`, n === "download" ? "Inbound" : "Outbound"]} />
+                  <Area type="monotone" dataKey="download" stroke="#0ea5e9" fill="url(#gDl)" strokeWidth={2} name="Inbound" activeDot={{ r: 4 }} />
+                  <Area type="monotone" dataKey="upload" stroke="#f43f5e" fill="url(#gUl)" strokeWidth={2} name="Outbound" activeDot={{ r: 4 }} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
-            <div className="flex items-center gap-4 sm:gap-6 mt-2 sm:mt-3 text-[10px] sm:text-xs text-muted-foreground">
-              <div className="flex items-center gap-1 sm:gap-2"><div className="w-3 h-[2px] bg-blue-500" /><ArrowDown className="w-3 h-3" /> Download</div>
-              <div className="flex items-center gap-1 sm:gap-2"><div className="w-3 h-[2px] bg-green-500" /><ArrowUp className="w-3 h-3" /> Upload</div>
+            <div className="flex items-center justify-center gap-4 sm:gap-6 mt-2 sm:mt-3 text-[10px] sm:text-xs text-muted-foreground">
+              <div className="flex items-center gap-1 sm:gap-2"><div className="w-3 h-[2px] bg-sky-500" /> Inbound</div>
+              <div className="flex items-center gap-1 sm:gap-2"><div className="w-3 h-[2px] bg-rose-500" /> Outbound</div>
             </div>
           </div>
 

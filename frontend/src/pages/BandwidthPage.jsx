@@ -350,52 +350,58 @@ export default function BandwidthPage() {
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={220}>
-                <AreaChart data={history} margin={{ left: 0, right: 4, top: 4, bottom: 0 }}>
+                <AreaChart data={history} margin={{ left: -10, right: 10, top: 10, bottom: 0 }}>
                   <defs>
                     <linearGradient id="dlGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#06b6d4" stopOpacity={0} />
+                      <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
                     </linearGradient>
                     <linearGradient id="ulGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                      <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#f43f5e" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
                   <XAxis
                     dataKey="time"
-                    tick={{ fontSize: 9, fill: "#6b7280" }}
+                    tick={{ fontSize: 9, fill: "#64748b" }}
                     interval={Math.max(1, Math.floor(history.length / 8))}
                     tickLine={false}
+                    axisLine={false}
                   />
                   <YAxis
-                    tick={{ fontSize: 9, fill: "#6b7280" }}
+                    tick={{ fontSize: 9, fill: "#64748b" }}
                     tickFormatter={v => fmtMbps(v)}
                     tickLine={false}
                     axisLine={false}
-                    width={60}
+                    width={70}
                   />
                   <Tooltip content={<CustomTooltip />} />
+                  <Legend 
+                     verticalAlign="top" 
+                     height={36} 
+                     wrapperStyle={{ fontSize: "11px", color: "#94a3b8" }}
+                  />
                   <Area
                     type="monotone"
                     dataKey="download"
-                    name="Download"
-                    stroke="#06b6d4"
+                    name="Inbound"
+                    stroke="#0ea5e9"
                     strokeWidth={2}
                     fill="url(#dlGrad)"
                     dot={false}
-                    activeDot={{ r: 3 }}
+                    activeDot={{ r: 4 }}
                     isAnimationActive={false}
                   />
                   <Area
                     type="monotone"
                     dataKey="upload"
-                    name="Upload"
-                    stroke="#10b981"
+                    name="Outbound"
+                    stroke="#f43f5e"
                     strokeWidth={2}
                     fill="url(#ulGrad)"
                     dot={false}
-                    activeDot={{ r: 3 }}
+                    activeDot={{ r: 4 }}
                     isAnimationActive={false}
                   />
                 </AreaChart>
