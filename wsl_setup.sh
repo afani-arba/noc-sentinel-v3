@@ -95,7 +95,7 @@ print_step "2/10 Install MongoDB 6.x"
 if ! command -v mongod &>/dev/null; then
     print_info "Menginstall MongoDB 6.0..."
     curl -fsSL https://www.mongodb.org/static/pgp/server-6.0.asc | \
-        gpg --dearmor -o /usr/share/keyrings/mongodb-server-6.0.gpg 2>/dev/null
+        gpg --dearmor --yes -o /usr/share/keyrings/mongodb-server-6.0.gpg 2>/dev/null
 
     # Gunakan repository sesuai codename Ubuntu (jammy/focal)
     OS_CODE=$(lsb_release -cs 2>/dev/null || echo "jammy")
