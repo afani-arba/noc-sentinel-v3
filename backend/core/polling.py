@@ -263,16 +263,23 @@ async def poll_via_api(device: dict, fetch_system: bool) -> dict:
         latencies = []
         for p in ping_raw:
             if isinstance(p, dict) and p.get("status") != "timeout" and p.get("time"):
-                # time usually "12ms" or "1s23ms"
+                # time usually "12ms" or "1s23ms" or just numerical in some v7
                 t_str = str(p.get("time"))
-                if t_str.endswith("ms"):
+                if "ms" in t_str or "s" in t_str:
                     lat = t_str.replace("ms", "")
                     if "s" in lat:
-                        sec, ms = lat.split("s")
+                        clp = lat.split("s")
+                        sec = clp[0]
+                        ms = clp[1] if len(clp) > 1 and clp[1] else 0
                         val = float(sec) * 1000 + float(ms)
                     else:
                         val = float(lat)
-                    latencies.append(val)
+                else: # pure numeric (just in case)
+                    try:
+                        val = float(t_str)
+                    except ValueError:
+                        continue
+                latencies.append(val)
         
         if latencies:
             loss = round(((len(ping_raw) - len(latencies)) / len(ping_raw)) * 100)

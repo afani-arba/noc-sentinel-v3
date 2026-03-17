@@ -666,7 +666,8 @@ class MikroTikRestAPI(MikroTikBase):
         Mengembalikan list of dict response ping.
         """
         try:
-            payload = {"address": address, "count": str(count)}
+            # ROS 7 strict REST API parameter types
+            payload = {"address": address, "count": int(count)}
             if interface:
                 payload["interface"] = interface
             
@@ -674,6 +675,10 @@ class MikroTikRestAPI(MikroTikBase):
             items = await self._async_req("POST", "ping", payload)
             logger.error(f"DEBUG PING SUCCESS ITEMS: {items}")
             
+            # For some ROS7 versions, the result might be wrapped in a dict
+            if isinstance(items, dict) and "ret" in items:
+                items = items["ret"]
+                
             return items if isinstance(items, list) else [items] if items else []
         except Exception as e:
             logger.error(f"ping_host REST gagal ke {address}: {e}")
