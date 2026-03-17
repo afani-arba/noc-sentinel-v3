@@ -19,8 +19,6 @@ const navItems = [
   { separator: true, label: "Routing & Security", adminOnly: true },
   { to: "/bgp", icon: GitBranch, label: "BGP Peers", adminOnly: true },
   { to: "/routing", icon: Route, label: "OSPF / Routes", adminOnly: true },
-  { to: "/connections", icon: Cable, label: "Active Connections", adminOnly: true },
-  { to: "/firewall", icon: ShieldAlert, label: "Firewall Rules", adminOnly: true },
   { separator: true, label: "CPE Management", adminOnly: true },
   { to: "/genieacs", icon: Cpu, label: "GenieACS / TR-069", adminOnly: true },
   { separator: true, label: "v3 — NOC Features" },

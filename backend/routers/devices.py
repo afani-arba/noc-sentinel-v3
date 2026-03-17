@@ -1059,63 +1059,6 @@ async def traffic_compare(
 
 
 
-
-@router.get("/dashboard/top-talkers")
-async def top_talkers(
-    limit: int = 10,
-    range: str = "1h",
-    user=Depends(get_current_user)
-):
-    """Top N devices/interfaces by total bandwidth - last range period."""
-    db = get_db()
-    now_utc = datetime.now(timezone.utc)
-    range_map = {"1h": timedelta(hours=1), "12h": timedelta(hours=12), "24h": timedelta(hours=24)}
-    delta = range_map.get(range, timedelta(hours=1))
-    start = (now_utc - delta).strftime("%Y-%m-%dT%H:%M:%S+00:00")
-
-    records = await db.traffic_history.find(
-        {"timestamp": {"$gte": start}},
-        {"_id": 0, "device_id": 1, "bandwidth": 1}
-    ).to_list(5000)
-
-    devices = await db.devices.find({}, {"_id": 0, "id": 1, "name": 1, "ip_address": 1}).to_list(1000)  # FIX BUG #12: was 100
-    dev_map = {d["id"]: d for d in devices}
-
-    tally = {}
-    for rec in records:
-        did = rec.get("device_id", "")
-        for iface, bw in (rec.get("bandwidth") or {}).items():
-            if not isinstance(bw, dict):
-                continue
-            key = (did, iface)
-            if key not in tally:
-                tally[key] = {"dl": 0, "ul": 0, "count": 0}
-            tally[key]["dl"] += bw.get("download_bps", 0)
-            tally[key]["ul"] += bw.get("upload_bps", 0)
-            tally[key]["count"] += 1
-
-    result = []
-    for (did, iface), vals in tally.items():
-        cnt = max(vals["count"], 1)
-        avg_dl = vals["dl"] / cnt
-        avg_ul = vals["ul"] / cnt
-        total_avg_mbps = round((avg_dl + avg_ul) / 1_000_000, 2)
-        dev = dev_map.get(did, {})
-        result.append({
-            "device_id": did,
-            "device_name": dev.get("name", did),
-            "ip_address": dev.get("ip_address", ""),
-            "interface": iface,
-            "label": f"{dev.get('name', did)} / {iface}",
-            "download_mbps": round(avg_dl / 1_000_000, 2),
-            "upload_mbps": round(avg_ul / 1_000_000, 2),
-            "total_mbps": total_avg_mbps,
-        })
-
-    result.sort(key=lambda x: x["total_mbps"], reverse=True)
-    return result[:limit]
-
-
 # -- Heatmap (v3) -------------------------------------------------------------
 @router.get("/dashboard/heatmap")
 async def bandwidth_heatmap(

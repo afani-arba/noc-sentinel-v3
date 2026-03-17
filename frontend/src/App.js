@@ -16,8 +16,6 @@ import BackupsPage from "@/pages/BackupsPage";
 import SyslogPage from "@/pages/SyslogPage";
 import BGPPage from "@/pages/BGPPage";
 import RoutingPage from "@/pages/RoutingPage";
-import ConnectionsPage from "@/pages/ConnectionsPage";
-import FirewallPage from "@/pages/FirewallPage";
 import GenieACSPage from "@/pages/GenieACSPage";
 import BillingPage from "@/pages/BillingPage";
 import WallDisplayPage from "@/pages/WallDisplayPage";
@@ -125,8 +123,6 @@ function App() {
             <Route path="admin" element={<ProtectedRoute allowedRoles={["administrator"]}><AdminPage /></ProtectedRoute>} />
             <Route path="bgp" element={<BGPPage />} />
             <Route path="routing" element={<RoutingPage />} />
-            <Route path="connections" element={<ConnectionsPage />} />
-            <Route path="firewall" element={<FirewallPage />} />
             <Route path="genieacs" element={<GenieACSPage />} />
             <Route path="billing" element={<ProtectedRoute allowedRoles={["administrator"]}><BillingPage /></ProtectedRoute>} />
             {/* v3 New Features */}

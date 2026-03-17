@@ -33,9 +33,6 @@ export default function DashboardPage() {
   const [dateFilter, setDateFilter] = useState("");
   const [trafficData, setTrafficData] = useState(null); // null = use stats.traffic_data
   const [loadingTraffic, setLoadingTraffic] = useState(false);
-  // v3 — Top Talkers
-  const [topTalkers, setTopTalkers] = useState([]);
-  const [topTalkersRange, setTopTalkersRange] = useState("1h");
   // v4 — ISP Multi-series
   const [ispSeries, setIspSeries]   = useState([]);  // [{name, data:[{time,download,upload}]}]
   const [ispRange, setIspRange]   = useState("24h");
@@ -185,13 +182,6 @@ export default function DashboardPage() {
     return () => clearInterval(wgIv);
   }, []);
 
-  // v3 — Top Talkers
-  useEffect(() => {
-    api.get("/dashboard/top-talkers", { params: { range: topTalkersRange, limit: 10 } })
-      .then(r => setTopTalkers(r.data || []))
-      .catch(() => setTopTalkers([]));
-  }, [topTalkersRange]);
-
   // v4 — ISP Multi-series chart
   useEffect(() => {
     if (!selectedDevice || selectedDevice === "all") { setIspSeries([]); return; }
@@ -315,7 +305,6 @@ export default function DashboardPage() {
             { label: "Architecture", value: sysResource.architecture_name || "—", icon: Layers },
             { label: "Board Name", value: sysResource.board_name || "—", icon: CircuitBoard },
             { label: "ROS Version", value: sysResource.version || "—", icon: Monitor },
-            { label: "Build Time", value: sysResource.build_time ? sysResource.build_time.slice(0, 10) : "—", icon: Activity },
             { label: "CPU Count", value: sysResource.cpu_count > 0 ? `${sysResource.cpu_count}` : "—", icon: Cpu },
             { label: "CPU Frequency", value: sysResource.cpu_frequency > 0 ? `${sysResource.cpu_frequency} MHz` : "—", icon: Zap },
           ].map((item) => (
@@ -330,14 +319,12 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Stats */}
+      {/* Stats & Heatmap Grid */}
       <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {[
           { label: "Devices", value: `${devStat.online ?? 0}/${devStat.total ?? 0}`, sub: "online/total", icon: Server, color: "text-purple-500", bg: "bg-purple-500/10" },
           { label: "Download", value: `${bw.download ?? 0}`, sub: "Mbps", icon: ArrowDown, color: "text-blue-500", bg: "bg-blue-500/10" },
           { label: "Upload", value: `${bw.upload ?? 0}`, sub: "Mbps", icon: ArrowUp, color: "text-green-500", bg: "bg-green-500/10" },
-          { label: "Ping", value: `${latestPing}`, sub: "ms (latest)", icon: Activity, color: "text-cyan-500", bg: "bg-cyan-500/10" },
-          { label: "Jitter", value: `${latestJitter}`, sub: "ms (latest)", icon: Activity, color: "text-rose-500", bg: "bg-rose-500/10" },
         ].map((c, i) => (
           <div key={c.label} className="bg-card border border-border rounded-sm p-3 sm:p-4 opacity-0 animate-slide-up" style={{ animationDelay: `${i * 0.04}s`, animationFillMode: 'forwards' }} data-testid={`stat-card-${c.label.toLowerCase().replace(/\s/g, '-')}`}>
             <div className="flex items-start justify-between">
@@ -346,6 +333,26 @@ export default function DashboardPage() {
             </div>
           </div>
         ))}
+
+        {/* Latency Heatmap embedded inside Top Stats Grid (Replacing Ping & Jitter space) */}
+        <div className="col-span-2 sm:col-span-3 lg:col-span-2 bg-card border border-border rounded-sm p-3 opacity-0 animate-slide-up flex flex-col justify-center" style={{ animationDelay: `0.12s`, animationFillMode: 'forwards' }}>
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="text-[9px] sm:text-[10px] text-muted-foreground uppercase tracking-wider w-full">Latency Distribution</h3>
+            <div className="flex items-center gap-1 text-[9px] font-mono text-muted-foreground whitespace-nowrap">
+              <span>Ping: <span className="text-cyan-400">{latestPing}ms</span></span>
+              <span>· Jitter: <span className="text-rose-400">{latestJitter}ms</span></span>
+            </div>
+          </div>
+          {td.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center bg-secondary/10 rounded-sm border border-dashed border-border py-4">
+              <span className="text-xs text-muted-foreground">Menunggu data latency...</span>
+            </div>
+          ) : (
+            <div className="h-16 w-full -ml-2">
+              <LatencyHeatmap data={td} dataKey="ping" />
+            </div>
+          )}
+        </div>
       </div>
 
       {noData && devices.length === 0 ? (
@@ -396,41 +403,6 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Ping & Jitter */}
-          <div className="bg-card border border-border rounded-sm p-3 sm:p-5" data-testid="ping-jitter-chart">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 gap-2">
-              <h3 className="text-base sm:text-lg font-semibold font-['Rajdhani'] flex items-center gap-2">
-                Latency Heatmap
-                <span className="text-xs text-muted-foreground font-normal hidden sm:inline">— distribution overview</span>
-              </h3>
-              
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2 sm:gap-3 text-[10px] sm:text-xs">
-                  <div className="flex items-center gap-1 sm:gap-2 px-2 py-1 rounded-sm bg-cyan-500/10 border border-cyan-500/20">
-                    <span className="text-cyan-400">Ping (Latest):</span>
-                    <span className="font-mono text-cyan-300 font-semibold">{latestPing} ms</span>
-                  </div>
-                  <div className="flex items-center gap-1 sm:gap-2 px-2 py-1 rounded-sm bg-rose-500/10 border border-rose-500/20">
-                    <span className="text-rose-400">Jitter (Latest):</span>
-                    <span className="font-mono text-rose-300 font-semibold">{latestJitter} ms</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            {td.length === 0 ? (
-              <div className="h-48 flex items-center justify-center bg-secondary/20 rounded-sm border border-dashed border-border">
-                <div className="text-center">
-                  <Activity className="w-8 h-8 mx-auto mb-2 text-muted-foreground/30" />
-                  <p className="text-sm text-muted-foreground">Menunggu data latency...</p>
-                  <p className="text-xs text-muted-foreground/70 mt-1">Data latency akan tersedia setelah beberapa siklus polling selesai.</p>
-                </div>
-              </div>
-            ) : (
-              <div className="h-40 sm:h-48 w-full pt-2">
-                <LatencyHeatmap data={td} dataKey="ping" />
-              </div>
-            )}
-          </div>
 
           {/* ── ISP Multi-series Chart (hanya jika device spesifik & ada multi-ISP) ── */}
           {ispSeries.length > 1 && selectedDevice !== "all" && (
@@ -694,55 +666,6 @@ export default function DashboardPage() {
             })}
           </div>
         </div>
-      </div>
-
-      {/* ── v3: Top Talkers ──────────────────────────────────────────────── */}
-      <div className="bg-card border border-border rounded-sm p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold font-['Rajdhani'] flex items-center gap-2">
-            <ArrowUp className="w-4 h-4 text-orange-400" /> Top Talkers
-            <span className="text-xs text-muted-foreground font-normal">— top bandwidth consumers</span>
-          </h3>
-          <div className="flex gap-1">
-            {["1h", "12h", "24h"].map(r => (
-              <button key={r} onClick={() => setTopTalkersRange(r)}
-                className={`text-[10px] px-2 py-1 rounded-sm border transition-colors ${
-                  topTalkersRange === r ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:border-primary/50"
-                }`}>{r}</button>
-            ))}
-          </div>
-        </div>
-        {topTalkers.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
-            <Activity className="w-8 h-8 mx-auto mb-2 opacity-30" />
-            <p className="text-sm">No bandwidth data yet for this period.</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {topTalkers.map((t, i) => {
-              const maxBw = topTalkers[0]?.total_mbps || 1;
-              const pct = Math.round((t.total_mbps / maxBw) * 100);
-              return (
-                <div key={i} className="flex items-center gap-3">
-                  <span className="w-5 text-[10px] text-muted-foreground text-right">{i + 1}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex justify-between mb-0.5">
-                      <span className="text-xs font-mono truncate text-foreground/80">{t.label}</span>
-                      <span className="text-xs font-mono font-bold text-orange-400 flex-shrink-0 ml-2">{t.total_mbps} Mbps</span>
-                    </div>
-                    <div className="w-full h-1.5 bg-secondary rounded-full">
-                      <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: `linear-gradient(90deg, #f97316, #ef4444)` }} />
-                    </div>
-                    <div className="flex gap-3 mt-0.5 text-[9px] text-muted-foreground">
-                      <span className="text-blue-400">↓ {t.download_mbps}M</span>
-                      <span className="text-green-400">↑ {t.upload_mbps}M</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
       </div>
     </div>
   );
