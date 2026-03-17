@@ -662,14 +662,14 @@ class MikroTikRestAPI(MikroTikBase):
     # ── Ping (ROS 7.x REST API) ──
     async def ping_host(self, address: str = "8.8.8.8", count: int = 4, interface: str = ""):
         """
-        Melakukan ping dari router ke target address via /rest/tool/ping.
+        Melakukan ping dari router ke target address via /rest/ping.
         Mengembalikan list of dict response ping.
         """
         try:
-            payload = {"address": address, "count": count}
+            payload = {"address": address, "count": str(count)}
             if interface:
                 payload["interface"] = interface
-            items = await self._async_req("POST", "tool/ping", payload)
+            items = await self._async_req("POST", "ping", payload)
             return items if isinstance(items, list) else [items] if items else []
         except Exception as e:
             logger.debug(f"ping_host REST gagal ke {address}: {e}")
