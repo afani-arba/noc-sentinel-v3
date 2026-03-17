@@ -91,6 +91,7 @@ class MikroTikBase:
     async def list_interfaces(self):     return []
     async def get_isp_interfaces(self):  return []
     async def get_interface_traffic(self, interface_name="ether1", duration=1): return {}
+    async def ping_host(self, address="8.8.8.8", count=4): return []
 
     # ── PPPoE ──
     async def list_pppoe_secrets(self): raise NotImplementedError
@@ -658,6 +659,18 @@ class MikroTikRestAPI(MikroTikBase):
         except Exception:
             return []
 
+    # ── Ping (ROS 7.x REST API) ──
+    async def ping_host(self, address: str = "8.8.8.8", count: int = 4):
+        """
+        Melakukan ping dari router ke target address via /rest/tool/ping.
+        Mengembalikan list of dict response ping.
+        """
+        try:
+            items = await self._async_req("POST", "tool/ping", {"address": address, "count": count})
+            return items if isinstance(items, list) else [items] if items else []
+        except Exception as e:
+            logger.debug(f"ping_host REST gagal ke {address}: {e}")
+            return []
 
 
 
@@ -1160,6 +1173,12 @@ class MikroTikLegacyAPI(MikroTikBase):
             ifaces = safe_get("/interface")
             data["ifaces"] = self._normalize_items(ifaces) if isinstance(ifaces, list) else ifaces
 
+            try:
+                ping_res = api.get_resource("/").call("ping", {"address": "8.8.8.8", "count": "3"})
+                data["ping"] = self._normalize_items(ping_res) if isinstance(ping_res, list) else ping_res
+            except Exception as e:
+                data["ping"] = e
+
             if fetch_system:
                 sys = safe_get("/system/resource")
                 data["sys"] = sys[0] if isinstance(sys, list) and sys else (sys if isinstance(sys, Exception) else {})
@@ -1208,6 +1227,22 @@ class MikroTikLegacyAPI(MikroTikBase):
     async def get_polling_data(self, fetch_system: bool):
         return await asyncio.to_thread(self._get_polling_data_sync, fetch_system)
 
+    # ── Ping (ROS 6.x API Protocol) ──
+    async def ping_host(self, address: str = "8.8.8.8", count: int = 4):
+        """
+        Melakukan ping dari router ke target address via command /ping.
+        Mengembalikan list of dict response ping.
+        """
+        try:
+            def cb(api):
+                resource = api.get_resource("/")
+                return resource.call("ping", {"address": address, "count": str(count)})
+            
+            items = await asyncio.to_thread(self._execute, cb)
+            return self._normalize_items(items) if items else []
+        except Exception as e:
+            logger.debug(f"ping_host API Protocol gagal ke {address}: {e}")
+            return []
 
 # Backward compatibility alias
 MikroTikRouterAPI = MikroTikLegacyAPI

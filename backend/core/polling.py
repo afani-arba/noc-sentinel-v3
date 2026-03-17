@@ -86,9 +86,10 @@ async def poll_via_api(device: dict, fetch_system: bool) -> dict:
         # Kita gunakan metode khusus yang berjalan dalam SATU koneksi TCP
         res_dict = await mt.get_polling_data(fetch_system)
     else:
-        # Kumpulkan task API (traffic stats itu Wajib)
+        # Kumpulkan task API (traffic stats dan ping itu Wajib)
         tasks = {
-            "ifaces": mt.list_interfaces()
+            "ifaces": mt.list_interfaces(),
+            "ping": mt.ping_host("8.8.8.8", count=3)
         }
         
         # Selective Polling: Hanya ambil sistem berat setiap x detik
@@ -235,11 +236,53 @@ async def poll_via_api(device: dict, fetch_system: bool) -> dict:
                 pass
 
 
+    # ── Parse Ping (Latency & Jitter RFC 1889) ──
+    ping_raw = res_dict.get("ping", [])
+    if isinstance(ping_raw, Exception): ping_raw = []
+    
+    ping_data = {"reachable": False, "min": 0, "avg": 0, "max": 0, "jitter": 0, "loss": 100}
+    if isinstance(ping_raw, list) and len(ping_raw) > 0:
+        latencies = []
+        for p in ping_raw:
+            if isinstance(p, dict) and p.get("status") != "timeout" and p.get("time"):
+                # time usually "12ms" or "1s23ms"
+                t_str = str(p.get("time"))
+                if t_str.endswith("ms"):
+                    lat = t_str.replace("ms", "")
+                    if "s" in lat:
+                        sec, ms = lat.split("s")
+                        val = float(sec) * 1000 + float(ms)
+                    else:
+                        val = float(lat)
+                    latencies.append(val)
+        
+        if latencies:
+            loss = round(((len(ping_raw) - len(latencies)) / len(ping_raw)) * 100)
+            avg = sum(latencies) / len(latencies)
+            # RFC 1889 style jitter calculation
+            jitter = 0
+            if len(latencies) > 1:
+                jit_acc = 0
+                for i in range(1, len(latencies)):
+                    diff = abs(latencies[i] - latencies[i-1])
+                    jit_acc += (diff - jit_acc) / 16.0
+                jitter = jit_acc
+            
+            ping_data = {
+                "reachable": True,
+                "min": round(min(latencies), 1),
+                "avg": round(avg, 1),
+                "max": round(max(latencies), 1),
+                "jitter": round(jitter, 1),
+                "loss": loss
+            }
+
+
     return {
         "reachable":       True,
         "poll_mode":       f"{api_mode}_api_only",
         "poll_source":     "api_delta",
-        "ping":            {"reachable": True, "min": 0, "avg": 0, "max": 0, "jitter": 0, "loss": 0},
+        "ping":            ping_data,
         "system":          sys_info,
         "cpu":             cpu_load,
         "memory":          memory,
@@ -273,20 +316,10 @@ async def poll_single_device(device: dict) -> dict:
     device = await _ensure_api_mode(device, db)
 
     try:
-        # Lakukan ping dulu
-        ip = device.get("ip_address", "127.0.0.1")
-        try:
-            ping_res = await asyncio.wait_for(asyncio.to_thread(ping_service.ping_device, ip), timeout=4.0)
-        except Exception as e:
-            logger.debug(f"Ping timeout/gagal untuk {ip}: {e}")
-            ping_res = None
-            
-        # Ping wajib ada data, meski offline
-        ping_data = ping_res or {"reachable": False, "avg": 0, "jitter": 0, "loss": 100}
-        real_ping_ms = ping_data.get("avg", 0)
-        
         result = await asyncio.wait_for(poll_via_api(device, fetch_system), timeout=25.0)
-        result["ping"] = ping_data
+        
+        ping_data = result.get("ping", {"reachable": False, "min": 0, "avg": 0, "max": 0, "jitter": 0, "loss": 100})
+        real_ping_ms = ping_data.get("avg", 0)
         
         if fetch_system and result["reachable"]:
             _last_sys_poll[did] = now_ts
@@ -294,7 +327,7 @@ async def poll_single_device(device: dict) -> dict:
     except Exception as e:
         logger.error(f"[CRITICAL POLL FAILURE] API poll gagal {device.get('name', '?')} ({device.get('ip_address')}): {e.__class__.__name__} - {str(e)}")
         # Tambahkan default variables yang dibutuh jika throw exception
-        ping_data = {"reachable": False, "avg": 0, "jitter": 0, "loss": 100}
+        ping_data = {"reachable": False, "min": 0, "avg": 0, "max": 0, "jitter": 0, "loss": 100}
         real_ping_ms = 0
         result = {"reachable": False, "ping": ping_data}
 
