@@ -78,3 +78,16 @@ async def get_wireguard_status():
         return {"status": "offline", "message": "Tunnel wg0 tidak ditemukan / mati."}
         
     return stats
+
+@router.get("/generate-keys")
+async def generate_wireguard_keys():
+    """Generate a new private and public key pair for WireGuard."""
+    priv = wg_svc.generate_private_key()
+    if not priv:
+        raise HTTPException(status_code=500, detail="Gagal men-generate private key. Pastikan WireGuard terinstall (apt install wireguard).")
+    
+    pub = wg_svc.get_pubkey_from_privkey(priv)
+    return {
+        "private_key": priv,
+        "public_key": pub
+    }

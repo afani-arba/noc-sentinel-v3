@@ -143,3 +143,18 @@ def get_pubkey_from_privkey(private_key: str) -> str:
     except Exception as e:
         logger.error(f"Exception generating pubkey: {e}")
         return ""
+
+def generate_private_key() -> str:
+    """
+    Generate a new WireGuard private key using 'wg genkey'.
+    """
+    try:
+        result = subprocess.run(['wg', 'genkey'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode == 0:
+            return result.stdout.strip()
+        else:
+            logger.error(f"Failed to generate private key: {result.stderr.strip()}")
+            return ""
+    except Exception as e:
+        logger.error(f"Exception generating private key: {e}")
+        return ""

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import api from "@/lib/api";
-import { Shield, Wifi, WifiOff, Save, Info } from "lucide-react";
+import { Shield, Wifi, WifiOff, Save, Info, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,6 +11,7 @@ function WireGuardSection() {
   const [cfg, setCfg] = useState({ enabled: false, private_key: "", local_public_key: "", client_ip: "", server_public_key: "", server_endpoint: "", allowed_ips: "0.0.0.0/0" });
   const [status, setStatus] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [showKey, setShowKey] = useState(false);
 
   useEffect(() => {
@@ -30,6 +31,19 @@ function WireGuardSection() {
       api.get("/wireguard/status").then(res => setStatus(res.data)).catch(() => {});
     } catch (e) { toast.error(e.response?.data?.detail || "Gagal menyimpan konfigurasi WireGuard"); }
     setSaving(false);
+  };
+
+  const handleGenerate = async () => {
+    if (!confirm("Buat kunci baru? Peringatan: Anda harus menyesuaikan Public Key di Mikrotik nanti.")) return;
+    setGenerating(true);
+    try {
+      const { data } = await api.get("/wireguard/generate-keys");
+      setCfg(c => ({ ...c, private_key: data.private_key, local_public_key: data.public_key }));
+      toast.success("Kunci berhasil dibuat! Jangan lupa Simpan & Terapkan.");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Gagal membuat kunci.");
+    }
+    setGenerating(false);
   };
 
   const isOnline = status?.status === "online";
@@ -71,8 +85,13 @@ function WireGuardSection() {
               {showKey ? "Hide" : "Show"}
             </span>
           </Label>
-          <Input type={showKey ? "text" : "password"} value={cfg.private_key} onChange={e => setCfg(c => ({ ...c, private_key: e.target.value }))}
-            placeholder="Kunci Privat Host Linux Sentinel..." className="rounded-sm bg-background font-mono text-xs" />
+          <div className="flex gap-2">
+            <Input type={showKey ? "text" : "password"} value={cfg.private_key} onChange={e => setCfg(c => ({ ...c, private_key: e.target.value }))}
+              placeholder="Kunci Privat Host Linux Sentinel..." className="rounded-sm bg-background font-mono text-xs" />
+            <Button type="button" variant="outline" size="icon" disabled={generating} onClick={handleGenerate} className="w-9 h-9 flex-shrink-0 bg-secondary hover:bg-muted" title="Generate Private/Public Key otomatis">
+              <RefreshCw className={`w-4 h-4 text-purple-400 ${generating ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
         </div>
         <div className="space-y-1.5">
           <Label className="text-xs text-muted-foreground flex justify-between">
