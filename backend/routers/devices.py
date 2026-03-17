@@ -843,7 +843,6 @@ async def traffic_history_range(
             p_val = h.get("ping_ms")
             j_val = h.get("jitter_ms")
             result.append({
-            result.append({
                 "time":     label,
                 "download": round(dl / 1_000_000, 2),
                 "upload":   round(ul / 1_000_000, 2),
