@@ -178,7 +178,11 @@ export default function DashboardPage() {
     return () => clearInterval(iv);
   }, [fetchStats]);
 
-  useEffect(() => { fetchTrafficHistory(); }, [fetchTrafficHistory]);
+  useEffect(() => {
+    fetchTrafficHistory();
+    const trafficIv = setInterval(fetchTrafficHistory, 30000);
+    return () => clearInterval(trafficIv);
+  }, [fetchTrafficHistory]);
 
   // Fetch WG Status
   useEffect(() => {
