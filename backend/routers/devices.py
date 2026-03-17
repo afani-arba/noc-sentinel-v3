@@ -922,6 +922,7 @@ async def traffic_history_out_range(
                 {"$match": base_match},
                 {"$addFields": {
                     "ts_ms": {"$toLong": {"$dateFromString": {"dateString": "$timestamp"}}},
+                    # Prioritas 1: Gunakan out_bandwidth yang di-tracking langsung oleh polling.py
                     "out_dl": {"$reduce": {
                         "input": {"$objectToArray": {"$ifNull": ["$out_bandwidth", {}]}},
                         "initialValue": 0,
@@ -932,11 +933,48 @@ async def traffic_history_out_range(
                         "initialValue": 0,
                         "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.upload_bps", 0]}]}
                     }},
+                    # Prioritas 2 (Fallback untuk Historis sebelum update ini): Filter dari bandwidth
+                    "fallback_dl": {"$reduce": {
+                        "input": {
+                            "$filter": {
+                                "input": {"$objectToArray": {"$ifNull": ["$bandwidth", {}]}},
+                                "as": "item",
+                                "cond": {"$regexMatch": {"input": "$$item.k", "regex": "OUT", "options": "i"}}
+                            }
+                        },
+                        "initialValue": 0,
+                        "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.download_bps", 0]}]}
+                    }},
+                    "fallback_ul": {"$reduce": {
+                        "input": {
+                            "$filter": {
+                                "input": {"$objectToArray": {"$ifNull": ["$bandwidth", {}]}},
+                                "as": "item",
+                                "cond": {"$regexMatch": {"input": "$$item.k", "regex": "OUT", "options": "i"}}
+                            }
+                        },
+                        "initialValue": 0,
+                        "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.upload_bps", 0]}]}
+                    }},
+                    "out_count": {"$size": {"$objectToArray": {"$ifNull": ["$out_bandwidth", {}]}}},
+                }},
+                {"$addFields": {
+                    # Pilih out_bandwidth jika tersedia (>0), jika tidak gunakan fallback regex
+                    "final_out_dl": {"$cond": {
+                        "if":   {"$gt": ["$out_count", 0]},
+                        "then": "$out_dl",
+                        "else": "$fallback_dl",
+                    }},
+                    "final_out_ul": {"$cond": {
+                        "if":   {"$gt": ["$out_count", 0]},
+                        "then": "$out_ul",
+                        "else": "$fallback_ul",
+                    }},
                 }},
                 {"$group": {
                     "_id": {"$subtract": ["$ts_ms", {"$mod": ["$ts_ms", interval_ms]}]},
-                    "download_bps": {"$avg": "$out_dl"},
-                    "upload_bps":   {"$avg": "$out_ul"},
+                    "download_bps": {"$avg": "$final_out_dl"},
+                    "upload_bps":   {"$avg": "$final_out_ul"},
                 }},
                 {"$sort": {"_id": 1}},
             ]
