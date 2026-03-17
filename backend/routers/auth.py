@@ -17,9 +17,28 @@ class UserLogin(BaseModel):
 @router.post("/login")
 async def login(data: UserLogin, request: Request = None):
     db = get_db()
-    user = await db.admin_users.find_one({"username": data.username}, {"_id": 0})
-    if not user or not pwd_context.verify(data.password, user["password"]):
+    user = await db.admin_users.find_one({"username": data.username})
+    if not user or not pwd_context.verify(data.password, user.get("password", "")):
         raise HTTPException(401, "Invalid credentials")
+
+    # FIX: Legacy users from v2 might not have 'id' or 'role'
+    needs_update = False
+    upd_auth = {}
+    if "id" not in user:
+        import uuid
+        user["id"] = str(uuid.uuid4())
+        upd_auth["id"] = user["id"]
+        needs_update = True
+    if "role" not in user:
+        user["role"] = "administrator"
+        upd_auth["role"] = user["role"]
+        needs_update = True
+        
+    if needs_update:
+        await db.admin_users.update_one({"_id": user["_id"]}, {"$set": upd_auth})
+
+    # Remove ObjectId so it's JSON serializable
+    user.pop("_id", None)
 
     # Audit log: LOGIN event
     try:
