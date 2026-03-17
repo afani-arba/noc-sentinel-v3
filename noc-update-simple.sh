@@ -59,9 +59,11 @@ while systemctl is-active --quiet "$SERVICE" 2>/dev/null && [ $i -lt 20 ]; do
     sleep 1; i=$((i+1))
 done
 
-# Bebaskan port 8000
-fuser -k 8000/tcp 2>/dev/null || lsof -ti:8000 | xargs -r kill -9 2>/dev/null || true
-sleep 1
+# Pastikan benar-benar mati dan Port 8000 terbebas (Paksa Kill)
+echo "  Membunuh sisa proses di port 8000..."
+fuser -k -9 8000/tcp 2>/dev/null || lsof -ti:8000 | xargs -r kill -9 2>/dev/null || true
+pkill -9 -f "uvicorn server:app" 2>/dev/null || true
+sleep 2
 
 systemctl daemon-reload
 systemctl start "$SERVICE"
