@@ -253,7 +253,7 @@ function printReport(report, companyName, clientName, engineerName) {
     <div class="ec-sub">Upload peak: ${s.peak_bandwidth.upload} Mbps</div>
   </div>
   <div class="exec-card" style="border-left-color:#0891b2">
-    <div class="ec-label">Avg Ping / Jitter</div>
+    <div class="ec-label">Ping / Jitter</div>
     <div class="ec-value" style="color:#0891b2">${s.avg_ping} ms</div>
     <div class="ec-sub">Jitter: ${s.avg_jitter} ms</div>
   </div>
@@ -302,8 +302,8 @@ function printReport(report, companyName, clientName, engineerName) {
     <h4>C. Bandwidth Utilization</h4>
     <div class="perf-row"><span class="plabel">Avg Traffic</span><span class="pval">${s.avg_bandwidth.download} Mbps</span></div>
     <div class="perf-row"><span class="plabel">Peak Traffic</span><span class="pval">${s.peak_bandwidth.download} Mbps</span></div>
-    <div class="perf-row"><span class="plabel">Avg Ping</span><span class="pval">${s.avg_ping} ms</span></div>
-    <div class="perf-row"><span class="plabel">Avg Jitter</span><span class="pval">${s.avg_jitter} ms</span></div>
+    <div class="perf-row"><span class="plabel">Ping</span><span class="pval">${s.avg_ping} ms</span></div>
+    <div class="perf-row"><span class="plabel">Jitter</span><span class="pval">${s.avg_jitter} ms</span></div>
   </div>
   <div class="perf-box">
     <h4>D. User Active Analysis</h4>
@@ -541,7 +541,7 @@ export default function ReportsPage() {
                   { label: "Device Availability", value: `${s.devices.online} / ${s.devices.total}`, color: "text-blue-600", border: "border-l-blue-500", sub: "Total Online Devices" },
                   { label: "Average Bandwidth", value: `${s.avg_bandwidth.download} Mbps`, color: "text-green-600", border: "border-l-green-500", sub: `Upload: ${s.avg_bandwidth.upload} Mbps` },
                   { label: "Peak Traffic", value: `${s.peak_bandwidth.download} Mbps`, color: "text-purple-600", border: "border-l-purple-500", sub: "Today peak" },
-                  { label: "Avg Ping / Jitter", value: `${s.avg_ping} ms`, color: "text-cyan-600", border: "border-l-cyan-500", sub: `Jitter: ${s.avg_jitter} ms` },
+                  { label: "Ping / Jitter", value: `${s.avg_ping} ms`, color: "text-cyan-600", border: "border-l-cyan-500", sub: `Jitter: ${s.avg_jitter} ms` },
                   { label: "SLA Compliance", value: `${av.uptime_pct ?? 100}%`, color: "text-orange-600", border: "border-l-orange-500", sub: `Target: ${av.sla_target ?? 99.5}%` },
                 ];
               })().map(c => (
@@ -621,7 +621,7 @@ export default function ReportsPage() {
                   rows: [
                     ["Avg Traffic", `${s.avg_bandwidth.download} Mbps`, "text-foreground"],
                     ["Peak Traffic", `${s.peak_bandwidth.download} Mbps`, "text-foreground"],
-                    ["Avg Ping", `${s.avg_ping} ms`, "text-foreground"],
+                    ["Ping", `${s.avg_ping} ms`, "text-foreground"],
                   ]
                 },
               ].map(sec => (

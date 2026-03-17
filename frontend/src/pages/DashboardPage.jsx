@@ -207,9 +207,15 @@ export default function DashboardPage() {
   const devStat = stats.devices || { online: 0, total: 0 };
   const bw = stats.total_bandwidth || { download: 0, upload: 0 };
   // Calculate averages only from non-zero values
-  // Calculate averages naturally from unpacked raw distribution (raw pings)
+  // Extract raw distribution (raw pings/jitters)
   const pingValues = td.flatMap(d => d.ping_raw || [d.ping]).filter(v => v > 0);
-  const avgPing = pingValues.length ? Math.round(pingValues.reduce((s, v) => s + v, 0) / pingValues.length) : 0;
+  const jitterValues = td.flatMap(d => d.jitter_raw || [d.jitter]).filter(v => v >= 0);
+  
+  // To avoid "averages", we will display the latest or peak data. Let's use the peak (Max) value from the current timeframe, or the latest.
+  // The heatmap already shows the full distribution. A single stat badge usually shows the Peak or Latest.
+  // Let's show the Latest valid ping/jitter.
+  const latestPing = pingValues.length > 0 ? Math.round(pingValues[pingValues.length - 1]) : 0;
+  const latestJitter = jitterValues.length > 0 ? jitterValues[jitterValues.length - 1].toFixed(1) : "0.0";
   
   const sd = stats.selected_device;
   const noData = td.length === 0;
@@ -307,7 +313,8 @@ export default function DashboardPage() {
           { label: "Devices", value: `${devStat.online ?? 0}/${devStat.total ?? 0}`, sub: "online/total", icon: Server, color: "text-purple-500", bg: "bg-purple-500/10" },
           { label: "Download", value: `${bw.download ?? 0}`, sub: "Mbps", icon: ArrowDown, color: "text-blue-500", bg: "bg-blue-500/10" },
           { label: "Upload", value: `${bw.upload ?? 0}`, sub: "Mbps", icon: ArrowUp, color: "text-green-500", bg: "bg-green-500/10" },
-          { label: "Avg Ping", value: `${avgPing}`, sub: "ms", icon: Activity, color: "text-cyan-500", bg: "bg-cyan-500/10" },
+          { label: "Ping", value: `${latestPing}`, sub: "ms (latest)", icon: Activity, color: "text-cyan-500", bg: "bg-cyan-500/10" },
+          { label: "Jitter", value: `${latestJitter}`, sub: "ms (latest)", icon: Activity, color: "text-rose-500", bg: "bg-rose-500/10" },
         ].map((c, i) => (
           <div key={c.label} className="bg-card border border-border rounded-sm p-3 sm:p-4 opacity-0 animate-slide-up" style={{ animationDelay: `${i * 0.04}s`, animationFillMode: 'forwards' }} data-testid={`stat-card-${c.label.toLowerCase().replace(/\s/g, '-')}`}>
             <div className="flex items-start justify-between">
@@ -377,8 +384,12 @@ export default function DashboardPage() {
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2 sm:gap-3 text-[10px] sm:text-xs">
                   <div className="flex items-center gap-1 sm:gap-2 px-2 py-1 rounded-sm bg-cyan-500/10 border border-cyan-500/20">
-                    <span className="text-cyan-400">Avg Ping:</span>
-                    <span className="font-mono text-cyan-300 font-semibold">{avgPing} ms</span>
+                    <span className="text-cyan-400">Ping (Latest):</span>
+                    <span className="font-mono text-cyan-300 font-semibold">{latestPing} ms</span>
+                  </div>
+                  <div className="flex items-center gap-1 sm:gap-2 px-2 py-1 rounded-sm bg-rose-500/10 border border-rose-500/20">
+                    <span className="text-rose-400">Jitter (Latest):</span>
+                    <span className="font-mono text-rose-300 font-semibold">{latestJitter} ms</span>
                   </div>
                 </div>
               </div>
