@@ -32,6 +32,7 @@ export default function DashboardPage() {
   const [trafficRange, setTrafficRange] = useState("24h");
   const [dateFilter, setDateFilter] = useState("");
   const [trafficData, setTrafficData] = useState(null); // null = use stats.traffic_data
+  const [trafficDataOut, setTrafficDataOut] = useState(null);
   const [loadingTraffic, setLoadingTraffic] = useState(false);
   // v4 — ISP Multi-series
   const [ispSeries, setIspSeries]   = useState([]);  // [{name, data:[{time,download,upload}]}]
