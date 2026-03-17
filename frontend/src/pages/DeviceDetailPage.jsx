@@ -10,6 +10,7 @@ import {
   AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend, ComposedChart, Brush
 } from "recharts";
+import LatencyHeatmap from "@/components/ui/LatencyHeatmap";
 
 /* ── Tooltip shared style ─────────────────────────────────────────── */
 const ttStyle = {
@@ -148,6 +149,8 @@ export default function DeviceDetailPage() {
         memory: h.memory ?? h.memory_percent ?? 0,
         ping:   h.ping   ?? h.ping_ms        ?? 0,
         jitter: h.jitter ?? h.jitter_ms      ?? 0,
+        ping_raw: h.ping_raw || [],
+        jitter_raw: h.jitter_raw || [],
       })));
     } catch (e) {
       console.error("Device detail fetch error:", e);
@@ -376,36 +379,24 @@ export default function DeviceDetailPage() {
       {/* ── Ping & Jitter Chart ── */}
       <ChartCard title="Ping & Jitter" icon={Heart} iconColor="text-rose-400" height={240}>
         {history.length === 0 ? <NoData /> : (
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={history} margin={{ top: 8, right: 8, left: -10, bottom: 28 }}>
-              <defs>
-                <linearGradient id="gJitter" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.25} />
-                  <stop offset="95%" stopColor="#f43f5e" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="2 4" stroke="rgba(255,255,255,0.04)" />
-              <XAxis dataKey="time" tick={{ fontSize: 9, fill: "#475569" }} interval="preserveStartEnd" minTickGap={40} />
-              <YAxis tick={{ fontSize: 9, fill: "#475569" }} tickFormatter={v => `${v}ms`} width={40} />
-              <Tooltip
-                {...ttStyle}
-                formatter={(v, n) => [
-                  `${v?.toFixed?.(1) ?? v} ms`,
-                  n === "ping" ? "📡 Ping" : "〰 Jitter"
-                ]}
-              />
-              <Legend wrapperStyle={{ fontSize: "10px", paddingTop: "2px" }} formatter={v => v === "ping" ? "Ping (ms)" : "Jitter (ms)"} />
-              <Area type="monotone" dataKey="jitter" stroke="#f43f5e" strokeWidth={1} fill="url(#gJitter)" dot={false} activeDot={{ r: 3 }} />
-              <Line type="monotone" dataKey="ping" stroke="#06b6d4" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#06b6d4" }} />
-              <Brush
-                dataKey="time"
-                height={18}
-                startIndex={brushStartIdx}
-                {...brushStyle}
-                tick={<BrushTick />}
-              />
-            </ComposedChart>
-          </ResponsiveContainer>
+          <div className="flex flex-col gap-2 h-full py-1">
+            <div className="flex-1 min-h-[90px] w-full relative">
+              <span className="absolute top-0 left-2 text-[10px] text-muted-foreground font-semibold uppercase tracking-wider z-10 flex items-center gap-1">
+                <Activity className="w-3 h-3 text-cyan-400" /> Ping
+              </span>
+              <div className="w-full h-full pt-4">
+                <LatencyHeatmap data={history} dataKey="ping" />
+              </div>
+            </div>
+            <div className="flex-1 min-h-[90px] w-full relative border-t border-border/50 pt-2">
+              <span className="absolute top-2 left-2 text-[10px] text-muted-foreground font-semibold uppercase tracking-wider z-10 flex items-center gap-1">
+                <Activity className="w-3 h-3 text-rose-400" /> Jitter
+              </span>
+              <div className="w-full h-full pt-4">
+                <LatencyHeatmap data={history} dataKey="jitter" />
+              </div>
+            </div>
+          </div>
         )}
       </ChartCard>
 

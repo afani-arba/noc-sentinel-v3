@@ -57,7 +57,6 @@ function DeviceActionModal({ device, onClose, deviceBwHistory }) {
   const [winboxLoading, setWinboxLoading] = useState(false);
   const [connInfo, setConnInfo] = useState(null);
   
-  const [latencyView, setLatencyView] = useState("ping");
   // FIX Bug #1: Ganti window.confirm() (diblokir mobile) dengan state konfirmasi inline
   const [confirmReboot, setConfirmReboot] = useState(false);
 
@@ -243,27 +242,10 @@ function DeviceActionModal({ device, onClose, deviceBwHistory }) {
                 <p className="text-slate-500 text-[10px] uppercase tracking-wider flex items-center gap-1">
                   <Activity className="w-3 h-3" /> Latency Distribution
                 </p>
-                <div className="flex gap-1 h-5">
-                  <button 
-                    onClick={() => setLatencyView("ping")}
-                    className={`text-[9px] px-2 font-semibold rounded-sm transition-colors ${
-                      latencyView === "ping" ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/30" : "text-slate-500 hover:text-cyan-400/70"
-                    }`}
-                  >
-                    Ping
-                  </button>
-                  <button 
-                    onClick={() => setLatencyView("jitter")}
-                    className={`text-[9px] px-2 font-semibold rounded-sm transition-colors ${
-                      latencyView === "jitter" ? "bg-rose-500/20 text-rose-400 border border-rose-500/30" : "text-slate-500 hover:text-rose-400/70"
-                    }`}
-                  >
-                    Jitter
-                  </button>
-                </div>
+
               </div>
               <div className="h-40 w-full overflow-hidden rounded-md bg-black/40">
-                <LatencyHeatmap data={deviceBwHistory} dataKey={latencyView} />
+                <LatencyHeatmap data={deviceBwHistory} dataKey="ping" />
               </div>
             </div>
           )}

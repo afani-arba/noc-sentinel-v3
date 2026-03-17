@@ -45,8 +45,7 @@ export default function DashboardPage() {
   const [comparePeriod, setComparePeriod] = useState("week");
   const [showCompare, setShowCompare] = useState(false);
   
-  // Latency Heatmap View Mode
-  const [latencyView, setLatencyView] = useState("ping");
+  // Jitter removed from Heatmap View
 
   // ━━━ SSE Real-time ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   const { devices: sseDevices, summary: sseSummary, connected: sseConnected, lastUpdate: sseLastUpdate } = useDeviceEvents();
@@ -208,10 +207,9 @@ export default function DashboardPage() {
   const devStat = stats.devices || { online: 0, total: 0 };
   const bw = stats.total_bandwidth || { download: 0, upload: 0 };
   // Calculate averages only from non-zero values
-  const pingValues = td.filter(d => d.ping > 0).map(d => d.ping);
-  const jitterValues = td.filter(d => d.jitter > 0).map(d => d.jitter);
+  // Calculate averages naturally from unpacked raw distribution (raw pings)
+  const pingValues = td.flatMap(d => d.ping_raw || [d.ping]).filter(v => v > 0);
   const avgPing = pingValues.length ? Math.round(pingValues.reduce((s, v) => s + v, 0) / pingValues.length) : 0;
-  const avgJitter = jitterValues.length ? (jitterValues.reduce((s, v) => s + v, 0) / jitterValues.length).toFixed(1) : "0";
   
   const sd = stats.selected_device;
   const noData = td.length === 0;
@@ -310,7 +308,6 @@ export default function DashboardPage() {
           { label: "Download", value: `${bw.download ?? 0}`, sub: "Mbps", icon: ArrowDown, color: "text-blue-500", bg: "bg-blue-500/10" },
           { label: "Upload", value: `${bw.upload ?? 0}`, sub: "Mbps", icon: ArrowUp, color: "text-green-500", bg: "bg-green-500/10" },
           { label: "Avg Ping", value: `${avgPing}`, sub: "ms", icon: Activity, color: "text-cyan-500", bg: "bg-cyan-500/10" },
-          { label: "Avg Jitter", value: avgJitter, sub: "ms", icon: Activity, color: "text-rose-500", bg: "bg-rose-500/10" },
         ].map((c, i) => (
           <div key={c.label} className="bg-card border border-border rounded-sm p-3 sm:p-4 opacity-0 animate-slide-up" style={{ animationDelay: `${i * 0.04}s`, animationFillMode: 'forwards' }} data-testid={`stat-card-${c.label.toLowerCase().replace(/\s/g, '-')}`}>
             <div className="flex items-start justify-between">
@@ -378,28 +375,11 @@ export default function DashboardPage() {
               </h3>
               
               <div className="flex items-center gap-4">
-                <div className="flex gap-1 h-7">
-                  <button 
-                    onClick={() => setLatencyView("ping")}
-                    className={`text-[10px] px-3 font-semibold rounded-sm border transition-colors ${
-                      latencyView === "ping" ? "bg-cyan-600 text-white border-cyan-600" : "border-border text-muted-foreground hover:border-cyan-500/50 hover:text-cyan-400"
-                    }`}
-                  >
-                    Ping
-                  </button>
-                  <button 
-                    onClick={() => setLatencyView("jitter")}
-                    className={`text-[10px] px-3 font-semibold rounded-sm border transition-colors ${
-                      latencyView === "jitter" ? "bg-rose-600 text-white border-rose-600" : "border-border text-muted-foreground hover:border-rose-500/50 hover:text-rose-400"
-                    }`}
-                  >
-                    Jitter
-                  </button>
-                </div>
-                
                 <div className="flex items-center gap-2 sm:gap-3 text-[10px] sm:text-xs">
-                  <div className="flex items-center gap-1 sm:gap-2 px-2 py-1 rounded-sm bg-cyan-500/10 border border-cyan-500/20"><span className="text-cyan-400">Avg Ping:</span><span className="font-mono text-cyan-300 font-semibold">{avgPing} ms</span></div>
-                  <div className="flex items-center gap-1 sm:gap-2 px-2 py-1 rounded-sm bg-rose-500/10 border border-rose-500/20"><span className="text-rose-400">Avg Jitter:</span><span className="font-mono text-rose-300 font-semibold">{avgJitter} ms</span></div>
+                  <div className="flex items-center gap-1 sm:gap-2 px-2 py-1 rounded-sm bg-cyan-500/10 border border-cyan-500/20">
+                    <span className="text-cyan-400">Avg Ping:</span>
+                    <span className="font-mono text-cyan-300 font-semibold">{avgPing} ms</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -413,7 +393,7 @@ export default function DashboardPage() {
               </div>
             ) : (
               <div className="h-40 sm:h-48 w-full pt-2">
-                <LatencyHeatmap data={td} dataKey={latencyView} />
+                <LatencyHeatmap data={td} dataKey="ping" />
               </div>
             )}
           </div>

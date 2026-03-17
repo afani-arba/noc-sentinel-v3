@@ -94,21 +94,24 @@ export default function LatencyHeatmap({ data = [], dataKey = "ping" }) {
       if (colIdx >= X_COLUMNS) colIdx = X_COLUMNS - 1;
       if (colIdx < 0) colIdx = 0;
 
-      const val = parseFloat(d[dataKey] || 0);
+      // Extract raw data points if available, otherwise fallback to the averaged value
+      const rawData = d[`${dataKey}_raw`] && Array.isArray(d[`${dataKey}_raw`]) && d[`${dataKey}_raw`].length > 0 
+        ? d[`${dataKey}_raw`] 
+        : [d[dataKey]];
 
-      const rowIdx = Y_BUCKETS.findIndex((b) => val >= b.min && val < b.max);
-      
-      if (rowIdx !== -1) {
-        // TAMPILAN BARU: Isi semua cell dari bawah (Y_BUCKETS.length - 1) 
-        // ke atas sampai rowIdx (batas nilai ping saat ini)
-        // Ini membuat data yang renggang (aggregated history) terlihat solid seperti Bar Chart
-        for (let r = Y_BUCKETS.length - 1; r >= rowIdx; r--) {
-          matrix[r][colIdx] += 1;
-          if (matrix[r][colIdx] > currentMaxCount) {
-            currentMaxCount = matrix[r][colIdx];
+      rawData.forEach((valStr) => {
+        const val = parseFloat(valStr || 0);
+        if (val <= 0) return; // Ignore 0 or negative pings (offline/errors)
+
+        const rowIdx = Y_BUCKETS.findIndex((b) => val >= b.min && val < b.max);
+        
+        if (rowIdx !== -1) {
+          matrix[rowIdx][colIdx] += 1;
+          if (matrix[rowIdx][colIdx] > currentMaxCount) {
+            currentMaxCount = matrix[rowIdx][colIdx];
           }
         }
-      }
+      });
     });
 
     // Generate labels for X axis (approx every 15 columns)

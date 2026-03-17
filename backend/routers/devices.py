@@ -714,6 +714,8 @@ async def traffic_history_range(
                     "upload_bps":   {"$avg": "$ul_bps"},
                     "ping_ms":      {"$avg": {"$ifNull": ["$ping_ms",  0]}},
                     "jitter_ms":    {"$avg": {"$ifNull": ["$jitter_ms",0]}},
+                    "ping_raw":     {"$push": "$ping_ms"},
+                    "jitter_raw":   {"$push": "$jitter_ms"},
                 }},
                 {"$sort": {"_id": 1}},
             ]
@@ -770,6 +772,8 @@ async def traffic_history_range(
                     "upload_bps":   {"$avg": "$ul_bps"},
                     "ping_ms":      {"$avg": {"$ifNull": ["$ping_ms",  0]}},
                     "jitter_ms":    {"$avg": {"$ifNull": ["$jitter_ms",0]}},
+                    "ping_raw":     {"$push": "$ping_ms"},
+                    "jitter_raw":   {"$push": "$jitter_ms"},
                 }},
                 {"$sort": {"_id": 1}},
             ]
@@ -794,6 +798,8 @@ async def traffic_history_range(
                 "upload":   round((b.get("upload_bps")   or 0) / 1_000_000, 2),
                 "ping":     round(b.get("ping_ms")   or 0, 1),
                 "jitter":   round(b.get("jitter_ms") or 0, 1),
+                "ping_raw": [p for p in b.get("ping_raw", []) if p is not None],
+                "jitter_raw": [j for j in b.get("jitter_raw", []) if j is not None],
             })
         return result
 
@@ -834,12 +840,16 @@ async def traffic_history_range(
                 dl = sum(v.get("download_bps", 0) for v in bw.values() if isinstance(v, dict))
                 ul = sum(v.get("upload_bps",   0) for v in bw.values() if isinstance(v, dict))
 
+            p_val = h.get("ping_ms")
+            j_val = h.get("jitter_ms")
             result.append({
                 "time":     label,
                 "download": round(dl / 1_000_000, 2),
                 "upload":   round(ul / 1_000_000, 2),
-                "ping":     h.get("ping_ms",   0),
-                "jitter":   h.get("jitter_ms", 0),
+                "ping":     p_val or 0,
+                "jitter":   j_val or 0,
+                "ping_raw": [p_val] if p_val is not None else [],
+                "jitter_raw": [j_val] if j_val is not None else [],
             })
         return result
 
