@@ -14,6 +14,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line, Legend, BarChart, Bar, Cell
 } from "recharts";
+import LatencyHeatmap from "@/components/ui/LatencyHeatmap";
 
 const alertIcons = { warning: AlertTriangle, error: AlertCircle, info: Info, success: CheckCircle2 };
 const alertColors = { warning: "text-yellow-500", error: "text-red-500", info: "text-blue-500", success: "text-green-500" };
@@ -43,6 +44,9 @@ export default function DashboardPage() {
   const [compareData, setCompareData] = useState(null); // {current, previous, anomalies}
   const [comparePeriod, setComparePeriod] = useState("week");
   const [showCompare, setShowCompare] = useState(false);
+  
+  // Latency Heatmap View Mode
+  const [latencyView, setLatencyView] = useState("ping");
 
   // ━━━ SSE Real-time ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   const { devices: sseDevices, summary: sseSummary, connected: sseConnected, lastUpdate: sseLastUpdate } = useDeviceEvents();
@@ -359,11 +363,36 @@ export default function DashboardPage() {
 
           {/* Ping & Jitter */}
           <div className="bg-card border border-border rounded-sm p-3 sm:p-5" data-testid="ping-jitter-chart">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 sm:mb-4 gap-2">
-              <h3 className="text-base sm:text-lg font-semibold font-['Rajdhani']">Ping & Jitter</h3>
-              <div className="flex items-center gap-2 sm:gap-3 text-[10px] sm:text-xs">
-                <div className="flex items-center gap-1 sm:gap-2 px-2 py-1 rounded-sm bg-cyan-500/10 border border-cyan-500/20"><span className="text-cyan-400">Ping:</span><span className="font-mono text-cyan-300 font-semibold">{avgPing} ms</span></div>
-                <div className="flex items-center gap-1 sm:gap-2 px-2 py-1 rounded-sm bg-rose-500/10 border border-rose-500/20"><span className="text-rose-400">Jitter:</span><span className="font-mono text-rose-300 font-semibold">{avgJitter} ms</span></div>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 gap-2">
+              <h3 className="text-base sm:text-lg font-semibold font-['Rajdhani'] flex items-center gap-2">
+                Latency Heatmap
+                <span className="text-xs text-muted-foreground font-normal hidden sm:inline">— distribution overview</span>
+              </h3>
+              
+              <div className="flex items-center gap-4">
+                <div className="flex gap-1 h-7">
+                  <button 
+                    onClick={() => setLatencyView("ping")}
+                    className={`text-[10px] px-3 font-semibold rounded-sm border transition-colors ${
+                      latencyView === "ping" ? "bg-cyan-600 text-white border-cyan-600" : "border-border text-muted-foreground hover:border-cyan-500/50 hover:text-cyan-400"
+                    }`}
+                  >
+                    Ping
+                  </button>
+                  <button 
+                    onClick={() => setLatencyView("jitter")}
+                    className={`text-[10px] px-3 font-semibold rounded-sm border transition-colors ${
+                      latencyView === "jitter" ? "bg-rose-600 text-white border-rose-600" : "border-border text-muted-foreground hover:border-rose-500/50 hover:text-rose-400"
+                    }`}
+                  >
+                    Jitter
+                  </button>
+                </div>
+                
+                <div className="flex items-center gap-2 sm:gap-3 text-[10px] sm:text-xs">
+                  <div className="flex items-center gap-1 sm:gap-2 px-2 py-1 rounded-sm bg-cyan-500/10 border border-cyan-500/20"><span className="text-cyan-400">Avg Ping:</span><span className="font-mono text-cyan-300 font-semibold">{avgPing} ms</span></div>
+                  <div className="flex items-center gap-1 sm:gap-2 px-2 py-1 rounded-sm bg-rose-500/10 border border-rose-500/20"><span className="text-rose-400">Avg Jitter:</span><span className="font-mono text-rose-300 font-semibold">{avgJitter} ms</span></div>
+                </div>
               </div>
             </div>
             {avgPing === 0 && avgJitter === "0" ? (
@@ -375,15 +404,8 @@ export default function DashboardPage() {
                 </div>
               </div>
             ) : (
-              <div className="h-48">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={td}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" /><XAxis dataKey="time" tick={{ fill: "#a1a1aa", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "#27272a" }} /><YAxis tick={{ fill: "#a1a1aa", fontSize: 11 }} tickLine={false} axisLine={{ stroke: "#27272a" }} domain={[0, 'auto']} /><Tooltip {...ttStyle} />
-                    <Legend iconType="line" wrapperStyle={{ fontSize: "11px", color: "#a1a1aa" }} />
-                    <Line type="monotone" dataKey="ping" stroke="#06b6d4" strokeWidth={2} dot={false} name="Ping (ms)" />
-                    <Line type="monotone" dataKey="jitter" stroke="#f43f5e" strokeWidth={2} dot={false} strokeDasharray="5 3" name="Jitter (ms)" />
-                  </LineChart>
-                </ResponsiveContainer>
+              <div className="h-64 sm:h-72 w-full pt-2">
+                <LatencyHeatmap data={td} dataKey={latencyView} />
               </div>
             )}
           </div>
