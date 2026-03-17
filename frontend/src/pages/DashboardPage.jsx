@@ -402,12 +402,12 @@ export default function DashboardPage() {
                 </div>
               </div>
             </div>
-            {avgPing === 0 && avgJitter === "0" ? (
+            {td.length === 0 ? (
               <div className="h-48 flex items-center justify-center bg-secondary/20 rounded-sm border border-dashed border-border">
                 <div className="text-center">
                   <Activity className="w-8 h-8 mx-auto mb-2 text-muted-foreground/30" />
-                  <p className="text-sm text-muted-foreground">Ping data tidak tersedia</p>
-                  <p className="text-xs text-muted-foreground/70 mt-1">Server monitoring tidak dapat menjangkau IP device via ICMP.<br />Pastikan firewall MikroTik mengizinkan ICMP dari server monitoring.</p>
+                  <p className="text-sm text-muted-foreground">Menunggu data latency...</p>
+                  <p className="text-xs text-muted-foreground/70 mt-1">Data latency akan tersedia setelah beberapa siklus polling selesai.</p>
                 </div>
               </div>
             ) : (
