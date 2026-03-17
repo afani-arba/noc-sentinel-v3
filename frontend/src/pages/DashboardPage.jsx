@@ -156,10 +156,16 @@ export default function DashboardPage() {
       if (selectedDevice !== "all") params.device_id = selectedDevice;
       if (selectedInterface !== "all") params.interface = selectedInterface;
       if (dateFilter) params.date = dateFilter;
-      const r = await api.get("/dashboard/traffic-history", { params });
-      setTrafficData(r.data.length > 0 ? r.data : null);
+      
+      const [rAll, rOut] = await Promise.all([
+        api.get("/dashboard/traffic-history", { params }),
+        api.get("/dashboard/traffic-history-out", { params })
+      ]);
+      setTrafficData(rAll.data.length > 0 ? rAll.data : null);
+      setTrafficDataOut(rOut.data.length > 0 ? rOut.data : null);
     } catch {
       setTrafficData(null);
+      setTrafficDataOut(null);
     }
     setLoadingTraffic(false);
   }, [trafficRange, dateFilter, selectedDevice, selectedInterface]);
@@ -323,6 +329,8 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {[
           { label: "Devices", value: `${devStat.online ?? 0}/${devStat.total ?? 0}`, sub: "online/total", icon: Server, color: "text-purple-500", bg: "bg-purple-500/10" },
+          { label: "Ping (ms)", value: latestPing, sub: "rata-rata", icon: Activity, color: "text-cyan-500", bg: "bg-cyan-500/10" },
+          { label: "Jitter (ms)", value: latestJitter, sub: "rata-rata", icon: Radio, color: "text-rose-500", bg: "bg-rose-500/10" },
           { label: "Download", value: `${bw.download ?? 0}`, sub: "Mbps", icon: ArrowDown, color: "text-blue-500", bg: "bg-blue-500/10" },
           { label: "Upload", value: `${bw.upload ?? 0}`, sub: "Mbps", icon: ArrowUp, color: "text-green-500", bg: "bg-green-500/10" },
         ].map((c, i) => (
@@ -333,26 +341,6 @@ export default function DashboardPage() {
             </div>
           </div>
         ))}
-
-        {/* Latency Heatmap embedded inside Top Stats Grid (Replacing Ping & Jitter space) */}
-        <div className="col-span-2 sm:col-span-3 lg:col-span-2 bg-card border border-border rounded-sm p-3 opacity-0 animate-slide-up flex flex-col justify-center" style={{ animationDelay: `0.12s`, animationFillMode: 'forwards' }}>
-          <div className="flex items-center justify-between mb-1">
-            <h3 className="text-[9px] sm:text-[10px] text-muted-foreground uppercase tracking-wider w-full">Latency Distribution</h3>
-            <div className="flex items-center gap-1 text-[9px] font-mono text-muted-foreground whitespace-nowrap">
-              <span>Ping: <span className="text-cyan-400">{latestPing}ms</span></span>
-              <span>· Jitter: <span className="text-rose-400">{latestJitter}ms</span></span>
-            </div>
-          </div>
-          {td.length === 0 ? (
-            <div className="flex-1 flex items-center justify-center bg-secondary/10 rounded-sm border border-dashed border-border py-4">
-              <span className="text-xs text-muted-foreground">Menunggu data latency...</span>
-            </div>
-          ) : (
-            <div className="h-16 w-full -ml-2">
-              <LatencyHeatmap data={td} dataKey="ping" />
-            </div>
-          )}
-        </div>
       </div>
 
       {noData && devices.length === 0 ? (
@@ -402,6 +390,47 @@ export default function DashboardPage() {
               <div className="flex items-center gap-1 sm:gap-2"><div className="w-3 h-[2px] bg-orange-500" /> Upload</div>
             </div>
           </div>
+
+          {/* Traffic Chart OUT (Only interfaces containing 'OUT') */}
+          {trafficDataOut && trafficDataOut.length > 0 && selectedInterface === "all" && (
+            <div className="bg-card border border-border rounded-sm p-3 sm:p-5" data-testid="traffic-chart-out">
+              <div className="flex items-center justify-between mb-3 sm:mb-4">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base sm:text-lg font-semibold font-['Rajdhani']">Traffic History Out</h3>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-mono hidden sm:inline">
+                    OUT Interfaces Only
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                  {loadingTraffic && <RefreshCw className="w-3 h-3 animate-spin" />}
+                  <span className="font-mono">{trafficDataOut.length} samples</span>
+                </div>
+              </div>
+              <div className="h-48 sm:h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={trafficDataOut} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="gDlOut" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#6366f1" stopOpacity={0.6} /><stop offset="95%" stopColor="#6366f1" stopOpacity={0.1} /></linearGradient>
+                      <linearGradient id="gUlOut" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#a855f7" stopOpacity={0.6} /><stop offset="95%" stopColor="#a855f7" stopOpacity={0.1} /></linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                    <XAxis dataKey="time" tick={{ fill: "#a1a1aa", fontSize: 10 }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fill: "#a1a1aa", fontSize: 10 }} tickLine={false} axisLine={false} width={80} tickFormatter={(val) => {
+                        if (val >= 1000) return `${(val/1000).toFixed(1)} Gbps`;
+                        return `${val} Mbps`;
+                    }} />
+                    <Tooltip {...ttStyle} formatter={(v, n) => [`${Number(v).toFixed(2)} Mbps`, n === "download" ? "Download" : "Upload"]} />
+                    <Area type="linear" dataKey="download" stroke="#6366f1" fill="url(#gDlOut)" strokeWidth={1.5} name="Download" activeDot={{ r: 4 }} />
+                    <Area type="linear" dataKey="upload" stroke="#a855f7" fill="url(#gUlOut)" strokeWidth={1.5} name="Upload" activeDot={{ r: 4 }} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="flex items-center justify-center gap-4 sm:gap-6 mt-2 sm:mt-3 text-[10px] sm:text-xs text-muted-foreground">
+                <div className="flex items-center gap-1 sm:gap-2"><div className="w-3 h-[2px] bg-indigo-500" /> Download</div>
+                <div className="flex items-center gap-1 sm:gap-2"><div className="w-3 h-[2px] bg-purple-500" /> Upload</div>
+              </div>
+            </div>
+          )}
 
 
           {/* ── ISP Multi-series Chart (hanya jika device spesifik & ada multi-ISP) ── */}

@@ -843,6 +843,7 @@ async def traffic_history_range(
             p_val = h.get("ping_ms")
             j_val = h.get("jitter_ms")
             result.append({
+            result.append({
                 "time":     label,
                 "download": round(dl / 1_000_000, 2),
                 "upload":   round(ul / 1_000_000, 2),
@@ -853,6 +854,109 @@ async def traffic_history_range(
             })
         return result
 
+@router.get("/dashboard/traffic-history-out")
+async def traffic_history_out_range(
+    device_id: str = "",
+    range: str = "24h",         # 1h, 12h, 24h, week, month
+    date: str = "",             # specific date YYYY-MM-DD
+    user=Depends(get_current_user)
+):
+    """
+    Sama seperti traffic history utama, tapi HANYA menjumlahkan trafik dari
+    interfaces yang mengandung kata "OUT" (case-insensitive).
+    """
+    db = get_db()
+    now_utc = datetime.now(timezone.utc)
+
+    if date:
+        try:
+            d = datetime.strptime(date, "%Y-%m-%d")
+            start = d.replace(tzinfo=timezone.utc) - timedelta(hours=7)
+            end   = start + timedelta(days=1)
+        except ValueError:
+            raise HTTPException(400, "Invalid date format")
+    elif range == "1h":
+        start, end = now_utc - timedelta(hours=1),  now_utc
+    elif range == "12h":
+        start, end = now_utc - timedelta(hours=12), now_utc
+    elif range == "week":
+        start, end = now_utc - timedelta(days=7),   now_utc
+    elif range == "month":
+        start, end = now_utc - timedelta(days=30),  now_utc
+    else:  # 24h default
+        start, end = now_utc - timedelta(hours=24), now_utc
+
+    start_str = start.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    end_str   = now_utc.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
+    interval_ms = {
+        "1h":    60_000,
+        "12h":   300_000,
+        "24h":   600_000,
+        "week":  3_600_000,
+        "month": 10_800_000,
+    }.get(range, 600_000)
+
+    base_match: dict = {"timestamp": {"$gte": start_str, "$lte": end_str}}
+    if device_id:
+        base_match["device_id"] = device_id
+
+    try:
+        pipeline = [
+            {"$match": base_match},
+            {"$addFields": {
+                "ts_ms": {"$toLong": {"$dateFromString": {"dateString": "$timestamp"}}},
+                "out_dl": {"$reduce": {
+                    "input": {
+                        "$filter": {
+                            "input": {"$objectToArray": {"$ifNull": ["$bandwidth", {}]}},
+                            "as": "item",
+                            "cond": {"$regexMatch": {"input": "$$item.k", "regex": "OUT", "options": "i"}}
+                        }
+                    },
+                    "initialValue": 0,
+                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.download_bps", 0]}]}
+                }},
+                "out_ul": {"$reduce": {
+                    "input": {
+                        "$filter": {
+                            "input": {"$objectToArray": {"$ifNull": ["$bandwidth", {}]}},
+                            "as": "item",
+                            "cond": {"$regexMatch": {"input": "$$item.k", "regex": "OUT", "options": "i"}}
+                        }
+                    },
+                    "initialValue": 0,
+                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.upload_bps", 0]}]}
+                }},
+            }},
+            {"$group": {
+                "_id": {"$subtract": ["$ts_ms", {"$mod": ["$ts_ms", interval_ms]}]},
+                "download_bps": {"$avg": "$out_dl"},
+                "upload_bps":   {"$avg": "$out_ul"},
+            }},
+            {"$sort": {"_id": 1}},
+        ]
+
+        buckets = await db.traffic_history.aggregate(pipeline).to_list(5000)
+
+        result = []
+        for b in buckets:
+            ts_ms = b.get("_id")
+            if not isinstance(ts_ms, (int, float)) or ts_ms <= 0: continue
+            
+            utc_dt   = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+            local_dt = utc_dt + timedelta(hours=7)
+            label = local_dt.strftime("%d/%m %H:00") if range in ("week", "month") else local_dt.strftime("%H:%M")
+            
+            result.append({
+                "time":     label,
+                "download": round((b.get("download_bps") or 0) / 1_000_000, 2),
+                "upload":   round((b.get("upload_bps")   or 0) / 1_000_000, 2),
+            })
+        return result
+    except Exception as e:
+        logger.warning(f"traffic-history-out aggregation failed: {e}")
+        return []
 
 
 # ── ISP Multi-Series Traffic History ─────────────────────────────────────────
