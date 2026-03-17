@@ -206,11 +206,24 @@ export default function DashboardPage() {
   const health = stats.system_health || {};
   const devStat = stats.devices || { online: 0, total: 0 };
   const bw = stats.total_bandwidth || { download: 0, upload: 0 };
-  // Calculate averages only from non-zero values
-  const pingValues = td.filter(d => d.ping > 0).map(d => d.ping);
-  const jitterValues = td.filter(d => d.jitter > 0).map(d => d.jitter);
-  const avgPing = pingValues.length ? Math.round(pingValues.reduce((s, v) => s + v, 0) / pingValues.length) : 0;
-  const avgJitter = jitterValues.length ? (jitterValues.reduce((s, v) => s + v, 0) / jitterValues.length).toFixed(1) : "0";
+  // Definisikan nilai current/live ping daripada average 24h untuk akurasi dashboard
+  let avgPing = 0;
+  let avgJitter = "0";
+  if (selectedDevice === "all") {
+    // Average ping dari device yang online saat ini
+    const onlineDevs = devices.filter(d => d.status === "online" && (d.ping_ms || 0) > 0);
+    avgPing = onlineDevs.length ? Math.round(onlineDevs.reduce((s, d) => s + d.ping_ms, 0) / onlineDevs.length) : 0;
+  } else {
+    // Live ping dari device terpilih
+    const dev = devices.find(d => d.id === selectedDevice);
+    avgPing = dev?.ping_ms || 0;
+  }
+  // Ambil nilai jitter terakhir dari history array
+  const latestJitterData = td.slice().reverse().find(d => d.jitter > 0);
+  if (latestJitterData) {
+    avgJitter = Number(latestJitterData.jitter).toFixed(1);
+  }
+  
   const sd = stats.selected_device;
   const noData = td.length === 0;
 
@@ -410,7 +423,7 @@ export default function DashboardPage() {
                 </div>
               </div>
             ) : (
-              <div className="h-64 sm:h-72 w-full pt-2">
+              <div className="h-40 sm:h-48 w-full pt-2">
                 <LatencyHeatmap data={td} dataKey={latencyView} />
               </div>
             )}
