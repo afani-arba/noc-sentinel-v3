@@ -858,11 +858,12 @@ async def traffic_history_out_range(
     device_id: str = "",
     range: str = "24h",         # 1h, 12h, 24h, week, month
     date: str = "",             # specific date YYYY-MM-DD
+    interface: str = "",        # specific interface
     user=Depends(get_current_user)
 ):
     """
-    Sama seperti traffic history utama, tapi HANYA menjumlahkan trafik dari
-    interfaces yang mengandung kata "OUT" (case-insensitive).
+    Sama seperti traffic history utama, tapi jika "all" HANYA menjumlahkan trafik dari
+    interfaces OUT. Jika interface spesifik dipilih, maka menampilkan trafik interface tersebut.
     """
     db = get_db()
     now_utc = datetime.now(timezone.utc)
@@ -901,28 +902,44 @@ async def traffic_history_out_range(
         base_match["device_id"] = device_id
 
     try:
-        pipeline = [
-            {"$match": base_match},
-            {"$addFields": {
-                "ts_ms": {"$toLong": {"$dateFromString": {"dateString": "$timestamp"}}},
-                "out_dl": {"$reduce": {
-                    "input": {"$objectToArray": {"$ifNull": ["$out_bandwidth", {}]}},
-                    "initialValue": 0,
-                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.download_bps", 0]}]}
+        if interface and interface != "all":
+            pipeline = [
+                {"$match": base_match},
+                {"$addFields": {
+                    "ts_ms": {"$toLong": {"$dateFromString": {"dateString": "$timestamp"}}},
+                    "out_dl": {"$ifNull": [f"$bandwidth.{interface}.download_bps", 0]},
+                    "out_ul": {"$ifNull": [f"$bandwidth.{interface}.upload_bps", 0]},
                 }},
-                "out_ul": {"$reduce": {
-                    "input": {"$objectToArray": {"$ifNull": ["$out_bandwidth", {}]}},
-                    "initialValue": 0,
-                    "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.upload_bps", 0]}]}
+                {"$group": {
+                    "_id": {"$subtract": ["$ts_ms", {"$mod": ["$ts_ms", interval_ms]}]},
+                    "download_bps": {"$avg": "$out_dl"},
+                    "upload_bps":   {"$avg": "$out_ul"},
                 }},
-            }},
-            {"$group": {
-                "_id": {"$subtract": ["$ts_ms", {"$mod": ["$ts_ms", interval_ms]}]},
-                "download_bps": {"$avg": "$out_dl"},
-                "upload_bps":   {"$avg": "$out_ul"},
-            }},
-            {"$sort": {"_id": 1}},
-        ]
+                {"$sort": {"_id": 1}},
+            ]
+        else:
+            pipeline = [
+                {"$match": base_match},
+                {"$addFields": {
+                    "ts_ms": {"$toLong": {"$dateFromString": {"dateString": "$timestamp"}}},
+                    "out_dl": {"$reduce": {
+                        "input": {"$objectToArray": {"$ifNull": ["$out_bandwidth", {}]}},
+                        "initialValue": 0,
+                        "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.download_bps", 0]}]}
+                    }},
+                    "out_ul": {"$reduce": {
+                        "input": {"$objectToArray": {"$ifNull": ["$out_bandwidth", {}]}},
+                        "initialValue": 0,
+                        "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.upload_bps", 0]}]}
+                    }},
+                }},
+                {"$group": {
+                    "_id": {"$subtract": ["$ts_ms", {"$mod": ["$ts_ms", interval_ms]}]},
+                    "download_bps": {"$avg": "$out_dl"},
+                    "upload_bps":   {"$avg": "$out_ul"},
+                }},
+                {"$sort": {"_id": 1}},
+            ]
 
         buckets = await db.traffic_history.aggregate(pipeline).to_list(5000)
 
