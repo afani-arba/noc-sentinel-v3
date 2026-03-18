@@ -88,22 +88,14 @@ async def wallboard_status(user=Depends(get_current_user)):
                         upload_bps   += iface_bw.get("upload_bps",   0)
                         parsed_ifaces.add(iface)
 
-            # ── PRIORITAS 3: Fallback — ambil SATU interface fisik dengan trafik tertinggi ────────
-            # (Mencegah jumlah trafik DL/UL menjadi duplikat sama persis akibat summing RX & TX di router)
+            # ── PRIORITAS 3: Fallback — sum semua interface fisik saja ────────
+            # (Digunakan jika MikroTik belum diberi comment ISP/WAN/INPUT)
             elif bw:
-                best_iface = None
-                best_traf = -1
                 for iface_name, iface_bw in bw.items():
                     if isinstance(iface_bw, dict) and is_physical(iface_name) and iface_name not in parsed_ifaces:
-                        tot = iface_bw.get("download_bps", 0) + iface_bw.get("upload_bps", 0)
-                        if tot > best_traf:
-                            best_traf = tot
-                            best_iface = iface_name
-                if best_iface:
-                    iface_bw = bw[best_iface]
-                    download_bps += iface_bw.get("download_bps", 0)
-                    upload_bps   += iface_bw.get("upload_bps",   0)
-                    parsed_ifaces.add(best_iface)
+                        download_bps += iface_bw.get("download_bps", 0)
+                        upload_bps   += iface_bw.get("upload_bps",   0)
+                        parsed_ifaces.add(iface_name)
 
 
         # Determine alert level

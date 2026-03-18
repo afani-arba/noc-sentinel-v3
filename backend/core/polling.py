@@ -161,9 +161,9 @@ async def poll_via_api(device: dict, fetch_system: bool) -> dict:
         status = "down" if disabled else ("up" if running else "down")
         is_virtual = itype in _VIRTUAL_IFACE_TYPES or name.lower().startswith(_VIRTUAL_IFACE_PREFIXES) or name.startswith("<")
         
-        # Deteksi ISP1 secara spesifik berdasarkan nama "isp1" atau comment mengandung "1"
+        # Deteksi ISP1 secara spesifik berdasarkan nama "isp1" atau comment adalah "1" (bukan in comment)
         is_isp1 = False
-        if "isp1" in name.lower() or "1" in comment:
+        if "isp1" in name.lower() or "isp1" in comment or comment == "1" or comment == "isp 1":
             is_isp1 = True
 
         if any(kw in comment for kw in _ISP_KEYWORDS) or is_isp1:
@@ -545,25 +545,10 @@ async def poll_single_device(device: dict) -> dict:
         eff_dl = sum(v.get("download_bps", 0) for v in isp_bw.values() if isinstance(v, dict))
         eff_ul = sum(v.get("upload_bps", 0) for v in isp_bw.values() if isinstance(v, dict))
     else:
-        best_iface = None
-        best_traf = -1
-        for k, v in bw.items():
-            if not isinstance(v, dict):
-                continue
-            kl = k.lower()
-            if any(kl.startswith(p) for p in ("bridge", "vlan", "lo", "wg", "tun", "tap", "veth", "ipip", "gre", "eoip", "pppoe", "l2tp", "pptp", "sstp", "ovpn", "dummy", "<")):
-                continue
-            tf = v.get("download_bps", 0) + v.get("upload_bps", 0)
-            if tf > best_traf:
-                best_traf = tf
-                best_iface = k
-                
-        if best_iface:
-            eff_dl = bw[best_iface].get("download_bps", 0)
-            eff_ul = bw[best_iface].get("upload_bps", 0)
-        else:
-            eff_dl = 0
-            eff_ul = 0
+        # Fallback: sum all physical interfaces
+        virt = ("bridge", "vlan", "lo", "wg", "tun", "tap", "veth", "ipip", "gre", "eoip", "pppoe", "l2tp", "pptp", "sstp", "ovpn", "dummy", "<")
+        eff_dl = sum(v.get("download_bps", 0) for k, v in bw.items() if isinstance(v, dict) and not any(k.lower().startswith(p) for p in virt))
+        eff_ul = sum(v.get("upload_bps", 0) for k, v in bw.items() if isinstance(v, dict) and not any(k.lower().startswith(p) for p in virt))
     
     # Hanya update grafik riwayat secara periodik untuk hemat Disk I/O.
     # Namun data snapshot selalu up to date di DB trafik snapshot.
