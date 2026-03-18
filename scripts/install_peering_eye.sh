@@ -90,11 +90,31 @@ fi
 echo "[5/7] Membuat environment file..."
 ENV_FILE="/etc/noc-sentinel/peering-eye.env"
 mkdir -p /etc/noc-sentinel
+
+# Auto-detect MongoDB from backend
+BACKEND_ENV="${INSTALL_DIR}/backend/.env"
+MONGO_URL_DEFAULT="mongodb://localhost:27017/noc_sentinel"
+MONGO_DB_DEFAULT="noc_sentinel"
+
+if [ -f "${BACKEND_ENV}" ]; then
+  DETECTED_MONGO=$(grep -m 1 -E "^MONGO_URI=|^MONGO_URL=" "${BACKEND_ENV}" | cut -d '=' -f 2-)
+  DETECTED_DB=$(grep -m 1 -E "^MONGO_DB_NAME=|^DB_NAME=" "${BACKEND_ENV}" | cut -d '=' -f 2-)
+  
+  if [ -n "${DETECTED_MONGO}" ]; then
+    MONGO_URL_DEFAULT="${DETECTED_MONGO}"
+    echo "      [INFO] Auto-detected MongoDB URL dari backend/.env"
+  fi
+  if [ -n "${DETECTED_DB}" ]; then
+    MONGO_DB_DEFAULT="${DETECTED_DB}"
+    echo "      [INFO] Auto-detected MongoDB Name dari backend/.env"
+  fi
+fi
+
 if [ ! -f "${ENV_FILE}" ]; then
-  cat > "${ENV_FILE}" << 'ENVEOF'
+  cat > "${ENV_FILE}" << ENVEOF
 # Sentinel Peering-Eye Environment Variables
-MONGO_URL=mongodb://localhost:27017
-MONGO_DB=noc_sentinel
+MONGO_URL=${MONGO_URL_DEFAULT}
+MONGO_DB=${MONGO_DB_DEFAULT}
 DNS_SYSLOG_PORT=5514
 NETFLOW_PORT=2055
 FLUSH_INTERVAL=60
@@ -102,7 +122,6 @@ LOCAL_AS=65000
 BGP_SYNC_INTERVAL=300
 ENVEOF
   echo "      Env file created at ${ENV_FILE}"
-  echo "      EDIT FILE INI sebelum menjalankan service!"
 else
   echo "      Env file sudah ada: ${ENV_FILE} (tidak ditimpa)"
 fi

@@ -28,7 +28,7 @@ systemctl restart sentinel-bgp  2>/dev/null && echo "  sentinel-bgp   ✓" || ec
 
 # 3. Restart main NOC backend
 echo "[3/3] Restart noc-sentinel backend..."
-systemctl restart noc-sentinel  2>/dev/null && echo "  noc-sentinel   ✓" || echo "  noc-sentinel  - sudah dijalankan terpisah"
+systemctl restart nocsentinel  2>/dev/null && echo "  nocsentinel    ✓" || echo "  nocsentinel   - tidak aktif / manual start"
 
 echo ""
 echo "Status terkini:"
