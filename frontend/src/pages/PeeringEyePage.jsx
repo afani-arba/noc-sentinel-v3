@@ -153,7 +153,7 @@ export default function PeeringEyePage() {
 
   // ── Build area chart series keys ─────────────────────────────────────────────
   const platformsInTimeline = timeline.length > 0
-    ? Object.keys(timeline[0]).filter(k => k !== "time").slice(0, 8)
+    ? Object.keys(timeline[0]).filter(k => k !== "time" && k !== "Others").slice(0, 8)
     : [];
 
   // ── Flatten timeline for recharts ────────────────────────────────────────────
@@ -294,7 +294,7 @@ export default function PeeringEyePage() {
             <ResponsiveContainer width="100%" height={240}>
               <PieChart>
                 <Pie
-                  data={platforms.slice(0, 10)}
+                  data={platforms.filter(p => p.platform !== "Others").slice(0, 10)}
                   dataKey="pct_hits"
                   nameKey="platform"
                   cx="50%" cy="50%"
@@ -303,7 +303,7 @@ export default function PeeringEyePage() {
                   labelLine={false}
                   label={PieLabel}
                 >
-                  {platforms.slice(0, 10).map((p, i) => (
+                  {platforms.filter(p => p.platform !== "Others").slice(0, 10).map((p, i) => (
                     <Cell key={i} fill={p.color} />
                   ))}
                 </Pie>
