@@ -233,11 +233,13 @@ def parse_netflow_v5(data: bytes, sender_ip: str) -> list[dict]:
             packets  = fields[7]
             octets   = fields[8]   # bytes
 
-            # Check if we know what platform this dst_ip is
+            # Check if we know what platform this dst_ip or src_ip belongs to
             with cache_lock:
                 platform = ip_platform_cache.get(dst_ip)
+                if not platform:
+                    platform = ip_platform_cache.get(src_ip)
 
-            if platform is None:
+            if not platform:
                 # Try reverse lookup (optional; skip to keep it fast)
                 platform = "Others"
 
