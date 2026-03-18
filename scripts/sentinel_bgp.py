@@ -254,10 +254,12 @@ def get_platform_domains(db) -> dict[str, set[str]]:
     for stat in stats:
         platform = stat.get("platform")
         if platform in PLATFORM_COMMUNITIES:
-            for td in stat.get("top_domains", []):
-                domain = td.get("domain")
-                if domain:
-                    domains_by_platform[platform].add(domain)
+            # top_domains is a dict: {"youtube.com": 50, "googlevideo.com": 100}
+            top_domains = stat.get("top_domains", {})
+            if isinstance(top_domains, dict):
+                for domain in top_domains.keys():
+                    if domain:
+                        domains_by_platform[platform].add(domain)
     return dict(domains_by_platform)
 
 
