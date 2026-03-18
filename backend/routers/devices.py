@@ -1476,28 +1476,45 @@ async def bandwidth_live(
     interfaces.sort(key=lambda x: (not x["is_physical"], not x.get("running", False), x["name"]))
 
     # â”€â”€ Total bandwidth â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    total_dl = sum(i["download_bps"] for i in interfaces)
-    total_ul = sum(i["upload_bps"]   for i in interfaces)
+    isp_bw = latest.get("isp_bandwidth") if latest else None
+    
+    if isp_bw and isinstance(isp_bw, dict) and len(isp_bw) > 0:
+        total_dl = sum(v.get("download_bps", 0) for v in isp_bw.values() if isinstance(v, dict))
+        total_ul = sum(v.get("upload_bps",   0) for v in isp_bw.values() if isinstance(v, dict))
+    else:
+        total_dl = sum(i["download_bps"] for i in interfaces)
+        total_ul = sum(i["upload_bps"]   for i in interfaces)
 
     # â”€â”€ Format history untuk grafik (timestamp + total dalam Mbps) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     trend = []
     for rec in history_records:
         ts = rec.get("timestamp", "")
-        bw_rec = rec.get("bandwidth", {})
-        if bw_rec and isinstance(bw_rec, dict):
-            r_dl = sum(v.get("download_bps", 0) for v in bw_rec.values() if isinstance(v, dict))
-            r_ul = sum(v.get("upload_bps",   0) for v in bw_rec.values() if isinstance(v, dict))
+        rec_isp_bw = rec.get("isp_bandwidth", {})
+        
+        if rec_isp_bw and isinstance(rec_isp_bw, dict) and len(rec_isp_bw) > 0:
+            r_dl = sum(v.get("download_bps", 0) for v in rec_isp_bw.values() if isinstance(v, dict))
+            r_ul = sum(v.get("upload_bps",   0) for v in rec_isp_bw.values() if isinstance(v, dict))
             trend.append({
                 "timestamp":     ts,
-                "download_mbps": round(r_dl / 1_000_000, 3),
-                "upload_mbps":   round(r_ul / 1_000_000, 3),
+                "download_mbps": round(r_dl / 1_000_000, 3) if r_dl else 0,
+                "upload_mbps":   round(r_ul / 1_000_000, 3) if r_ul else 0,
             })
         else:
-            trend.append({
-                "timestamp":     ts,
-                "download_mbps": rec.get("download_mbps", 0),
-                "upload_mbps":   rec.get("upload_mbps",   0),
-            })
+            bw_rec = rec.get("bandwidth", {})
+            if bw_rec and isinstance(bw_rec, dict):
+                r_dl = sum(v.get("download_bps", 0) for v in bw_rec.values() if isinstance(v, dict))
+                r_ul = sum(v.get("upload_bps",   0) for v in bw_rec.values() if isinstance(v, dict))
+                trend.append({
+                    "timestamp":     ts,
+                    "download_mbps": round(r_dl / 1_000_000, 3),
+                    "upload_mbps":   round(r_ul / 1_000_000, 3),
+                })
+            else:
+                trend.append({
+                    "timestamp":     ts,
+                    "download_mbps": rec.get("download_mbps", 0),
+                    "upload_mbps":   rec.get("upload_mbps",   0),
+                })
 
     return {
         "device_id":          device_id,
