@@ -131,10 +131,12 @@ def generate_gobgp_config(peers: list[dict]) -> str:
         "neighbors": []
     }
 
+    seen_ips = set()
     for peer in peers:
         neighbor_ip = peer.get("ip_address", "").split(":")[0].strip()
-        if not neighbor_ip:
+        if not neighbor_ip or neighbor_ip in seen_ips:
             continue
+        seen_ips.add(neighbor_ip)
         peer_as_raw = peer.get("bgp_peer_as", LOCAL_AS)
         try:
             peer_as = int(str(peer_as_raw).strip())
@@ -292,7 +294,10 @@ def sync_platform_ips_to_bgp(platform: str, new_ips: set[str]):
 
     old_ips = CURRENT_INJECTED.get(platform, set())
     
-    bgp_nexthop = os.getenv("BGP_NEXTHOP", "10.175.175.7")
+    bgp_nexthop = os.getenv("BGP_NEXTHOP")
+    if not bgp_nexthop:
+        bgp_nexthop = get_local_ip()
+        
     added = 0
     for ip in new_ips - old_ips:
         ok, _ = run_cmd([GOBGP_BIN, "global", "rib", "add", f"{ip}/32", "nexthop", bgp_nexthop, "community", community])
