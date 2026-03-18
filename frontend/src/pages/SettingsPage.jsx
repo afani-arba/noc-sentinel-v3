@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import api from "@/lib/api";
-import { Shield, Wifi, WifiOff, Save, Info, RefreshCw } from "lucide-react";
+import { Shield, Wifi, WifiOff, Save, Info, RefreshCw, Palette } from "lucide-react";
+import { useTheme } from "@/context/ThemeContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -179,6 +180,53 @@ function WireGuardSection() {
   );
 }
 
+// ─── Theme Section ────────────────────────────────────────────────────────
+function ThemeSection() {
+  const { theme, setTheme } = useTheme();
+
+  return (
+    <div className="bg-card border border-border rounded-sm p-4 sm:p-6 space-y-4" data-testid="theme-section">
+      <div className="flex items-center gap-3">
+        <div className="w-8 h-8 rounded-sm bg-blue-500/10 flex items-center justify-center">
+          <Palette className="w-4 h-4 text-blue-400" />
+        </div>
+        <div>
+          <h2 className="text-base sm:text-lg font-semibold font-['Rajdhani']">Tampilan (Global Theme)</h2>
+          <p className="text-[10px] sm:text-xs text-muted-foreground">Pilih tema antarmuka NOC Sentinel Anda</p>
+        </div>
+      </div>
+
+      <div className="flex flex-col sm:flex-row gap-4 pt-2">
+        <button
+          onClick={() => setTheme('classic')}
+          className={`flex-1 p-3 rounded-sm border text-left transition-all ${
+            theme === 'classic' ? 'border-primary bg-primary/10' : 'border-border bg-secondary/30 hover:border-primary/50'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold">Tema Classic</h3>
+            {theme === 'classic' && <div className="w-2 h-2 rounded-full bg-primary" />}
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">Tampilan clean dark dan profesional (Bawaan).</p>
+        </button>
+
+        <button
+          onClick={() => setTheme('neon')}
+          className={`flex-1 p-3 rounded-sm border text-left transition-all ${
+            theme === 'neon' ? 'border-cyan-500 bg-cyan-500/10' : 'border-border bg-secondary/30 hover:border-cyan-500/50'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-cyan-400">Tema Neon v4</h3>
+            {theme === 'neon' && <div className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]" />}
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">Dark mode dengan warna neon cyber futuristik.</p>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ───────────────────────────────────────────────────────────────
 export default function SettingsPage() {
   return (
@@ -187,6 +235,9 @@ export default function SettingsPage() {
         <h1 className="text-xl sm:text-2xl md:text-3xl font-bold font-['Rajdhani'] tracking-tight">Pengaturan</h1>
         <p className="text-xs sm:text-sm text-muted-foreground">Pengaturan sistem NOC-Sentinel</p>
       </div>
+
+      {/* Theme Section */}
+      <ThemeSection />
 
       {/* WireGuard Section */}
       <WireGuardSection />

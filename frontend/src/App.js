@@ -1,5 +1,6 @@
 import { useState, useEffect, createContext, useContext, useCallback } from "react";
 import "@/App.css";
+import { ThemeProvider } from "@/context/ThemeContext";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import api from "@/lib/api";
 import LoginPage from "@/pages/LoginPage";
@@ -96,50 +97,52 @@ function ProtectedRoute({ children, allowedRoles }) {
 
 function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <Toaster
-          theme="dark"
-          toastOptions={{
-            classNames: {
-              toast: "bg-card border-border text-foreground",
-              description: "text-muted-foreground",
-            },
-          }}
-        />
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-            <Route index element={<DashboardPage />} />
-            <Route path="pppoe" element={<PPPoEUsersPage />} />
-            <Route path="hotspot" element={<HotspotUsersPage />} />
-            <Route path="reports" element={<ReportsPage />} />
-            <Route path="devices" element={<DevicesPage />} />
-            <Route path="devices/:id" element={<DeviceDetailPage />} />
-            <Route path="settings" element={<ProtectedRoute allowedRoles={["administrator"]}><SettingsPage /></ProtectedRoute>} />
-            <Route path="notifications" element={<ProtectedRoute allowedRoles={["administrator"]}><NotificationsPage /></ProtectedRoute>} />
-            <Route path="backups" element={<ProtectedRoute allowedRoles={["administrator"]}><BackupsPage /></ProtectedRoute>} />
-            <Route path="syslog" element={<ProtectedRoute allowedRoles={["administrator"]}><SyslogPage /></ProtectedRoute>} />
-            <Route path="admin" element={<ProtectedRoute allowedRoles={["administrator"]}><AdminPage /></ProtectedRoute>} />
-            <Route path="bgp" element={<BGPPage />} />
-            <Route path="routing" element={<RoutingPage />} />
-            <Route path="genieacs" element={<GenieACSPage />} />
-            <Route path="billing" element={<ProtectedRoute allowedRoles={["administrator"]}><BillingPage /></ProtectedRoute>} />
-            {/* v3 New Features */}
-            <Route path="wallboard" element={<WallDisplayPage />} />
-            <Route path="sla" element={<SLAPage />} />
-            <Route path="incidents" element={<IncidentsPage />} />
-            <Route path="audit" element={<ProtectedRoute allowedRoles={["administrator"]}><AuditLogPage /></ProtectedRoute>} />
-            {/* v4 — New Features */}
-            <Route path="bandwidth" element={<BandwidthPage />} />
-            <Route path="topology" element={<TopologyPage />} />
-            <Route path="update" element={<ProtectedRoute allowedRoles={["administrator"]}><UpdatePage /></ProtectedRoute>} />
-            <Route path="scheduler" element={<ProtectedRoute allowedRoles={["administrator"]}><SchedulerPage /></ProtectedRoute>} />
-          </Route>
-          <Route path="*" element={<Navigate to="/" />} />
-        </Routes>
-      </AuthProvider>
-    </BrowserRouter>
+    <ThemeProvider>
+      <BrowserRouter>
+        <AuthProvider>
+          <Toaster
+            theme="dark"
+            toastOptions={{
+              classNames: {
+                toast: "bg-card border-border text-foreground",
+                description: "text-muted-foreground",
+              },
+            }}
+          />
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+              <Route index element={<DashboardPage />} />
+              <Route path="pppoe" element={<PPPoEUsersPage />} />
+              <Route path="hotspot" element={<HotspotUsersPage />} />
+              <Route path="reports" element={<ReportsPage />} />
+              <Route path="devices" element={<DevicesPage />} />
+              <Route path="devices/:id" element={<DeviceDetailPage />} />
+              <Route path="settings" element={<ProtectedRoute allowedRoles={["administrator"]}><SettingsPage /></ProtectedRoute>} />
+              <Route path="notifications" element={<ProtectedRoute allowedRoles={["administrator"]}><NotificationsPage /></ProtectedRoute>} />
+              <Route path="backups" element={<ProtectedRoute allowedRoles={["administrator"]}><BackupsPage /></ProtectedRoute>} />
+              <Route path="syslog" element={<ProtectedRoute allowedRoles={["administrator"]}><SyslogPage /></ProtectedRoute>} />
+              <Route path="admin" element={<ProtectedRoute allowedRoles={["administrator"]}><AdminPage /></ProtectedRoute>} />
+              <Route path="bgp" element={<BGPPage />} />
+              <Route path="routing" element={<RoutingPage />} />
+              <Route path="genieacs" element={<GenieACSPage />} />
+              <Route path="billing" element={<ProtectedRoute allowedRoles={["administrator"]}><BillingPage /></ProtectedRoute>} />
+              {/* v3 New Features */}
+              <Route path="wallboard" element={<WallDisplayPage />} />
+              <Route path="sla" element={<SLAPage />} />
+              <Route path="incidents" element={<IncidentsPage />} />
+              <Route path="audit" element={<ProtectedRoute allowedRoles={["administrator"]}><AuditLogPage /></ProtectedRoute>} />
+              {/* v4 — New Features */}
+              <Route path="bandwidth" element={<BandwidthPage />} />
+              <Route path="topology" element={<TopologyPage />} />
+              <Route path="update" element={<ProtectedRoute allowedRoles={["administrator"]}><UpdatePage /></ProtectedRoute>} />
+              <Route path="scheduler" element={<ProtectedRoute allowedRoles={["administrator"]}><SchedulerPage /></ProtectedRoute>} />
+            </Route>
+            <Route path="*" element={<Navigate to="/" />} />
+          </Routes>
+        </AuthProvider>
+      </BrowserRouter>
+    </ThemeProvider>
   );
 }
 

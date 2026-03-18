@@ -36,6 +36,38 @@
     --error: 0 84% 60%;
     --info: 217 91% 60%;
   }
+
+  .theme-neon {
+    --background: 240 10% 2%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 4%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 4%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 180 100% 50%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 270 50% 15%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 10% 8%;
+    --muted-foreground: 240 10% 65%;
+    --accent: 280 100% 60%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 340 100% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 30% 15%;
+    --input: 240 30% 15%;
+    --ring: 180 100% 50%;
+    --radius: 0.25rem;
+    --chart-1: 180 100% 50%;
+    --chart-2: 280 100% 60%;
+    --chart-3: 150 100% 50%;
+    --chart-4: 330 100% 60%;
+    --chart-5: 45 100% 50%;
+    --success: 150 100% 50%;
+    --warning: 45 100% 50%;
+    --error: 340 100% 60%;
+    --info: 180 100% 50%;
+  }
 }
 
 @layer base {
