@@ -367,8 +367,14 @@ def ensure_gobgpd_running():
     minimal_config = json.dumps({
         "global": {
             "config": {
-                "as": LOCAL_AS,
+                "as": int(LOCAL_AS),
                 "router-id": router_id
+            },
+            "apply-policy": {
+                "config": {
+                    "default-import-policy": "accept-route",
+                    "default-export-policy": "accept-route"
+                }
             }
         }
     })
