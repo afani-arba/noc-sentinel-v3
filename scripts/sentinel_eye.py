@@ -344,6 +344,18 @@ def refresh_device_cache(db):
         logger.warning(f"Device cache refresh failed: {e}")
 
 
+def refresh_ip_cache(db):
+    """Refresh dst_ip -> platform mapping from the DB populated by sentinel_bgp."""
+    global ip_platform_cache
+    try:
+        docs = list(db.peering_eye_ips.find({}, {"_id": 0, "ip": 1, "platform": 1}))
+        new_cache = {d["ip"]: d["platform"] for d in docs if "ip" in d}
+        with cache_lock:
+            ip_platform_cache = new_cache
+        logger.debug(f"IP platform cache refreshed: {len(new_cache)} IPs")
+    except Exception as e:
+        logger.warning(f"IP platform cache refresh failed: {e}")
+
 def flush_to_mongo():
     """Periodic flush: combine dns_acc + flow_acc → MongoDB."""
     db = get_db()
@@ -353,6 +365,7 @@ def flush_to_mongo():
         time.sleep(FLUSH_INTERVAL)
         try:
             refresh_device_cache(db)
+            refresh_ip_cache(db)
 
             with acc_lock:
                 dns_snapshot  = {k: dict(v) for k, v in dns_acc.items()}

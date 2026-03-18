@@ -297,7 +297,9 @@ def resolve_all_domains(domains: set[str]) -> set[str]:
     return ips
 
 
-def sync_platform_ips_to_bgp(platform: str, new_ips: set[str]):
+from pymongo import MongoClient, UpdateOne
+
+def sync_platform_ips_to_bgp(db, platform: str, new_ips: set[str]):
     community = PLATFORM_COMMUNITIES.get(platform)
     if not community:
         return
@@ -321,6 +323,15 @@ def sync_platform_ips_to_bgp(platform: str, new_ips: set[str]):
     CURRENT_INJECTED[platform] = set(new_ips)
     if added > 0 or deleted > 0:
         logger.info(f"Platform {platform}: Injected {added} new IPs, removed {deleted} stale IPs")
+        
+        # Save to MongoDB for sentinel_eye.py NetFlow classifier
+        try:
+            ops = [UpdateOne({"ip": ip}, {"$set": {"platform": platform}}, upsert=True) for ip in new_ips]
+            if ops:
+                db.peering_eye_ips.bulk_write(ops)
+            db.peering_eye_ips.delete_many({"platform": platform, "ip": {"$nin": list(new_ips)}})
+        except Exception as e:
+            logger.error(f"Failed to persist IPs to MongoDB: {e}")
 
 
 def bgp_monitor_loop():
@@ -356,7 +367,7 @@ def bgp_monitor_loop():
                 if not domains: continue
                 ips = resolve_all_domains(domains)
                 if ips:
-                    sync_platform_ips_to_bgp(platform, ips)
+                    sync_platform_ips_to_bgp(db, platform, ips)
 
         except Exception as e:
             logger.error(f"BGP monitor loop error: {e}")
