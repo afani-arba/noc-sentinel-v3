@@ -227,7 +227,7 @@ def parse_netflow_v5(data: bytes, sender_ip: str) -> list[dict]:
             if offset + FLOW_SIZE > len(data):
                 break
             flow = data[offset:offset + FLOW_SIZE]
-            fields = struct.unpack("!4s4s4sHHIIIIHHxBBBHHBB", flow)
+            fields = struct.unpack("!4s4s4sHHIIIIHHxBBBHHBBxx", flow)
             src_ip   = socket.inet_ntoa(fields[0])
             dst_ip   = socket.inet_ntoa(fields[1])
             packets  = fields[7]
