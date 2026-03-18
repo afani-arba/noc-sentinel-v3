@@ -143,7 +143,7 @@ def generate_gobgp_config(peers: list[dict]) -> str:
         except ValueError:
             peer_as = int(LOCAL_AS)
             
-        config["neighbors"].append({
+        neighbor_conf = {
             "config": {
                 "neighbor-address": neighbor_ip,
                 "peer-as": peer_as,
@@ -168,7 +168,17 @@ def generate_gobgp_config(peers: list[dict]) -> str:
                     }
                 }
             ]
-        })
+        }
+        
+        if peer_as != int(LOCAL_AS):
+            neighbor_conf["ebgp-multihop"] = {
+                "config": {
+                    "enabled": True,
+                    "multihop-ttl": 255
+                }
+            }
+            
+        config["neighbors"].append(neighbor_conf)
 
     # Serialize to JSON (GoBGP also accepts JSON config)
     return json.dumps(config, indent=2)
