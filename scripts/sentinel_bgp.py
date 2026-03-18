@@ -148,6 +148,12 @@ def generate_gobgp_config(peers: list[dict]) -> str:
                     "keepalive-interval": 30,
                 }
             },
+            "apply-policy": {
+                "config": {
+                    "default-import-policy": "accept-route",
+                    "default-export-policy": "accept-route"
+                }
+            },
             "afi-safis": [
                 {
                     "config": {
@@ -220,24 +226,13 @@ def sync_peers_to_gobgp(db):
     except PermissionError:
         logger.warning("Cannot write /etc/gobgp/gobgpd.conf (need root). Using API instead.")
 
-    # Add peers via gobgp CLI (runtime, no restart needed)
-    for device in devices:
-        ip = device.get("ip_address", "").split(":")[0].strip()
-        if not ip:
-            continue
-        peer_as = device.get("bgp_peer_as", LOCAL_AS)
-        ok, out = run_cmd([
-            GOBGP_BIN, "neighbor", "add", ip,
-            "as", str(peer_as),
-            "--address-family", "ipv4"
-        ])
-        if ok:
-            logger.info(f"BGP peer {ip} (AS{peer_as}) added/updated")
-        else:
-            if "already exists" in out.lower():
-                pass  # Normal
-            else:
-                logger.warning(f"Failed to add BGP peer {ip}: {out}")
+    # Reload GoBGP config (runtime, no restart needed)
+    ok, pid = run_cmd(["pgrep", "-x", "gobgpd"])
+    if ok and pid:
+        run_cmd(["kill", "-HUP", pid])
+        logger.info(f"Sent SIGHUP to gobgpd (PID {pid}) to reload {len(devices)} peers config")
+    else:
+        logger.warning("Could not find gobgpd process to reload config")
 
 
 def persist_bgp_status(db, status: list[dict]):
