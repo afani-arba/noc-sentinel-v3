@@ -48,7 +48,7 @@ GOBGPD_BIN     = os.getenv("GOBGPD_BIN", "/usr/local/bin/gobgpd")
 LOCAL_AS       = int(os.getenv("LOCAL_AS", "65000"))
 LOCAL_ROUTER_ID = os.getenv("LOCAL_ROUTER_ID", "")
 SYNC_INTERVAL  = int(os.getenv("BGP_SYNC_INTERVAL", "300"))  # 5 menit
-GOBGP_CONFIG_PATH = "/etc/gobgp/gobgpd.conf"
+GOBGP_CONFIG_PATH = "/etc/gobgp/gobgpd.json"
 
 
 def get_db():
