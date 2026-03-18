@@ -541,8 +541,29 @@ async def poll_single_device(device: dict) -> dict:
         if isinstance(d, dict):
             isp_bw[iname] = d
 
-    eff_dl = sum(v.get("download_bps", 0) for v in (isp_bw.values() if isp_bw else bw.values()) if isinstance(v, dict))
-    eff_ul = sum(v.get("upload_bps", 0) for v in (isp_bw.values() if isp_bw else bw.values()) if isinstance(v, dict))
+    if isp_bw:
+        eff_dl = sum(v.get("download_bps", 0) for v in isp_bw.values() if isinstance(v, dict))
+        eff_ul = sum(v.get("upload_bps", 0) for v in isp_bw.values() if isinstance(v, dict))
+    else:
+        best_iface = None
+        best_traf = -1
+        for k, v in bw.items():
+            if not isinstance(v, dict):
+                continue
+            kl = k.lower()
+            if any(kl.startswith(p) for p in ("bridge", "vlan", "lo", "wg", "tun", "tap", "veth", "ipip", "gre", "eoip", "pppoe", "l2tp", "pptp", "sstp", "ovpn", "dummy", "<")):
+                continue
+            tf = v.get("download_bps", 0) + v.get("upload_bps", 0)
+            if tf > best_traf:
+                best_traf = tf
+                best_iface = k
+                
+        if best_iface:
+            eff_dl = bw[best_iface].get("download_bps", 0)
+            eff_ul = bw[best_iface].get("upload_bps", 0)
+        else:
+            eff_dl = 0
+            eff_ul = 0
     
     # Hanya update grafik riwayat secara periodik untuk hemat Disk I/O.
     # Namun data snapshot selalu up to date di DB trafik snapshot.

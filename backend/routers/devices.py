@@ -411,8 +411,20 @@ async def dashboard_stats(device_id: str = "", interface: str = "", user=Depends
                     "l2tp", "eoip", "gre", "wireguard", "wg", "veth", "docker",
                     "ip6tnl", "sit", "tun", "tap", "dummy",
                 )
-                dl = sum(v.get("download_bps", 0) for k, v in bw.items() if isinstance(v, dict) and not any(k.lower().startswith(p) for p in VIRTUAL_PREFIXES))
-                ul = sum(v.get("upload_bps",   0) for k, v in bw.items() if isinstance(v, dict) and not any(k.lower().startswith(p) for p in VIRTUAL_PREFIXES))
+                best_iface = None
+                best_traf = -1
+                for k, v in bw.items():
+                    if isinstance(v, dict) and not any(k.lower().startswith(p) for p in VIRTUAL_PREFIXES):
+                        tot = v.get("download_bps", 0) + v.get("upload_bps", 0)
+                        if tot > best_traf:
+                            best_traf = tot
+                            best_iface = k
+                if best_iface:
+                    dl = bw[best_iface].get("download_bps", 0)
+                    ul = bw[best_iface].get("upload_bps", 0)
+                else:
+                    dl = 0
+                    ul = 0
             else:
                 dl = (h.get("download_mbps") or 0) * 1_000_000
                 ul = (h.get("upload_mbps")   or 0) * 1_000_000
@@ -488,12 +500,19 @@ async def dashboard_stats(device_id: str = "", interface: str = "", user=Depends
                         total_dl_bps += iface_bw.get("download_bps", 0)
                         total_ul_bps += iface_bw.get("upload_bps",   0)
             elif bw:
-                # Prioritas 3: sum semua interface fisik (hindari virtual)
+                # Prioritas 3: ambil interface fisik dengan trafik tertinggi agar tak terduplikasi
+                best_iface = None
+                best_traf = -1
                 for iface_name, iface_bw in bw.items():
                     n = iface_name.lower()
                     if isinstance(iface_bw, dict) and not any(n.startswith(p) for p in VIRTUAL_PREFIXES):
-                        total_dl_bps += iface_bw.get("download_bps", 0)
-                        total_ul_bps += iface_bw.get("upload_bps",   0)
+                        tot = iface_bw.get("download_bps", 0) + iface_bw.get("upload_bps", 0)
+                        if tot > best_traf:
+                            best_traf = tot
+                            best_iface = iface_name
+                if best_iface:
+                    total_dl_bps += bw[best_iface].get("download_bps", 0)
+                    total_ul_bps += bw[best_iface].get("upload_bps",   0)
 
         live_bw = {
             "download": round(total_dl_bps / 1_000_000, 2),
@@ -741,17 +760,15 @@ async def traffic_history_range(
                         "initialValue": 0,
                         "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.upload_bps", 0]}]},
                     }},
-                    # Fallback: sum semua interface di bandwidth (untuk device tanpa ISP comment)
-                    "total_dl": {"$reduce": {
+                    # Fallback: ambil max flow diantara semua interface di bandwidth (mencegah duplikasi rx+tx)
+                    "total_dl": {"$max": {"$map": {
                         "input": {"$objectToArray": {"$ifNull": ["$bandwidth", {}]}},
-                        "initialValue": 0,
-                        "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.download_bps", 0]}]},
-                    }},
-                    "total_ul": {"$reduce": {
+                        "in": {"$ifNull": ["$$this.v.download_bps", 0]}
+                    }}},
+                    "total_ul": {"$max": {"$map": {
                         "input": {"$objectToArray": {"$ifNull": ["$bandwidth", {}]}},
-                        "initialValue": 0,
-                        "in": {"$add": ["$$value", {"$ifNull": ["$$this.v.upload_bps", 0]}]},
-                    }},
+                        "in": {"$ifNull": ["$$this.v.upload_bps", 0]}
+                    }}},
                     # Jumlah ISP interface yang dideteksi (>0 = ada isp_bandwidth valid)
                     "isp_count": {"$size": {"$objectToArray": {"$ifNull": ["$isp_bandwidth", {}]}}},
                 }},
