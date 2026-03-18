@@ -95,8 +95,7 @@ def generate_gobgp_config(peers: list[dict]) -> str:
         "global": {
             "config": {
                 "as": LOCAL_AS,
-                "router-id": router_id,
-                "listen-port": 179,
+                "router-id": router_id
             }
         },
         "neighbors": []
@@ -273,8 +272,7 @@ def ensure_gobgpd_running():
         "global": {
             "config": {
                 "as": LOCAL_AS,
-                "router-id": router_id,
-                "listen-port": 179,
+                "router-id": router_id
             }
         }
     })
