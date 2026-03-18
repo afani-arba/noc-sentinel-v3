@@ -118,8 +118,14 @@ def generate_gobgp_config(peers: list[dict]) -> str:
     config = {
         "global": {
             "config": {
-                "as": LOCAL_AS,
+                "as": int(LOCAL_AS),
                 "router-id": router_id
+            },
+            "apply-policy": {
+                "config": {
+                    "default-import-policy": "accept-route",
+                    "default-export-policy": "accept-route"
+                }
             }
         },
         "neighbors": []
