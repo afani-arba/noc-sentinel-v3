@@ -352,58 +352,18 @@ export default function BandwidthPage() {
               <ResponsiveContainer width="100%" height={220}>
                 <AreaChart data={history} margin={{ left: -10, right: 10, top: 10, bottom: 0 }}>
                   <defs>
-                    <linearGradient id="dlGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.5} />
-                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0.05} />
-                    </linearGradient>
-                    <linearGradient id="ulGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#f97316" stopOpacity={0.5} />
-                      <stop offset="95%" stopColor="#f97316" stopOpacity={0.05} />
-                    </linearGradient>
+                    <linearGradient id="gDl" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#ef4444" stopOpacity={0.6} /><stop offset="95%" stopColor="#ef4444" stopOpacity={0.1} /></linearGradient>
+                    <linearGradient id="gUl" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#f97316" stopOpacity={0.6} /><stop offset="95%" stopColor="#f97316" stopOpacity={0.1} /></linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-                  <XAxis
-                    dataKey="time"
-                    tick={{ fontSize: 9, fill: "#64748b" }}
-                    interval={Math.max(1, Math.floor(history.length / 8))}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 9, fill: "#64748b" }}
-                    tickFormatter={v => fmtMbps(v)}
-                    tickLine={false}
-                    axisLine={false}
-                    width={70}
-                  />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Legend 
-                     verticalAlign="top" 
-                     height={36} 
-                     wrapperStyle={{ fontSize: "11px", color: "#94a3b8" }}
-                  />
-                  <Area
-                    type="linear"
-                    dataKey="download"
-                    name="Download"
-                    stroke="#ef4444"
-                    strokeWidth={1.5}
-                    fill="url(#dlGrad)"
-                    dot={false}
-                    activeDot={{ r: 4 }}
-                    isAnimationActive={false}
-                  />
-                  <Area
-                    type="linear"
-                    dataKey="upload"
-                    name="Upload"
-                    stroke="#f97316"
-                    strokeWidth={1.5}
-                    fill="url(#ulGrad)"
-                    dot={false}
-                    activeDot={{ r: 4 }}
-                    isAnimationActive={false}
-                  />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                  <XAxis dataKey="time" tick={{ fill: "#a1a1aa", fontSize: 10 }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fill: "#a1a1aa", fontSize: 10 }} tickLine={false} axisLine={false} width={80} tickFormatter={(val) => {
+                      if (val >= 1000) return `${(val/1000).toFixed(1)} Gbps`;
+                      return `${val} Mbps`;
+                  }} />
+                  <Tooltip contentStyle={{ backgroundColor: "#121214", borderColor: "#27272a", borderRadius: "4px", color: "#fafafa", fontSize: "12px", fontFamily: "'JetBrains Mono', monospace" }} formatter={(v, n) => [`${Number(v).toFixed(2)} Mbps`, n === "Download" || n === "download" ? "Download" : "Upload"]} />
+                  <Area type="linear" dataKey="download" stroke="#ef4444" fill="url(#gDl)" strokeWidth={1.5} name="Download" activeDot={{ r: 4 }} isAnimationActive={false} />
+                  <Area type="linear" dataKey="upload" stroke="#f97316" fill="url(#gUl)" strokeWidth={1.5} name="Upload" activeDot={{ r: 4 }} isAnimationActive={false} />
                 </AreaChart>
               </ResponsiveContainer>
             )}
