@@ -42,6 +42,8 @@
     "react-resizable-panels": "^2.1.7",
     "react-router-dom": "^6.28.2",
     "recharts": "^2.15.1",
+    "highcharts": "^11.4.0",
+    "highcharts-react-official": "^3.2.1",
     "sonner": "^1.7.4",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",

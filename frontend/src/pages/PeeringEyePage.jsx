@@ -9,6 +9,13 @@ import {
   TrendingUp, HardDrive, Radio, Server, AlertCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import Highcharts from 'highcharts';
+import HighchartsReact from 'highcharts-react-official';
+import highcharts3d from 'highcharts/highcharts-3d';
+
+if (typeof Highcharts === 'object') {
+  highcharts3d(Highcharts);
+}
 
 // ── Format helpers ─────────────────────────────────────────────────────────────
 function fmtBytes(b) {
@@ -35,15 +42,7 @@ const RANGES = [
   { value: "30d", label: "30 Hari" },
 ];
 
-// ── Custom Pie Label ───────────────────────────────────────────────────────────
-const PieLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, index, name, fill, x, y, textAnchor }) => {
-  if (!percent || percent < 0.02) return null;
-  return (
-    <text x={x} y={y} fill={fill} textAnchor={textAnchor} dominantBaseline="central" fontSize={12} fontWeight={800} style={{ filter: `drop-shadow(0px 0px 6px ${fill})` }} className="font-['Rajdhani'] uppercase tracking-wide">
-      {name} {(percent * 100).toFixed(0)}%
-    </text>
-  );
-};
+// Highcharts natively handles 3D Pie Labels.
 
 // ── Stat Card ──────────────────────────────────────────────────────────────────
 function StatCard({ icon: Icon, label, value, sub, color = "text-primary" }) {
@@ -165,8 +164,8 @@ export default function PeeringEyePage() {
   const sortedRaw = [...rawPlatforms].sort((a, b) => b.bytes - a.bytes);
   
   const NEON_COLORS = [
-    "#00F4FF", "#FF00E6", "#FFD700", "#B200FF", "#FF5E00", 
-    "#00FF85", "#0066FF", "#FF003C", "#00FFD1", "#E3FF00"
+    "#7cb5ec", "#434348", "#90ed7d", "#f7a35c", "#8085e9", 
+    "#f15c80", "#e4d354", "#2b908f", "#f45b5b", "#91e8e1"
   ];
   const platforms = sortedRaw.map((p, i) => ({
     ...p,
@@ -298,41 +297,62 @@ export default function PeeringEyePage() {
           {platforms.length === 0 ? (
             <NoData message="Belum ada data platform" />
           ) : (
-            <ResponsiveContainer width="100%" height={260} className="z-10 relative mt-2">
-              <PieChart>
-                <defs>
-                  <filter id="neon" x="-50%" y="-50%" width="200%" height="200%">
-                    <feGaussianBlur stdDeviation="4" result="blur" />
-                    <feMerge>
-                      <feMergeNode in="blur" />
-                      <feMergeNode in="SourceGraphic" />
-                    </feMerge>
-                  </filter>
-                </defs>
-                <text x="50%" y="47%" textAnchor="middle" fill="#ffffff" fontSize={16} fontWeight={800} className="font-['Rajdhani'] drop-shadow-xl tracking-wide">TRAFFIC</text>
-                <text x="50%" y="54%" textAnchor="middle" fill="#ffffff" fontSize={16} fontWeight={800} className="font-['Rajdhani'] drop-shadow-md tracking-wide">SHARES</text>
-                <Pie
-                  data={platforms.filter(p => p.platform !== "Others").slice(0, 10)}
-                  dataKey="bytes"
-                  nameKey="platform"
-                  cx="50%" cy="50%"
-                  innerRadius={65}
-                  outerRadius={90}
-                  stroke="#ffffff"
-                  strokeWidth={1.5}
-                  labelLine={{ stroke: 'rgba(255,255,255,0.6)', strokeWidth: 1.5 }}
-                  label={PieLabel}
-                >
-                  {platforms.filter(p => p.platform !== "Others").slice(0, 10).map((p, i) => (
-                    <Cell key={i} fill={p.color} filter="url(#neon)" style={{ cursor: "pointer", transition: "all 0.3s ease" }} />
-                  ))}
-                </Pie>
-                <ReTooltip
-                  contentStyle={{ backgroundColor: "rgba(9, 9, 11, 0.95)", borderColor: "#27272a", borderRadius: "8px", fontSize: "12px", boxShadow: "0 0 20px rgba(0,0,0,0.8)", backdropFilter: "blur(4px)", border: "1px solid rgba(255,255,255,0.1)" }}
-                  formatter={(v, n, props) => [`${props.payload.bytes_fmt}`, n]}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+            <div className="z-10 relative mt-2 w-full h-[260px]">
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10" style={{ transform: 'translateY(-10px)' }}>
+                 <p className="text-white text-[15px] font-[800] font-['Rajdhani'] drop-shadow-md tracking-wide">TRAFFIC</p>
+                 <p className="text-white text-[15px] font-[800] font-['Rajdhani'] drop-shadow-md tracking-wide">SHARES</p>
+              </div>
+              <HighchartsReact
+                highcharts={Highcharts}
+                options={{
+                  chart: {
+                    type: 'pie',
+                    backgroundColor: 'transparent',
+                    options3d: { enabled: true, alpha: 45 },
+                    height: 260,
+                    margin: [0, 0, 0, 0]
+                  },
+                  title: { text: '' },
+                  tooltip: {
+                    backgroundColor: "rgba(9, 9, 11, 0.95)",
+                    borderColor: "#27272a",
+                    style: { color: '#fff', fontSize: '12px' },
+                    pointFormatter: function() {
+                      return `<b>${this.name}</b>: ${fmtBytes(this.y)}`;
+                    }
+                  },
+                  plotOptions: {
+                    pie: {
+                      innerSize: '60%',
+                      depth: 35,
+                      dataLabels: {
+                        enabled: true,
+                        format: '<b>{point.name}</b><br/>{point.percentage:.0f}%',
+                        style: {
+                           color: 'contrast',
+                           textOutline: 'none',
+                           fontWeight: 'bold',
+                           fontSize: '11px',
+                           fontFamily: 'Rajdhani, sans-serif'
+                        },
+                        connectorColor: 'inherit',
+                        connectorPadding: 0,
+                        distance: 15
+                      }
+                    }
+                  },
+                  series: [{
+                    name: 'Traffic',
+                    data: platforms.filter(p => p.platform !== "Others").slice(0, 10).map(p => ({
+                       name: p.platform,
+                       y: p.bytes,
+                       color: p.color
+                    }))
+                  }],
+                  credits: { enabled: false }
+                }}
+              />
+            </div>
           )}
         </div>
 
@@ -396,7 +416,7 @@ export default function PeeringEyePage() {
 
       {/* ── Platform Table ──────────────────────────────────────────────────── */}
       <div className="bg-card border border-border rounded-sm p-4">
-        <p className="text-xs font-semibold mb-1">Top 10 Detail Platform Traffic</p>
+        <p className="text-xs font-semibold mb-1">Detail Platform Traffic</p>
         <p className="text-[10px] text-muted-foreground mb-3">Klasifikasi berdasarkan DNS syslog + NetFlow</p>
         {platforms.length === 0 ? (
           <NoData />
@@ -411,7 +431,7 @@ export default function PeeringEyePage() {
                 </tr>
               </thead>
               <tbody>
-                {platforms.slice(0, 10).map((p, i) => (
+                {platforms.map((p, i) => (
                   <tr key={p.platform} className="border-b border-border/20 hover:bg-secondary/10 transition-colors">
                     <td className="px-3 py-2.5">
                       <div className="flex items-center gap-2">
