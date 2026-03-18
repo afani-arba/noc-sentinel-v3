@@ -36,18 +36,14 @@ const RANGES = [
 ];
 
 // ── Custom Pie Label ───────────────────────────────────────────────────────────
-function PieLabel({ cx, cy, midAngle, outerRadius, name, percent }) {
+const PieLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, index, name, fill, x, y, textAnchor }) => {
   if (!percent || percent < 0.02) return null;
-  const RAD = Math.PI / 180;
-  const radius = outerRadius + 28;
-  const x = cx + radius * Math.cos(-midAngle * RAD);
-  const y = cy + radius * Math.sin(-midAngle * RAD);
   return (
-    <text x={x} y={y} textAnchor={x > cx ? "start" : "end"} fill="#e4e4e7" fontSize={10} fontWeight={600} style={{ filter: "drop-shadow(0px 2px 4px rgba(0,0,0,0.8))" }}>
-      {name} {(percent * 100).toFixed(1)}%
+    <text x={x} y={y} fill={fill} textAnchor={textAnchor} dominantBaseline="central" fontSize={12} fontWeight={800} style={{ filter: `drop-shadow(0px 0px 6px ${fill})` }} className="font-['Rajdhani'] uppercase tracking-wide">
+      {name} {(percent * 100).toFixed(0)}%
     </text>
   );
-}
+};
 
 // ── Stat Card ──────────────────────────────────────────────────────────────────
 function StatCard({ icon: Icon, label, value, sub, color = "text-primary" }) {
@@ -166,7 +162,16 @@ export default function PeeringEyePage() {
   });
 
   const rawPlatforms = stats?.platforms || [];
-  const platforms = [...rawPlatforms].sort((a, b) => b.bytes - a.bytes);
+  const sortedRaw = [...rawPlatforms].sort((a, b) => b.bytes - a.bytes);
+  
+  const NEON_COLORS = [
+    "#00F4FF", "#FF00E6", "#FFD700", "#B200FF", "#FF5E00", 
+    "#00FF85", "#0066FF", "#FF003C", "#00FFD1", "#E3FF00"
+  ];
+  const platforms = sortedRaw.map((p, i) => ({
+    ...p,
+    color: i < 10 ? NEON_COLORS[i] : p.color
+  }));
   const bgpPeers  = bgpStatus?.peers || [];
 
   return (
@@ -304,8 +309,8 @@ export default function PeeringEyePage() {
                     </feMerge>
                   </filter>
                 </defs>
-                <text x="50%" y="47%" textAnchor="middle" fill="#ffffff" fontSize={15} fontWeight={800} className="font-['Rajdhani'] drop-shadow-xl tracking-wide">DISTRIBUSI</text>
-                <text x="50%" y="54%" textAnchor="middle" fill="#94a3b8" fontSize={9} fontWeight={600} className="drop-shadow-md">TRAFFIC (ESTIMASI)</text>
+                <text x="50%" y="47%" textAnchor="middle" fill="#ffffff" fontSize={16} fontWeight={800} className="font-['Rajdhani'] drop-shadow-xl tracking-wide">TRAFFIC</text>
+                <text x="50%" y="54%" textAnchor="middle" fill="#ffffff" fontSize={16} fontWeight={800} className="font-['Rajdhani'] drop-shadow-md tracking-wide">SHARES</text>
                 <Pie
                   data={platforms.filter(p => p.platform !== "Others").slice(0, 10)}
                   dataKey="bytes"
@@ -313,9 +318,9 @@ export default function PeeringEyePage() {
                   cx="50%" cy="50%"
                   innerRadius={65}
                   outerRadius={90}
-                  stroke="rgba(255,255,255,0.05)"
-                  strokeWidth={2}
-                  labelLine={false}
+                  stroke="#ffffff"
+                  strokeWidth={1.5}
+                  labelLine={{ stroke: 'rgba(255,255,255,0.6)', strokeWidth: 1.5 }}
                   label={PieLabel}
                 >
                   {platforms.filter(p => p.platform !== "Others").slice(0, 10).map((p, i) => (
@@ -391,7 +396,7 @@ export default function PeeringEyePage() {
 
       {/* ── Platform Table ──────────────────────────────────────────────────── */}
       <div className="bg-card border border-border rounded-sm p-4">
-        <p className="text-xs font-semibold mb-1">Detail Platform Traffic</p>
+        <p className="text-xs font-semibold mb-1">Top 10 Detail Platform Traffic</p>
         <p className="text-[10px] text-muted-foreground mb-3">Klasifikasi berdasarkan DNS syslog + NetFlow</p>
         {platforms.length === 0 ? (
           <NoData />
@@ -406,7 +411,7 @@ export default function PeeringEyePage() {
                 </tr>
               </thead>
               <tbody>
-                {platforms.map((p, i) => (
+                {platforms.slice(0, 10).map((p, i) => (
                   <tr key={p.platform} className="border-b border-border/20 hover:bg-secondary/10 transition-colors">
                     <td className="px-3 py-2.5">
                       <div className="flex items-center gap-2">
