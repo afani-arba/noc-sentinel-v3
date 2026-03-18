@@ -51,27 +51,38 @@ FLUSH_INTERVAL  = int(os.getenv("FLUSH_INTERVAL", "60"))
 PLATFORM_PATTERNS = [
     # Streaming Video
     (r"(youtube\.com|googlevideo\.com|ytimg\.com|youtu\.be)", "YouTube", "▶", "#FF0000"),
-    (r"(netflix\.com|nflxvideo\.net|nflximg\.net|nflxso\.net)", "Netflix", "🎬", "#E50914"),
-    (r"(tiktok\.com|tiktokv\.com|tiktokcdn\.com|musical\.ly)", "TikTok", "🎵", "#010101"),
+    (r"(netflix\.com|nflxvideo\.net|nflximg\.net|nflxso\.net|nflxext\.com)", "Netflix", "🎬", "#E50914"),
+    (r"(tiktok\.com|tiktokv\.com|tiktokcdn\.com|musical\.ly|byteoversea\.com|ibyteimg\.com|snssdk\.com|bytedance\.com)", "TikTok", "🎵", "#010101"),
     (r"(twitch\.tv|twitchsvc\.net|twitchstatic\.com)", "Twitch", "🎮", "#9146FF"),
     (r"(spotify\.com|scdn\.co|spotifycdn\.com)", "Spotify", "🎧", "#1DB954"),
+    (r"(disneyplus\.com|bamgrid\.com)", "Disney+", "🎬", "#113CCF"),
     # Social Media
     (r"(facebook\.com|fb\.com|fbcdn\.net|fbsbx\.com|facebook\.net)", "Facebook", "👥", "#1877F2"),
     (r"(instagram\.com|cdninstagram\.com|ig\.me)", "Instagram", "📸", "#E4405F"),
     (r"(twitter\.com|x\.com|twimg\.com|t\.co)", "Twitter/X", "🐦", "#1DA1F2"),
+    (r"(pinterest\.com|pinimg\.com)", "Pinterest", "📌", "#E60023"),
     # Messaging
     (r"(whatsapp\.com|whatsapp\.net)", "WhatsApp", "💬", "#25D366"),
-    (r"(telegram\.org|t\.me|tdesktop\.com|tlgr\.org)", "Telegram", "✈", "#2CA5E0"),
-    (r"(discord\.com|discordapp\.com|discord\.gg|discordapp\.org)", "Discord", "🎮", "#5865F2"),
-    # Cloud / Productivity
-    (r"(googleapis\.com|gstatic\.com|google\.com|goo\.gl|googletagmanager|googlesyndication)", "Google", "🔍", "#4285F4"),
-    (r"(microsoft\.com|msn\.com|live\.com|hotmail\.com|outlook\.com|office\.com|office365|windows\.com)", "Microsoft", "🪟", "#0078D4"),
-    (r"(icloud\.com|apple\.com|mzstatic\.com|aaplimg\.com)", "Apple/iCloud", "🍎", "#555555"),
+    (r"(telegram\.org|t\.me|tdesktop\.com|tlgr\.org|telegram\.me)", "Telegram", "✈", "#2CA5E0"),
+    (r"(discord\.com|discordapp\.com|discord\.gg|discordapp\.org|discordapp\.net)", "Discord", "🎮", "#5865F2"),
+    (r"(line\.me|line-apps\.com|line-scdn\.net)", "LINE", "💬", "#00C300"),
+    # Cloud / Productivity / Tech
+    (r"(googleapis\.com|gstatic\.com|google\.com|goo\.gl|googletagmanager|googlesyndication|google-analytics\.com|googlehosted\.com|ggpht\.com)", "Google", "🔍", "#4285F4"),
+    (r"(microsoft\.com|msn\.com|live\.com|hotmail\.com|outlook\.com|office\.com|office365|windows\.com|azureedge\.net|live\.net|microsoftonline\.com|skype\.com)", "Microsoft", "🪟", "#0078D4"),
+    (r"(icloud\.com|apple\.com|mzstatic\.com|aaplimg\.com|cdn-apple\.com|me\.com)", "Apple/iCloud", "🍎", "#555555"),
     (r"(cloudflare\.com|cloudflare\.net|cloudflare-dns\.com)", "Cloudflare", "☁", "#F38020"),
-    (r"amazon\.com|amazonaws\.com|cloudfront\.net|awsstatic\.com", "Amazon/AWS", "📦", "#FF9900"),
+    (r"(amazon\.com|amazonaws\.com|cloudfront\.net|awsstatic\.com|amazonvideo\.com)", "Amazon/AWS", "📦", "#FF9900"),
+    (r"(yahoo\.com|yimg\.com)", "Yahoo", "📰", "#430297"),
+    # Global CDNs & Analytics
+    (r"(akamai\.net|akamaiedge\.net|akamaitechnologies\.com|edgekey\.net|edgesuite\.net)", "Akamai CDN", "🌍", "#0096D6"),
+    (r"(fastly\.net|fastlylb\.net)", "Fastly CDN", "🌍", "#FF282D"),
+    (r"(doubleclick\.net|criteo\.com|taboola\.com)", "Ad Networks", "📈", "#FF0055"),
+    # Smartphone Home/Telemetry
+    (r"(xiaomi\.net|miui\.com|xiaomi\.com)", "Xiaomi", "📱", "#FF6900"),
+    (r"(samsung\.com|samsungqbe\.com|secb2b\.com)", "Samsung", "📱", "#1428A0"),
+    (r"(coloros\.com|oppomobile\.com|vivo\.com|heytapmobile\.com)", "Oppo/Vivo", "📱", "#006400"),
     # Video Call
     (r"(zoom\.us|zoomgov\.com|zoom\.com)", "Zoom", "📹", "#2D8CFF"),
-    (r"(meet\.google\.com|hangouts\.google\.com)", "Google Meet", "📹", "#00832D"),
     # Indonesian Platforms
     (r"(tokopedia\.com|tokopedia\.net|tkpd\.io)", "Tokopedia", "🛒", "#03AC0E"),
     (r"(shopee\.co\.id|seacdn\.com|shopeemobile\.com)", "Shopee", "🛍", "#EE4D2D"),
@@ -79,12 +90,17 @@ PLATFORM_PATTERNS = [
     (r"(grab\.com|grabtaxi\.com|grab\.app)", "Grab", "🚕", "#00B14F"),
     (r"(bukalapak\.com)", "Bukalapak", "🛒", "#E31E52"),
     (r"(traveloka\.com)", "Traveloka", "✈", "#038CC1"),
+    (r"(detik\.com|detik\.net)", "Detikcom", "📰", "#0B3189"),
+    (r"(kompas\.com|kompasiana\.com)", "Kompas", "📰", "#F26522"),
+    (r"(tribunnews\.com|tribunnetwork\.com)", "Tribun", "📰", "#1B5599"),
     # Gaming
     (r"(steampowered\.com|steamcontent\.com|steamcommunity\.com|valve\.net)", "Steam", "🎮", "#1B2838"),
-    (r"(riotgames\.com|leagueoflegends\.com)", "Riot Games", "⚔", "#C6272F"),
-    (r"(epicgames\.com|epicgameslauncher\.com)", "Epic Games", "🎮", "#2F2F2F"),
-    (r"(garena\.com|garenaplus\.com)", "Garena", "🎮", "#F4821F"),
-    (r"(ml\.igg\.com|moonton\.com)", "Mobile Legends", "⚔", "#F5A623"),
+    (r"(riotgames\.com|leagueoflegends\.com|valorant\.com)", "Riot Games", "⚔", "#C6272F"),
+    (r"(epicgames\.com|epicgameslauncher\.com|unrealengine\.com)", "Epic Games", "🎮", "#2F2F2F"),
+    (r"(roblox\.com|rbxcdn\.com)", "Roblox", "🧱", "#FFFFFF"),
+    (r"(garena\.com|garenaplus\.com|garenanow\.com)", "Garena", "🎮", "#F4821F"),
+    (r"(ml\.igg\.com|moonton\.com|mobilelegends\.com)", "Mobile Legends", "⚔", "#F5A623"),
+    (r"(pubgmobile\.com|tencentgames\.com|igamecj\.com)", "PUBG Mobile", "🔫", "#F5A623"),
 ]
 
 def match_platform(domain: str) -> tuple[str, str, str]:
