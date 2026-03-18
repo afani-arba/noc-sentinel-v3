@@ -29,7 +29,9 @@ import logging
 import socket
 import subprocess
 import threading
-from datetime import datetime, timezone
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone, timedelta
 
 from pymongo import MongoClient
 
@@ -49,6 +51,28 @@ LOCAL_AS       = int(os.getenv("LOCAL_AS", "65000"))
 LOCAL_ROUTER_ID = os.getenv("LOCAL_ROUTER_ID", "")
 SYNC_INTERVAL  = int(os.getenv("BGP_SYNC_INTERVAL", "300"))  # 5 menit
 GOBGP_CONFIG_PATH = "/etc/gobgp/gobgpd.json"
+
+PLATFORM_COMMUNITIES = {
+    "YouTube": "65000:10",
+    "Netflix": "65000:11",
+    "TikTok": "65000:12",
+    "Facebook": "65000:13",
+    "Instagram": "65000:14",
+    "WhatsApp": "65000:15",
+    "Telegram": "65000:16",
+    "LINE": "65000:17",
+    "Discord": "65000:18",
+    "Zoom": "65000:19",
+    "Shopee": "65000:20",
+    "Tokopedia": "65000:21",
+    "Gojek/GoTo": "65000:22",
+    "Grab": "65000:23",
+    "Mobile Legends": "65000:30",
+    "PUBG Mobile": "65000:31",
+    "Roblox": "65000:32",
+    "Steam": "65000:33",
+    "Google": "65000:100",
+}
 
 
 def get_db():
@@ -220,6 +244,61 @@ def persist_bgp_status(db, status: list[dict]):
         logger.info(f"BGP status persisted: {len(docs)} peers")
 
 
+CURRENT_INJECTED = defaultdict(set)
+
+def get_platform_domains(db) -> dict[str, set[str]]:
+    domains_by_platform = defaultdict(set)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    
+    stats = db.peering_eye_stats.find({"timestamp": {"$gt": cutoff.isoformat()}})
+    for stat in stats:
+        platform = stat.get("platform")
+        if platform in PLATFORM_COMMUNITIES:
+            for td in stat.get("top_domains", []):
+                domain = td.get("domain")
+                if domain:
+                    domains_by_platform[platform].add(domain)
+    return dict(domains_by_platform)
+
+
+def resolve_domain(domain: str) -> list[str]:
+    try:
+        _, _, ips = socket.gethostbyname_ex(domain)
+        return ips
+    except Exception:
+        return []
+
+
+def resolve_all_domains(domains: set[str]) -> set[str]:
+    ips = set()
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        for result in executor.map(resolve_domain, list(domains)):
+            ips.update(result)
+    return ips
+
+
+def sync_platform_ips_to_bgp(platform: str, new_ips: set[str]):
+    community = PLATFORM_COMMUNITIES.get(platform)
+    if not community:
+        return
+
+    old_ips = CURRENT_INJECTED.get(platform, set())
+    
+    added = 0
+    for ip in new_ips - old_ips:
+        ok, _ = run_cmd([GOBGP_BIN, "global", "rib", "add", f"{ip}/32", "community", community])
+        if ok: added += 1
+            
+    deleted = 0
+    for ip in old_ips - new_ips:
+        ok, _ = run_cmd([GOBGP_BIN, "global", "rib", "del", f"{ip}/32"])
+        if ok: deleted += 1
+            
+    CURRENT_INJECTED[platform] = set(new_ips)
+    if added > 0 or deleted > 0:
+        logger.info(f"Platform {platform}: Injected {added} new IPs, removed {deleted} stale IPs")
+
+
 def bgp_monitor_loop():
     """Main BGP monitoring loop."""
     db = get_db()
@@ -246,6 +325,15 @@ def bgp_monitor_loop():
 
             established = sum(1 for s in status if s["state"] == "ESTABLISHED")
             logger.info(f"BGP sync done: {len(status)} peers, {established} established")
+
+            # 5. Inject prefixes if we have active established peers
+            if established > 0:
+                domains_map = get_platform_domains(db)
+                for platform, domains in domains_map.items():
+                    if not domains: continue
+                    ips = resolve_all_domains(domains)
+                    if ips:
+                        sync_platform_ips_to_bgp(platform, ips)
 
         except Exception as e:
             logger.error(f"BGP monitor loop error: {e}")
