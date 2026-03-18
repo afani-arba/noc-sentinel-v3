@@ -17,7 +17,15 @@ echo ""
 # Auto-detect install dir (wherever this script is located)
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 INSTALL_DIR="$(dirname "${SCRIPT_DIR}")"
-PYTHON_BIN="python3"
+# Auto-detect venv Python (prefer venv, fallback to system)
+VENV_PYTHON="${INSTALL_DIR}/backend/venv/bin/python3"
+if [ -f "${VENV_PYTHON}" ]; then
+  PYTHON_BIN="${VENV_PYTHON}"
+  echo "  Python (venv) : ${PYTHON_BIN}"
+else
+  PYTHON_BIN="python3"
+  echo "  Python (sys)  : ${PYTHON_BIN}"
+fi
 GOBGP_VERSION="3.30.0"
 GOBGP_URL="https://github.com/osrg/gobgp/releases/download/v${GOBGP_VERSION}/gobgp_${GOBGP_VERSION}_linux_amd64.tar.gz"
 REPO_SCRIPTS="${INSTALL_DIR}/scripts"
@@ -38,8 +46,14 @@ apt-get install -y -q python3 python3-pip python3-venv curl wget tar jq
 
 # ── 2. Install Python packages ────────────────────────────────
 echo "[2/7] Menginstall Python packages untuk sentinel_eye.py..."
-pip3 install --quiet pymongo
-
+# Install ke venv jika ada, fallback ke pip3 global
+if [ -f "${INSTALL_DIR}/backend/venv/bin/pip" ]; then
+  "${INSTALL_DIR}/backend/venv/bin/pip" install --quiet pymongo
+  echo "      pymongo installed ke venv: ${INSTALL_DIR}/backend/venv"
+else
+  pip3 install --quiet pymongo
+  echo "      pymongo installed ke system python3"
+fi
 echo "      Python packages installed."
 
 # ── 3. Install GoBGP ─────────────────────────────────────────
@@ -105,8 +119,8 @@ Wants=mongod.service
 
 [Service]
 Type=simple
-User=www-data
-Group=www-data
+User=root
+Group=root
 WorkingDirectory=${INSTALL_DIR}
 EnvironmentFile=${ENV_FILE}
 ExecStart=${PYTHON_BIN} ${REPO_SCRIPTS}/sentinel_eye.py
@@ -161,10 +175,10 @@ echo "# Step 1: Aktifkan DNS di Mikrotik"
 echo "/ip dns set allow-remote-requests=yes"
 echo ""
 echo "# Step 2: Buat logging action ke Ubuntu VPS (DNS Syslog)"
-echo "/system logging action add name=sentinel-dns target=remote remote=${UBUNTU_IP} remote-port=5514 src-address=0.0.0.0"
+echo "/system logging action add name=sentineldns target=remote remote=${UBUNTU_IP} remote-port=5514 src-address=0.0.0.0"
 echo ""
 echo "# Step 3: Enable DNS logging"
-echo "/system logging add topics=dns action=sentinel-dns"
+echo "/system logging add topics=dns action=sentineldns"
 echo ""
 echo "# Step 4: Aktifkan NetFlow/Traffic-Flow ke Ubuntu VPS"
 echo "/ip traffic-flow set enabled=yes"
