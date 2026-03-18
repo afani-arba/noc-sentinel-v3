@@ -187,7 +187,7 @@ def get_bgp_neighbors_status() -> list[dict]:
         for n in neighbors:
             conf = n.get("conf", {}).get("neighbor-address", "unknown")
             state = n.get("state", {})
-            session_state = state.get("session-state", "unknown")
+            session_state = str(state.get("session-state", "unknown")).upper()
             peer_as = state.get("peer-as", 0)
             pfx = n.get("afi-safis", [{}])[0].get("state", {})
             received  = pfx.get("received", 0)
