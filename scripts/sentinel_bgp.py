@@ -287,13 +287,19 @@ def ensure_gobgpd_running():
         logger.error("Need root to write GoBGP config. Run as root or use sudo.")
         return False
 
-    ok, out = run_cmd([
-        GOBGPD_BIN, "-f", GOBGP_CONFIG_PATH,
-        "--log-level", "warn", "-p", "&"
-    ])
-    time.sleep(2)
-    logger.info(f"gobgpd start attempt: {out}")
-    return True
+    try:
+        subprocess.Popen(
+            [GOBGPD_BIN, "-f", GOBGP_CONFIG_PATH, "--log-level", "warn", "-p"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True
+        )
+        time.sleep(2)
+        logger.info("gobgpd starte attempt finished")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to start gobgpd: {e}")
+        return False
 
 
 def main():
