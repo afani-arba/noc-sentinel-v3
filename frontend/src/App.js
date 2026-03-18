@@ -27,6 +27,7 @@ import BandwidthPage from "@/pages/BandwidthPage";
 import TopologyPage from "@/pages/TopologyPage";
 import UpdatePage from "@/pages/UpdatePage";
 import SchedulerPage from "@/pages/SchedulerPage";
+import PeeringEyePage from "@/pages/PeeringEyePage";
 import Layout from "@/components/Layout";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -137,6 +138,8 @@ function App() {
               <Route path="topology" element={<TopologyPage />} />
               <Route path="update" element={<ProtectedRoute allowedRoles={["administrator"]}><UpdatePage /></ProtectedRoute>} />
               <Route path="scheduler" element={<ProtectedRoute allowedRoles={["administrator"]}><SchedulerPage /></ProtectedRoute>} />
+              {/* Peering-Eye */}
+              <Route path="peering-eye" element={<PeeringEyePage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
