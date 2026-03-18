@@ -36,15 +36,15 @@ const RANGES = [
 ];
 
 // ── Custom Pie Label ───────────────────────────────────────────────────────────
-function PieLabel({ cx, cy, midAngle, outerRadius, name, pct_hits }) {
-  if (pct_hits < 3) return null;
+function PieLabel({ cx, cy, midAngle, outerRadius, name, percent }) {
+  if (!percent || percent < 0.02) return null;
   const RAD = Math.PI / 180;
-  const radius = outerRadius + 22;
+  const radius = outerRadius + 28;
   const x = cx + radius * Math.cos(-midAngle * RAD);
   const y = cy + radius * Math.sin(-midAngle * RAD);
   return (
-    <text x={x} y={y} textAnchor={x > cx ? "start" : "end"} fill="#a1a1aa" fontSize={10}>
-      {name} {pct_hits}%
+    <text x={x} y={y} textAnchor={x > cx ? "start" : "end"} fill="#e4e4e7" fontSize={10} fontWeight={600} style={{ filter: "drop-shadow(0px 2px 4px rgba(0,0,0,0.8))" }}>
+      {name} {(percent * 100).toFixed(1)}%
     </text>
   );
 }
@@ -165,7 +165,8 @@ export default function PeeringEyePage() {
     return flat;
   });
 
-  const platforms = stats?.platforms || [];
+  const rawPlatforms = stats?.platforms || [];
+  const platforms = [...rawPlatforms].sort((a, b) => b.bytes - a.bytes);
   const bgpPeers  = bgpStatus?.peers || [];
 
   return (
@@ -285,31 +286,45 @@ export default function PeeringEyePage() {
       {/* ── Charts Row ──────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         {/* Donut Chart */}
-        <div className="lg:col-span-2 bg-card border border-border rounded-sm p-4">
-          <p className="text-xs font-semibold mb-1">Distribusi Platform</p>
-          <p className="text-[10px] text-muted-foreground mb-3">% DNS hits per platform</p>
+        <div className="lg:col-span-2 bg-[#09090b] border border-[#27272a]/70 rounded-xl p-4 relative overflow-hidden shadow-2xl">
+          <div className="absolute top-0 right-0 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+          <p className="text-xs font-bold mb-1 text-white z-10 relative">Distribusi Platform</p>
+          <p className="text-[10px] text-muted-foreground mb-3 z-10 relative">Berdasarkan Total Estimasi Traffic</p>
           {platforms.length === 0 ? (
             <NoData message="Belum ada data platform" />
           ) : (
-            <ResponsiveContainer width="100%" height={240}>
+            <ResponsiveContainer width="100%" height={260} className="z-10 relative mt-2">
               <PieChart>
+                <defs>
+                  <filter id="neon" x="-50%" y="-50%" width="200%" height="200%">
+                    <feGaussianBlur stdDeviation="4" result="blur" />
+                    <feMerge>
+                      <feMergeNode in="blur" />
+                      <feMergeNode in="SourceGraphic" />
+                    </feMerge>
+                  </filter>
+                </defs>
+                <text x="50%" y="47%" textAnchor="middle" fill="#ffffff" fontSize={15} fontWeight={800} className="font-['Rajdhani'] drop-shadow-xl tracking-wide">DISTRIBUSI</text>
+                <text x="50%" y="54%" textAnchor="middle" fill="#94a3b8" fontSize={9} fontWeight={600} className="drop-shadow-md">TRAFFIC (ESTIMASI)</text>
                 <Pie
                   data={platforms.filter(p => p.platform !== "Others").slice(0, 10)}
-                  dataKey="pct_hits"
+                  dataKey="bytes"
                   nameKey="platform"
                   cx="50%" cy="50%"
-                  innerRadius={60}
+                  innerRadius={65}
                   outerRadius={90}
+                  stroke="rgba(255,255,255,0.05)"
+                  strokeWidth={2}
                   labelLine={false}
                   label={PieLabel}
                 >
                   {platforms.filter(p => p.platform !== "Others").slice(0, 10).map((p, i) => (
-                    <Cell key={i} fill={p.color} />
+                    <Cell key={i} fill={p.color} filter="url(#neon)" style={{ cursor: "pointer", transition: "all 0.3s ease" }} />
                   ))}
                 </Pie>
                 <ReTooltip
-                  contentStyle={{ backgroundColor: "#121214", borderColor: "#27272a", borderRadius: "4px", fontSize: "11px" }}
-                  formatter={(v, n) => [`${v}%`, n]}
+                  contentStyle={{ backgroundColor: "rgba(9, 9, 11, 0.95)", borderColor: "#27272a", borderRadius: "8px", fontSize: "12px", boxShadow: "0 0 20px rgba(0,0,0,0.8)", backdropFilter: "blur(4px)", border: "1px solid rgba(255,255,255,0.1)" }}
+                  formatter={(v, n, props) => [`${props.payload.bytes_fmt}`, n]}
                 />
               </PieChart>
             </ResponsiveContainer>
@@ -317,15 +332,23 @@ export default function PeeringEyePage() {
         </div>
 
         {/* Area Chart Timeline */}
-        <div className="lg:col-span-3 bg-card border border-border rounded-sm p-4">
-          <p className="text-xs font-semibold mb-1">Timeline Traffic</p>
-          <p className="text-[10px] text-muted-foreground mb-3">DNS hits per platform — {RANGES.find(r => r.value === range)?.label} terakhir</p>
+        <div className="lg:col-span-3 bg-[#09090b] border border-[#27272a]/70 rounded-xl p-4 relative shadow-2xl">
+          <div className="absolute top-0 left-0 w-64 h-64 bg-cyan-500/5 rounded-full blur-3xl pointer-events-none" />
+          <p className="text-xs font-bold mb-1 text-white z-10 relative">Timeline Traffic</p>
+          <p className="text-[10px] text-muted-foreground mb-3 z-10 relative">DNS hits per platform — {RANGES.find(r => r.value === range)?.label} terakhir</p>
           {chartData.length === 0 ? (
             <NoData message="Belum ada data timeline" />
           ) : (
-            <ResponsiveContainer width="100%" height={240}>
-              <AreaChart data={chartData} margin={{ left: -10, right: 10, top: 5, bottom: 0 }}>
+            <ResponsiveContainer width="100%" height={260} className="z-10 relative">
+              <AreaChart data={chartData} margin={{ left: -10, right: 10, top: 15, bottom: 0 }}>
                 <defs>
+                  <filter id="neonLine" x="-50%" y="-50%" width="200%" height="200%">
+                    <feGaussianBlur stdDeviation="3" result="blur" />
+                    <feMerge>
+                      <feMergeNode in="blur" />
+                      <feMergeNode in="SourceGraphic" />
+                    </feMerge>
+                  </filter>
                   {platformsInTimeline.map((p, i) => {
                     const color = platforms.find(pl => pl.platform === p)?.color || "#64748b";
                     return (
@@ -338,10 +361,10 @@ export default function PeeringEyePage() {
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
                 <XAxis dataKey="time" tick={{ fill: "#a1a1aa", fontSize: 9 }} tickLine={false} axisLine={false} />
-                <YAxis tick={{ fill: "#a1a1aa", fontSize: 9 }} tickLine={false} axisLine={false} width={50} tickFormatter={fmtNum} />
+                <YAxis tick={{ fill: "#a1a1aa", fontSize: 10, fontWeight: 500 }} tickLine={false} axisLine={false} width={65} tickFormatter={fmtBytes} />
                 <ReTooltip
-                  contentStyle={{ backgroundColor: "#121214", borderColor: "#27272a", borderRadius: "4px", fontSize: "11px" }}
-                  formatter={(v, n) => [fmtNum(v) + " hits", n]}
+                  contentStyle={{ backgroundColor: "rgba(9, 9, 11, 0.95)", borderColor: "#27272a", borderRadius: "8px", fontSize: "12px", boxShadow: "0 0 20px rgba(0,0,0,0.8)", border: "1px solid rgba(255,255,255,0.1)" }}
+                  formatter={(v, n) => [fmtBytes(v), n]}
                 />
                 <Legend iconSize={8} wrapperStyle={{ fontSize: 10, paddingTop: 8 }} />
                 {platformsInTimeline.map((p, i) => {
@@ -349,12 +372,13 @@ export default function PeeringEyePage() {
                   return (
                     <Area
                       key={p}
-                      type="linear"
+                      type="monotone"
                       dataKey={p}
                       stroke={color}
                       fill={`url(#grad_${i})`}
-                      strokeWidth={1.5}
+                      strokeWidth={3}
                       dot={false}
+                      filter="url(#neonLine)"
                       isAnimationActive={false}
                     />
                   );
