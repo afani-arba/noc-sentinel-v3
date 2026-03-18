@@ -164,7 +164,7 @@ export default function PeeringEyePage() {
   const sortedRaw = [...rawPlatforms].sort((a, b) => b.bytes - a.bytes);
   
   const NEON_COLORS = [
-    "#7cb5ec", "#434348", "#90ed7d", "#f7a35c", "#8085e9", 
+    "#7cb5ec", "#00FFC4", "#90ed7d", "#f7a35c", "#8085e9", 
     "#f15c80", "#e4d354", "#2b908f", "#f45b5b", "#91e8e1"
   ];
   const platforms = sortedRaw.map((p, i) => ({
@@ -327,17 +327,14 @@ export default function PeeringEyePage() {
                       depth: 35,
                       dataLabels: {
                         enabled: true,
-                        format: '<b>{point.name}</b><br/>{point.percentage:.0f}%',
+                        useHTML: true,
+                        format: '<div style="color:{point.color}; text-align:center; font-family:\'Rajdhani\',sans-serif; font-weight:800; font-size:12px; text-shadow: 0px 0px 6px {point.color}; line-height: 1.1;">{point.name}<br/>{point.percentage:.0f}%</div>',
                         style: {
-                           color: 'contrast',
-                           textOutline: 'none',
-                           fontWeight: 'bold',
-                           fontSize: '11px',
-                           fontFamily: 'Rajdhani, sans-serif'
+                           textOutline: 'none'
                         },
-                        connectorColor: 'inherit',
-                        connectorPadding: 0,
-                        distance: 15
+                        connectorWidth: 1.5,
+                        connectorPadding: 5,
+                        distance: 35
                       }
                     }
                   },
