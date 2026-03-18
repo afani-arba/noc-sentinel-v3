@@ -135,7 +135,12 @@ def generate_gobgp_config(peers: list[dict]) -> str:
         neighbor_ip = peer.get("ip_address", "").split(":")[0].strip()
         if not neighbor_ip:
             continue
-        peer_as = peer.get("bgp_peer_as", LOCAL_AS)  # Default iBGP
+        peer_as_raw = peer.get("bgp_peer_as", LOCAL_AS)
+        try:
+            peer_as = int(str(peer_as_raw).strip())
+        except ValueError:
+            peer_as = int(LOCAL_AS)
+            
         config["neighbors"].append({
             "config": {
                 "neighbor-address": neighbor_ip,
@@ -383,14 +388,15 @@ def ensure_gobgpd_running():
         return False
 
     try:
+        log_f = open("/var/log/gobgpd.log", "a")
         subprocess.Popen(
             [GOBGPD_BIN, "-f", GOBGP_CONFIG_PATH, "--log-level", "info"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=log_f,
+            stderr=log_f,
             start_new_session=True
         )
         time.sleep(2)
-        logger.info("gobgpd starte attempt finished")
+        logger.info("gobgpd start attempt finished")
         return True
     except Exception as e:
         logger.error(f"Failed to start gobgpd: {e}")
