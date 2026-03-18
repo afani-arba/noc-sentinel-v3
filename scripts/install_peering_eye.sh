@@ -14,11 +14,16 @@ echo "============================================================"
 echo ""
 
 # ── Config ──────────────────────────────────────────────────
-INSTALL_DIR="/opt/noc-sentinel"
+# Auto-detect install dir (wherever this script is located)
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+INSTALL_DIR="$(dirname "${SCRIPT_DIR}")"
 PYTHON_BIN="python3"
 GOBGP_VERSION="3.30.0"
 GOBGP_URL="https://github.com/osrg/gobgp/releases/download/v${GOBGP_VERSION}/gobgp_${GOBGP_VERSION}_linux_amd64.tar.gz"
 REPO_SCRIPTS="${INSTALL_DIR}/scripts"
+
+echo "  Install Dir  : ${INSTALL_DIR}"
+echo "  Scripts Dir  : ${REPO_SCRIPTS}"
 
 # ── 0. Check root ────────────────────────────────────────────
 if [ "$EUID" -ne 0 ]; then
