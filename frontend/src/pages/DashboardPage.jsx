@@ -385,7 +385,7 @@ export default function DashboardPage() {
                       if (val >= 1000) return `${(val/1000).toFixed(1)} Gbps`;
                       return `${val} Mbps`;
                   }} />
-                  <Tooltip {...ttStyle} formatter={(v, n) => [`${Number(v).toFixed(2)} Mbps`, n === "download" ? "Download" : "Upload"]} />
+                  <Tooltip {...ttStyle} formatter={(v, n) => [`${Number(v).toFixed(2)} Mbps`, n === "Download" || n === "download" ? "Download" : "Upload"]} />
                   <Area type="linear" dataKey="download" stroke="#ef4444" fill="url(#gDl)" strokeWidth={1.5} name="Download" activeDot={{ r: 4 }} />
                   <Area type="linear" dataKey="upload" stroke="#f97316" fill="url(#gUl)" strokeWidth={1.5} name="Upload" activeDot={{ r: 4 }} />
                 </AreaChart>
@@ -425,7 +425,7 @@ export default function DashboardPage() {
                         if (val >= 1000) return `${(val/1000).toFixed(1)} Gbps`;
                         return `${val} Mbps`;
                     }} />
-                    <Tooltip {...ttStyle} formatter={(v, n) => [`${Number(v).toFixed(2)} Mbps`, n === "download" ? "Download" : "Upload"]} />
+                    <Tooltip {...ttStyle} formatter={(v, n) => [`${Number(v).toFixed(2)} Mbps`, n === "Download" || n === "download" ? "Download" : "Upload"]} />
                     <Area type="linear" dataKey="download" stroke="#6366f1" fill="url(#gDlOut)" strokeWidth={1.5} name="Download" activeDot={{ r: 4 }} />
                     <Area type="linear" dataKey="upload" stroke="#a855f7" fill="url(#gUlOut)" strokeWidth={1.5} name="Upload" activeDot={{ r: 4 }} />
                   </AreaChart>
