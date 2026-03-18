@@ -286,9 +286,10 @@ def sync_platform_ips_to_bgp(platform: str, new_ips: set[str]):
 
     old_ips = CURRENT_INJECTED.get(platform, set())
     
+    bgp_nexthop = os.getenv("BGP_NEXTHOP", "10.175.175.7")
     added = 0
     for ip in new_ips - old_ips:
-        ok, _ = run_cmd([GOBGP_BIN, "global", "rib", "add", f"{ip}/32", "community", community])
+        ok, _ = run_cmd([GOBGP_BIN, "global", "rib", "add", f"{ip}/32", "nexthop", bgp_nexthop, "community", community])
         if ok: added += 1
             
     deleted = 0
