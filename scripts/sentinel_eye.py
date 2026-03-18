@@ -230,8 +230,16 @@ def parse_netflow_v5(data: bytes, sender_ip: str) -> list[dict]:
             fields = struct.unpack("!4s4s4sHHIIIIHHxBBBHHBBxx", flow)
             src_ip   = socket.inet_ntoa(fields[0])
             dst_ip   = socket.inet_ntoa(fields[1])
-            packets  = fields[7]
-            octets   = fields[8]   # bytes
+            packets  = fields[5]
+            octets   = fields[6]   # bytes
+
+            # SANITY CHECK: Cegah Bug Mikrotik (ROS v6/v7) melempar traffic Terabyte palsu!
+            # Batas logis MTU adalah 1500 byte per paket. Jika lebih, berarti angka octets cacat (wrapped int).
+            if octets > packets * 1600:
+                octets = packets * 1000  # Fallback ke rata-rata 1KB per paket
+            
+            if octets > 500_000_000:     # Limit absolut: 500 MB per flow record (mencegah spike gila)
+                octets = 500_000_000
 
             # Check if we know what platform this dst_ip or src_ip belongs to
             with cache_lock:
@@ -362,6 +370,10 @@ def flush_to_mongo():
     """Periodic flush: combine dns_acc + flow_acc → MongoDB."""
     db = get_db()
     logger.info(f"MongoDB flush loop started (interval={FLUSH_INTERVAL}s)")
+    
+    # Run initial cache population before entering the sleep loop
+    refresh_device_cache(db)
+    refresh_ip_cache(db)
 
     while True:
         time.sleep(FLUSH_INTERVAL)
