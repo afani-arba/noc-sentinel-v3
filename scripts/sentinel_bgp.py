@@ -289,7 +289,7 @@ def ensure_gobgpd_running():
 
     try:
         subprocess.Popen(
-            [GOBGPD_BIN, "-f", GOBGP_CONFIG_PATH, "--log-level", "warn", "-p"],
+            [GOBGPD_BIN, "-f", GOBGP_CONFIG_PATH, "--log-level", "info"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True
