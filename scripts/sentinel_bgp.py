@@ -328,14 +328,13 @@ def bgp_monitor_loop():
             established = sum(1 for s in status if s["state"] == "ESTABLISHED")
             logger.info(f"BGP sync done: {len(status)} peers, {established} established")
 
-            # 5. Inject prefixes if we have active established peers
-            if established > 0:
-                domains_map = get_platform_domains(db)
-                for platform, domains in domains_map.items():
-                    if not domains: continue
-                    ips = resolve_all_domains(domains)
-                    if ips:
-                        sync_platform_ips_to_bgp(platform, ips)
+            # 5. Inject prefixes into global RIB (peers will automatically receive them when they connect)
+            domains_map = get_platform_domains(db)
+            for platform, domains in domains_map.items():
+                if not domains: continue
+                ips = resolve_all_domains(domains)
+                if ips:
+                    sync_platform_ips_to_bgp(platform, ips)
 
         except Exception as e:
             logger.error(f"BGP monitor loop error: {e}")
