@@ -22,6 +22,11 @@ api.interceptors.response.use(
       localStorage.removeItem('noc_user');
       window.location.href = '/login';
     }
+    if (error.response?.status === 403 && error.response?.data?.detail?.includes("License Error")) {
+      if (window.location.pathname !== '/admin/license') {
+        window.location.href = '/admin/license';
+      }
+    }
     return Promise.reject(error);
   }
 );

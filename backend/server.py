@@ -59,6 +59,7 @@ from routers.speedtest import router as speedtest_router
 from routers.routing_alerts import router as routing_alerts_router
 from routers.wireguard import router as wireguard_router
 from routers.peering_eye import router as peering_eye_router
+from routers.license import router as license_router
 
 # ── Background task references (FIX BUG #3: simpan reference agar tidak di-GC) ──
 _background_tasks: list = []
@@ -136,9 +137,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error checking WireGuard startup config: {e}")
 
-    logger.info("NOC-Sentinel ready!")
+    # Start License Verification
+    from services.license_service import license_check_loop
+    license_task = asyncio.create_task(license_check_loop())
+    _background_tasks.append(license_task)
+    logger.info("License Verification loop started")
 
+    logger.info("NOC-Sentinel ready!")
+    
     yield  # Server berjalan di sini
+
 
     # ── Shutdown ──────────────────────────────────────────────────────────
     logger.info("NOC-Sentinel shutting down...")
@@ -174,6 +182,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# FIX BUG #5: License verification middleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from core.db import get_db
+
+@app.middleware("http")
+async def license_middleware(request: Request, call_next):
+    path = request.url.path
+    if path.startswith("/api/"):
+        allowed = ["/api/auth/login", "/api/system/license", "/api/syslog/"] # Allow auth and license update
+        if not any(path.startswith(p) for p in allowed):
+            try:
+                # Middleware sync-like, tapi db_settings kita pakai motor async
+                # Kita bisa menggunakan request.app.state.db jika diset, atau get_db secara langsung.
+                # Opsi aman: buat koneksi temporary atau gunakan koneksi single db
+                db = await anext(get_db())
+                status_doc = await db.system_settings.find_one({"_id": "license_status"})
+                status = status_doc.get("status") if status_doc else "unlicensed"
+                if status != "valid":
+                    return JSONResponse(status_code=403, content={"detail": f"License Error: {status_doc.get('message', 'Unlicensed')}"})
+            except Exception as e:
+                # Fallback if DB not ready
+                pass
+
+    return await call_next(request)
+
 # Mount all routers under /api prefix
 api = APIRouter(prefix="/api")
 api.include_router(auth_router)
@@ -201,6 +235,7 @@ api.include_router(speedtest_router)
 api.include_router(routing_alerts_router)
 api.include_router(wireguard_router)
 api.include_router(peering_eye_router)
+api.include_router(license_router)
 app.include_router(api)
 
 

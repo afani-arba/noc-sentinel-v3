@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NOC License Server Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex text-sm">
+    <!-- Sidebar -->
+    <aside class="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
+        <div class="h-16 flex items-center px-6 border-b border-gray-700">
+            <i data-lucide="shield-check" class="text-blue-500 mr-2"></i>
+            <h1 class="font-bold text-lg text-white">License Server</h1>
+        </div>
+        <nav class="flex-1 px-4 py-6 flex flex-col gap-2">
+            <button onclick="switchTab('dashboard')" id="nav-dashboard" class="flex items-center px-4 py-2.5 hover:bg-gray-700 rounded-md transition-colors text-left w-full">
+                <i data-lucide="layout-dashboard" class="w-4 h-4 mr-3"></i> Dashboard
+            </button>
+            <button onclick="switchTab('licenses')" id="nav-licenses" class="flex items-center px-4 py-2.5 hover:bg-gray-700 rounded-md transition-colors text-left w-full">
+                <i data-lucide="key" class="w-4 h-4 mr-3"></i> Manajemen Lisensi
+            </button>
+            <button onclick="switchTab('products')" id="nav-products" class="flex items-center px-4 py-2.5 hover:bg-gray-700 rounded-md transition-colors text-left w-full">
+                <i data-lucide="shopping-cart" class="w-4 h-4 mr-3"></i> Paket Produk
+            </button>
+        </nav>
+        <div class="p-4 border-t border-gray-700">
+            <a href="/" class="flex items-center px-4 py-2 hover:bg-red-500/10 text-red-400 rounded-md transition-colors w-full">
+                <i data-lucide="log-out" class="w-4 h-4 mr-3"></i> Logout
+            </a>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col overflow-hidden bg-gray-900 h-screen">
+        <header class="h-16 bg-gray-800 border-b border-gray-700 flex items-center px-8 justify-between shrink-0">
+            <h2 id="page-title" class="text-lg font-semibold text-white">Dashboard Monitoring</h2>
+            <div class="text-xs text-gray-400">Welcome, Admin</div>
+        </header>
+
+        <div class="flex-1 overflow-auto p-8 relative">
+            <!-- TAB: Dashboard -->
+            <div id="tab-dashboard" class="hidden">
+                <div class="grid grid-cols-4 gap-6 mb-8">
+                    <div class="bg-gray-800 p-5 rounded-lg border border-gray-700">
+                        <p class="text-gray-400 mb-1 font-medium">Total Lisensi</p>
+                        <h3 id="stat-total" class="text-3xl font-bold text-blue-400">0</h3>
+                    </div>
+                    <div class="bg-gray-800 p-5 rounded-lg border border-gray-700">
+                        <p class="text-gray-400 mb-1 font-medium">Valid / Active</p>
+                        <h3 id="stat-active" class="text-3xl font-bold text-green-400">0</h3>
+                    </div>
+                    <div class="bg-gray-800 p-5 rounded-lg border border-gray-700">
+                        <p class="text-gray-400 mb-1 font-medium">Expired / Inactive</p>
+                        <h3 id="stat-inactive" class="text-3xl font-bold text-gray-400">0</h3>
+                    </div>
+                    <div class="bg-gray-800 p-5 rounded-lg border border-red-900/50">
+                        <p class="text-gray-400 mb-1 font-medium">Cracked / Cloned</p>
+                        <h3 id="stat-cracked" class="text-3xl font-bold text-red-500">0</h3>
+                    </div>
+                </div>
+
+                <div class="bg-gray-800 rounded-lg border border-gray-700">
+                    <div class="px-6 py-4 border-b border-gray-700 flex items-center justify-between">
+                        <h3 class="font-semibold text-white">Log Aktivitas Keamanan</h3>
+                        <button onclick="loadDashboard()" class="text-blue-400 hover:text-blue-300 text-xs flex items-center"><i data-lucide="refresh-cw" class="w-3 h-3 mr-1"></i> Refresh</button>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left">
+                            <thead class="bg-gray-900/50 border-b border-gray-700 text-gray-400 text-xs">
+                                <tr>
+                                    <th class="px-6 py-3">Waktu</th>
+                                    <th class="px-6 py-3">License Key</th>
+                                    <th class="px-6 py-3">Hardware ID</th>
+                                    <th class="px-6 py-3">IP Address</th>
+                                    <th class="px-6 py-3">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="logs-container" class="divide-y divide-gray-700/50 text-gray-300">
+                                <!-- JS injected -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB: Licenses -->
+            <div id="tab-licenses" class="hidden">
+                <div class="flex justify-between items-center mb-6">
+                    <h3 class="text-xl font-bold">Daftar Lisensi Klien</h3>
+                    <button onclick="openLicenseModal()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-md font-medium flex items-center">
+                        <i data-lucide="plus" class="w-4 h-4 mr-2"></i> Buat Lisensi
+                    </button>
+                </div>
+                <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+                    <table class="w-full text-left">
+                        <thead class="bg-gray-900/50 border-b border-gray-700 text-gray-400 text-xs">
+                            <tr>
+                                <th class="px-6 py-3">Pelanggan</th>
+                                <th class="px-6 py-3">License Key</th>
+                                <th class="px-6 py-3">Tipe Paket</th>
+                                <th class="px-6 py-3">Devices</th>
+                                <th class="px-6 py-3">Kadaluarsa</th>
+                            </tr>
+                        </thead>
+                        <tbody id="licenses-container" class="divide-y divide-gray-700/50 text-gray-300">
+                            <!-- JS injected -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- TAB: Products -->
+            <div id="tab-products" class="hidden">
+                <div class="flex justify-between items-center mb-6">
+                    <h3 class="text-xl font-bold">Paket & Harga (Billing)</h3>
+                    <button onclick="openProductModal()" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-md font-medium flex items-center">
+                        <i data-lucide="plus" class="w-4 h-4 mr-2"></i> Tambah Paket
+                    </button>
+                </div>
+                <div class="grid grid-cols-3 gap-6" id="products-container">
+                    <!-- JS Injected -->
+                </div>
+            </div>
+            
+        </div>
+    </main>
+
+    <!-- Modal Product -->
+    <div id="modal-product" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
+        <div class="bg-gray-800 p-6 rounded-lg border border-gray-700 w-96 relative">
+            <button onclick="closeModals()" class="absolute top-4 right-4 text-gray-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+            <h3 class="text-lg font-bold mb-4">Tambah Paket Produk</h3>
+            <form id="form-product" onsubmit="saveProduct(event)">
+                <div class="mb-3">
+                    <label class="block text-xs text-gray-400 mb-1">Nama Paket</label>
+                    <input type="text" id="p-name" class="w-full p-2 bg-gray-900 border border-gray-700 rounded text-sm focus:border-blue-500 outline-none" required>
+                </div>
+                <div class="mb-3">
+                    <label class="block text-xs text-gray-400 mb-1">Tipe (bulanan/tahunan/lifetime)</label>
+                    <select id="p-type" class="w-full p-2 bg-gray-900 border border-gray-700 rounded text-sm focus:border-blue-500 outline-none">
+                        <option value="monthly">Bulanan</option>
+                        <option value="yearly">Tahunan</option>
+                        <option value="lifetime">Lifetime</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="block text-xs text-gray-400 mb-1">Durasi Aktif (Bulan)</label>
+                    <input type="number" id="p-dur" value="1" class="w-full p-2 bg-gray-900 border border-gray-700 rounded text-sm focus:border-blue-500 outline-none">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-xs text-gray-400 mb-1">Harga (Rp)</label>
+                    <input type="number" id="p-price" value="0" class="w-full p-2 bg-gray-900 border border-gray-700 rounded text-sm focus:border-blue-500 outline-none">
+                </div>
+                <button type="submit" class="w-full bg-green-600 hover:bg-green-500 py-2 rounded font-medium">Simpan Paket</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal License -->
+    <div id="modal-license" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
+        <div class="bg-gray-800 p-6 rounded-lg border border-gray-700 w-96 relative">
+            <button onclick="closeModals()" class="absolute top-4 right-4 text-gray-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+            <h3 class="text-lg font-bold mb-4">Buat Lisensi Baru</h3>
+            <form id="form-license" onsubmit="saveLicense(event)">
+                <div class="mb-3">
+                    <label class="block text-xs text-gray-400 mb-1">Pilih Paket Produk</label>
+                    <select id="l-product" class="w-full p-2 bg-gray-900 border border-gray-700 rounded text-sm focus:border-blue-500 outline-none" required></select>
+                </div>
+                <div class="mb-3">
+                    <label class="block text-xs text-gray-400 mb-1">Nama Pelanggan / Usaha</label>
+                    <input type="text" id="l-customer" class="w-full p-2 bg-gray-900 border border-gray-700 rounded text-sm focus:border-blue-500 outline-none" required>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-xs text-gray-400 mb-1">Batas Maksimal Device ID</label>
+                    <input type="number" id="l-max" value="1" class="w-full p-2 bg-gray-900 border border-gray-700 rounded text-sm focus:border-blue-500 outline-none">
+                </div>
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 py-2 rounded font-medium">Generate Key</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Init Lucide Icons
+        lucide.createIcons();
+
+        // Global State
+        let currentTab = 'dashboard';
+        let allProducts = [];
+
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('[id^="tab-"]').forEach(el => el.classList.add('hidden'));
+            document.getElementById(`tab-${tab}`).classList.remove('hidden');
+            
+            // Stylize nav
+            document.querySelectorAll('[id^="nav-"]').forEach(el => {
+                el.classList.remove('bg-blue-600/20', 'text-blue-400');
+                el.classList.add('text-gray-300');
+            });
+            let actNav = document.getElementById(`nav-${tab}`);
+            actNav.classList.remove('text-gray-300');
+            actNav.classList.add('bg-blue-600/20', 'text-blue-400');
+            
+            document.getElementById('page-title').innerText = actNav.innerText;
+
+            // Load data
+            if(tab === 'dashboard') loadDashboard();
+            if(tab === 'licenses') loadLicenses();
+            if(tab === 'products') loadProducts();
+        }
+
+        async function apiCall(path, method='GET', body=null) {
+            const opts = { method, headers: { 'Content-Type': 'application/json' }};
+            if(body) opts.body = JSON.stringify(body);
+            try {
+                const res = await fetch(path, opts);
+                return await res.json();
+            } catch(e) {
+                console.error(e);
+                alert("API Error");
+            }
+        }
+
+        // --- Dashboard ---
+        async function loadDashboard() {
+            const stats = await apiCall('/api/v1/dashboard/stats');
+            if(stats) {
+                document.getElementById('stat-total').innerText = stats.total;
+                document.getElementById('stat-active').innerText = stats.active;
+                document.getElementById('stat-inactive').innerText = stats.inactive;
+                document.getElementById('stat-cracked').innerText = stats.cracked + stats.cloned;
+            }
+            const logs = await apiCall('/api/v1/monitoring_logs');
+            const tbody = document.getElementById('logs-container');
+            tbody.innerHTML = '';
+            if(logs) {
+                logs.forEach(l => {
+                    let badge = 'bg-gray-500/10 text-gray-400';
+                    if(l.status === 'Valid') badge = 'bg-green-500/10 text-green-400';
+                    if(l.status === 'Cracked') badge = 'bg-red-500/10 text-red-500';
+                    if(l.status === 'Cloned') badge = 'bg-yellow-500/10 text-yellow-400';
+                    if(l.status === 'Expired') badge = 'bg-orange-500/10 text-orange-400';
+
+                    tbody.innerHTML += `
+                        <tr class="hover:bg-gray-700/30">
+                            <td class="px-6 py-3">${l.timestamp.slice(0, 19).replace('T', ' ')}</td>
+                            <td class="px-6 py-3 font-mono text-xs">${l.license_key}</td>
+                            <td class="px-6 py-3 font-mono text-xs">${l.hardware_id}</td>
+                            <td class="px-6 py-3">${l.ip_address}</td>
+                            <td class="px-6 py-3"><span class="px-2 py-1 ${badge} rounded text-xs font-semibold">${l.status}</span></td>
+                        </tr>
+                    `;
+                });
+            }
+        }
+
+        // --- Products ---
+        async function loadProducts() {
+            allProducts = await apiCall('/api/v1/products') || [];
+            const container = document.getElementById('products-container');
+            container.innerHTML = '';
+            allProducts.forEach(p => {
+                container.innerHTML += `
+                    <div class="bg-gray-800 p-5 rounded-lg border border-gray-700 flex flex-col">
+                        <div class="flex justify-between items-start mb-2">
+                            <h4 class="font-bold text-lg text-white">${p.name}</h4>
+                            <span class="px-2 py-1 bg-gray-700 text-xs rounded uppercase text-gray-300">${p.type}</span>
+                        </div>
+                        <p class="text-xs text-gray-400 mb-4 h-8">${p.duration_months} Bulan Masa Aktif</p>
+                        <div class="mt-auto border-t border-gray-700 pt-3 flex justify-between items-center">
+                            <span class="text-sm font-medium text-gray-400">Harga:</span>
+                            <span class="font-bold text-green-400">Rp ${p.price.toLocaleString()}</span>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        function openProductModal() {
+            document.getElementById('modal-product').classList.remove('hidden');
+            document.getElementById('modal-product').classList.add('flex');
+        }
+
+        async function saveProduct(e) {
+            e.preventDefault();
+            const body = {
+                name: document.getElementById('p-name').value,
+                type: document.getElementById('p-type').value,
+                duration_months: parseInt(document.getElementById('p-dur').value),
+                price: parseInt(document.getElementById('p-price').value),
+            };
+            const res = await apiCall('/api/v1/products', 'POST', body);
+            if(res) {
+                closeModals();
+                loadProducts();
+            }
+        }
+
+        // --- Licenses ---
+        async function loadLicenses() {
+            const list = await apiCall('/api/v1/licenses') || [];
+            const tbody = document.getElementById('licenses-container');
+            tbody.innerHTML = '';
+            list.forEach(l => {
+                tbody.innerHTML += `
+                    <tr class="hover:bg-gray-700/30">
+                        <td class="px-6 py-3 font-medium text-white">${l.customer_name}</td>
+                        <td class="px-6 py-3 font-mono text-xs text-blue-400 cursor-pointer" onclick="navigator.clipboard.writeText('${l.license_key}'); alert('Copied!')">${l.license_key}</td>
+                        <td class="px-6 py-3 uppercase text-xs">${l.type}</td>
+                        <td class="px-6 py-3">${l.hardware_ids.length}/${l.max_devices}</td>
+                        <td class="px-6 py-3 text-xs">${l.expires_at.slice(0,10)}</td>
+                    </tr>
+                `;
+            });
+        }
+
+        async function openLicenseModal() {
+            document.getElementById('modal-license').classList.remove('hidden');
+            document.getElementById('modal-license').classList.add('flex');
+            
+            allProducts = await apiCall('/api/v1/products') || [];
+            const sel = document.getElementById('l-product');
+            sel.innerHTML = '';
+            allProducts.forEach(p => {
+                sel.innerHTML += `<option value="${p.id}">${p.name} (Rp ${p.price.toLocaleString()})</option>`;
+            });
+        }
+
+        async function saveLicense(e) {
+            e.preventDefault();
+            const body = {
+                product_id: document.getElementById('l-product').value,
+                customer_name: document.getElementById('l-customer').value,
+                max_devices: parseInt(document.getElementById('l-max').value),
+            };
+            const res = await apiCall('/api/v1/licenses', 'POST', body);
+            if(res) {
+                alert(`Generated Key: ${res.license.license_key}`);
+                closeModals();
+                loadLicenses();
+            }
+        }
+
+        // --- Utils ---
+        function closeModals() {
+            document.querySelectorAll('[id^="modal-"]').forEach(el => {
+                el.classList.add('hidden');
+                el.classList.remove('flex');
+            });
+        }
+
+        // Init
+        switchTab('dashboard');
+
+    </script>
+</body>
+</html>

@@ -37,6 +37,7 @@ const navItems = [
   { to: "/scheduler", icon: CalendarClock, label: "Scheduler & Monitor", adminOnly: true },
   { to: "/syslog", icon: Terminal, label: "Syslog", adminOnly: true },
   { to: "/update", icon: Download, label: "Update Aplikasi", adminOnly: true },
+  { to: "/admin/license", icon: ShieldAlert, label: "Lisensi Sistem", adminOnly: true },
   { to: "/settings", icon: Settings, label: "Pengaturan", adminOnly: true },
   { to: "/admin", icon: Shield, label: "Admin", adminOnly: true },
 ];
