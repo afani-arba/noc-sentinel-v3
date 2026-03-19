@@ -1192,6 +1192,10 @@ function SettingsTab() {
     wa_token: "",
     wa_delay_ms: 10000,
     wa_template_unpaid: "",
+    wa_template_isolir: "",
+    auto_isolir_enabled: false,
+    auto_isolir_time: "00:05",
+    auto_isolir_grace_days: 1,
   });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1262,12 +1266,55 @@ function SettingsTab() {
           <textarea
             value={settings.wa_template_unpaid || ""}
             onChange={e => setSettings({ ...settings, wa_template_unpaid: e.target.value })}
-            className="w-full h-40 text-xs rounded-sm border border-border bg-secondary p-2 text-foreground resize-y font-mono mt-1"
+            className="w-full h-24 text-xs rounded-sm border border-border bg-secondary p-2 text-foreground resize-y font-mono mt-1"
+            placeholder="Pesanan tagihan belum lunas..."
           />
         </div>
 
-        <Button onClick={handleSave} disabled={saving} className="w-full sm:w-auto text-xs h-8 rounded-sm gap-2">
+        <div className="space-y-1.5 pt-2">
+          <Label className="text-xs text-muted-foreground">Template Pesan Terisolir / Diputus</Label>
+          <p className="text-[10px] text-muted-foreground">Dikirim otomatis saat fitur Auto Isolir mengeksekusi pelanggan overdue.</p>
+          <textarea
+            value={settings.wa_template_isolir || ""}
+            onChange={e => setSettings({ ...settings, wa_template_isolir: e.target.value })}
+            className="w-full h-24 text-xs rounded-sm border border-border bg-secondary p-2 text-foreground resize-y font-mono mt-1"
+            placeholder="Mohon maaf, layanan Anda kami isolir..."
+          />
+        </div>
+
+        <Button onClick={handleSave} disabled={saving} className="w-full sm:w-auto text-xs h-8 rounded-sm gap-2 mt-4">
           <Save className="w-3.5 h-3.5" /> {saving ? "Menyimpan..." : "Simpan Pengaturan"}
+        </Button>
+      </div>
+
+      <div className="bg-card border border-border rounded-sm p-4 space-y-4">
+        <h3 className="font-semibold text-sm flex items-center gap-2 border-b border-border/50 pb-2 mb-2">
+          <WifiOff className="w-4 h-4 text-orange-400" /> Konfigurasi Auto Isolir (Otomatis Putus)
+        </h3>
+        
+        <div className="space-y-3 bg-secondary/10 rounded-sm">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={settings.auto_isolir_enabled || false} onChange={e => setSettings({ ...settings, auto_isolir_enabled: e.target.checked })} className="rounded" />
+            <span className="text-sm font-medium">Aktifkan Auto Isolir Pelanggan</span>
+          </label>
+          <p className="text-[10px] text-muted-foreground pl-6">Sistem akan otomatis memutus koneksi pelanggan di MikroTik yang memiliki tagihan overdue sesuai jadwal eksekusi di bawah.</p>
+          
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pl-6 pt-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Jam Eksekusi (Harian)</Label>
+              <Input value={settings.auto_isolir_time || "00:05"} onChange={e => setSettings({ ...settings, auto_isolir_time: e.target.value })}
+                type="time" className="h-8 rounded-sm text-xs font-mono" disabled={!settings.auto_isolir_enabled} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Toleransi Keterlambatan (Hari lewat jatuh tempo)</Label>
+              <Input value={settings.auto_isolir_grace_days || 1} onChange={e => setSettings({ ...settings, auto_isolir_grace_days: Number(e.target.value) })}
+                type="number" min="0" className="h-8 rounded-sm text-xs font-mono" disabled={!settings.auto_isolir_enabled} />
+            </div>
+          </div>
+        </div>
+
+        <Button onClick={handleSave} disabled={saving} className="w-full sm:w-auto text-xs h-8 rounded-sm gap-2 mt-4 border-orange-500/30 text-orange-400 hover:bg-orange-500/10" variant="outline">
+          <Save className="w-3.5 h-3.5" /> {saving ? "Menyimpan..." : "Simpan Pengaturan Isolir"}
         </Button>
       </div>
     </div>

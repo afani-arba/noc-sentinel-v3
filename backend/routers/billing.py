@@ -44,6 +44,10 @@ class BillingSettingsUpdate(BaseModel):
     wa_token: Optional[str] = None
     wa_delay_ms: Optional[int] = None
     wa_template_unpaid: Optional[str] = None
+    wa_template_isolir: Optional[str] = None
+    auto_isolir_enabled: Optional[bool] = None
+    auto_isolir_time: Optional[str] = None
+    auto_isolir_grace_days: Optional[int] = None
 
 @router.get("/settings")
 async def get_billing_settings(user=Depends(get_current_user)):
@@ -56,6 +60,10 @@ async def get_billing_settings(user=Depends(get_current_user)):
             "wa_token": "",
             "wa_delay_ms": 10000,
             "wa_template_unpaid": "Yth. *{customer_name}*,\n\nTagihan internet Anda sebesar *{total}* untuk paket {package_name} periode {period} telah terbit. Nomor invoice: {invoice_number}.\nJatuh tempo pada: *{due_date}*.\n\nMohon segera melakukan pembayaran. Abaikan pesan ini jika sudah mengkonfirmasi pembayaran.",
+            "wa_template_isolir": "Yth. *{customer_name}*,\n\nMohon maaf, layanan internet Anda untuk paket {package_name} (Invoice: {invoice_number}) telah kami *ISOLIR* (putus sementara) karena melewati batas waktu pembayaran.\nTotal tagihan: *{total}* (Jatuh tempo: {due_date}).\n\nSilakan lakukan pembayaran agar layanan dapat segera aktif kembali. Terima kasih.",
+            "auto_isolir_enabled": False,
+            "auto_isolir_time": "00:05",
+            "auto_isolir_grace_days": 1,
         }
         await db.billing_settings.insert_one(settings)
         settings.pop("_id", None)

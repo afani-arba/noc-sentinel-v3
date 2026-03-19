@@ -96,6 +96,12 @@ async def lifespan(app: FastAPI):
     _background_tasks.append(backup_task)
     logger.info("Auto backup scheduler started")
 
+    # Start auto-isolir scheduler
+    from services.isolir_service import auto_isolir_loop
+    isolir_task = asyncio.create_task(auto_isolir_loop())
+    _background_tasks.append(isolir_task)
+    logger.info("Auto isolir scheduler started")
+
     # Start BGP/OSPF alert monitor
     from services.routing_alert_service import bgp_ospf_alert_loop
     bgp_task = asyncio.create_task(bgp_ospf_alert_loop())
