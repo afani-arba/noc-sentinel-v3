@@ -93,6 +93,7 @@ class MikroTikBase:
     async def get_isp_interfaces(self):  return []
     async def get_interface_traffic(self, interface_name="ether1", duration=1): return {}
     async def ping_host(self, address="8.8.8.8", count=4): return []
+    async def list_dhcp_leases(self): return []
 
     # ── PPPoE ──
     async def list_pppoe_secrets(self): raise NotImplementedError
@@ -529,6 +530,14 @@ class MikroTikRestAPI(MikroTikBase):
         except Exception:
             return []
 
+    # ── DHCP Leases ──
+    async def list_dhcp_leases(self):
+        try:
+            items = await self._async_req("GET", "ip/dhcp-server/lease")
+            return items if isinstance(items, list) else []
+        except Exception:
+            return []
+
     # ── Firewall ──
     async def list_firewall_filter(self):
         try:
@@ -547,6 +556,24 @@ class MikroTikRestAPI(MikroTikBase):
             return await self._async_req("GET", "ip/firewall/mangle")
         except Exception:
             return []
+
+    async def get_firewall_address_list(self):
+        try:
+            return await self._async_req("GET", "ip/firewall/address-list")
+        except Exception:
+            return []
+
+    async def add_firewall_address_list(self, list_name: str, address: str, comment: str=""):
+        try:
+            return await self._async_req("PUT", "ip/firewall/address-list", {"list": list_name, "address": address, "comment": comment})
+        except Exception as e:
+            raise Exception(f"Gagal tambah address-list: {e}")
+
+    async def remove_firewall_address_list(self, mt_id: str):
+        try:
+            return await self._async_req("DELETE", f"ip/firewall/address-list/{mt_id}")
+        except Exception as e:
+            raise Exception(f"Gagal hapus address-list: {e}")
 
     # ── PPPoE (ROS 7.x REST API) ──────────────────────────────────────────────
     # Endpoint: /rest/ppp/secret  (PPPoE user secrets)
@@ -792,11 +819,25 @@ class MikroTikLegacyAPI(MikroTikBase):
             normalized = {}
             for k, v in item.items():
                 normalized[k] = v
-            # Ensure .id field exists (RouterOS API uses 'id')
             if "id" in normalized and ".id" not in normalized:
                 normalized[".id"] = normalized["id"]
             result.append(normalized)
         return result
+
+    async def list_dhcp_leases(self):
+        def cb(api):
+            return self._normalize_items(api.get_resource('/ip/dhcp-server/lease').get())
+        return await asyncio.to_thread(self._execute, cb)
+
+    async def get_firewall_address_list(self):
+        items = await asyncio.to_thread(self._list_resource, "/ip/firewall/address-list")
+        return self._normalize_items(items)
+
+    async def add_firewall_address_list(self, list_name: str, address: str, comment: str=""):
+        return await asyncio.to_thread(self._add_resource, "/ip/firewall/address-list", {"list": list_name, "address": address, "comment": comment})
+
+    async def remove_firewall_address_list(self, mt_id: str):
+        return await asyncio.to_thread(self._remove_resource, "/ip/firewall/address-list", mt_id)
 
     async def test_connection(self):
         try:

@@ -8,64 +8,70 @@ Endpoints untuk membaca data dari collection:
 Mount prefix: /api/peering-eye
 """
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, Body
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
+from pydantic import BaseModel
+import asyncio
+import uuid
 from core.db import get_db
-from core.auth import get_current_user
+from core.auth import get_current_user, require_write, require_admin
+from mikrotik_api import get_api_client
 
 router = APIRouter(prefix="/peering-eye", tags=["Peering Eye"])
 
-# ─── Platform colors & icons (fallback jika kolom tidak ada di DB) ────────────
-PLATFORM_META = {
-    "Judi Online":  {"icon": "🎰", "color": "#be123c"},
-    "Situs Dewasa": {"icon": "🔞", "color": "#be185d"},
-    "YouTube":      {"icon": "▶",  "color": "#ef4444"},
-    "Netflix":      {"icon": "🎬", "color": "#f43f5e"},
-    "TikTok":       {"icon": "🎵", "color": "#ec4899"},
-    "Twitch":       {"icon": "🎮", "color": "#a855f7"},
-    "Spotify":      {"icon": "🎧", "color": "#22c55e"},
-    "Disney+":      {"icon": "🎬", "color": "#3b82f6"},
-    "Facebook":     {"icon": "👥", "color": "#3b82f6"},
-    "Instagram":    {"icon": "📸", "color": "#d946ef"},
-    "Twitter/X":    {"icon": "🐦", "color": "#e2e8f0"},
-    "Pinterest":    {"icon": "📌", "color": "#ef4444"},
-    "WhatsApp":     {"icon": "💬", "color": "#10b981"},
-    "Telegram":     {"icon": "✈",  "color": "#0ea5e9"},
-    "Discord":      {"icon": "🎮", "color": "#6366f1"},
-    "LINE":         {"icon": "💬", "color": "#22c55e"},
-    "Google":       {"icon": "🔍", "color": "#60a5fa"},
-    "Microsoft":    {"icon": "🪟", "color": "#38bdf8"},
-    "Apple/iCloud": {"icon": "🍎", "color": "#94a3b8"},
-    "Cloudflare":   {"icon": "☁",  "color": "#f97316"},
-    "Amazon/AWS":   {"icon": "📦", "color": "#f59e0b"},
-    "Yahoo":        {"icon": "📰", "color": "#8b5cf6"},
-    "Akamai CDN":   {"icon": "🌍", "color": "#14b8a6"},
-    "Fastly CDN":   {"icon": "🌍", "color": "#f43f5e"},
-    "Ad Networks":  {"icon": "📈", "color": "#f472b6"},
-    "Xiaomi":       {"icon": "📱", "color": "#f97316"},
-    "Samsung":      {"icon": "📱", "color": "#3b82f6"},
-    "Oppo/Vivo":    {"icon": "📱", "color": "#22c55e"},
-    "Zoom":         {"icon": "📹", "color": "#3b82f6"},
-    "Tokopedia":    {"icon": "🛒", "color": "#22c55e"},
-    "Shopee":       {"icon": "🛍", "color": "#f97316"},
-    "Gojek/GoTo":   {"icon": "🚗", "color": "#10b981"},
-    "Grab":         {"icon": "🚕", "color": "#22c55e"},
-    "Bukalapak":    {"icon": "🛒", "color": "#e11d48"},
-    "Traveloka":    {"icon": "✈",  "color": "#0ea5e9"},
-    "Detikcom":     {"icon": "📰", "color": "#1d4ed8"},
-    "Kompas":       {"icon": "📰", "color": "#ea580c"},
-    "Tribun":       {"icon": "📰", "color": "#1e3a8a"},
-    "Steam":        {"icon": "🎮", "color": "#334155"},
-    "Riot Games":   {"icon": "⚔",  "color": "#e11d48"},
-    "Epic Games":   {"icon": "🎮", "color": "#475569"},
-    "Roblox":       {"icon": "🧱", "color": "#f8fafc"},
-    "Garena":       {"icon": "🎮", "color": "#ea580c"},
-    "Mobile Legends":{"icon": "⚔", "color": "#eab308"},
-    "PUBG Mobile":  {"icon": "🔫", "color": "#f59e0b"},
-    "Others":       {"icon": "🌐", "color": "#64748b"},
-}
+# ─── Endpoint: Platforms Management ──────────────────────────────────────────
+class PeeringPlatform(BaseModel):
+    name: str
+    regex_pattern: str
+    icon: str = "🌐"
+    color: str = "#64748b"
+    alert_threshold_hits: int = 0
+    alert_threshold_mb: int = 0
 
+@router.get("/platforms")
+async def get_platforms(user=Depends(get_current_user)):
+    db = get_db()
+    docs = await db.peering_platforms.find({}, {"_id": 0}).to_list(1000)
+    return docs
+
+@router.post("/platforms")
+async def create_platform(data: PeeringPlatform, user=Depends(require_write)):
+    db = get_db()
+    existing = await db.peering_platforms.find_one({"name": data.name})
+    if existing:
+        raise HTTPException(400, "Platform dengan nama tersebut sudah ada")
+    
+    doc = data.dict()
+    doc["id"] = str(uuid.uuid4())
+    await db.peering_platforms.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+@router.put("/platforms/{plat_id}")
+async def update_platform(plat_id: str, data: PeeringPlatform, user=Depends(require_write)):
+    db = get_db()
+    res = await db.peering_platforms.update_one({"id": plat_id}, {"$set": data.dict()})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Platform tidak ditemukan")
+    return {"message": "Updated"}
+
+@router.delete("/platforms/{plat_id}")
+async def delete_platform(plat_id: str, user=Depends(require_admin)):
+    db = get_db()
+    res = await db.peering_platforms.delete_one({"id": plat_id})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Platform tidak ditemukan")
+    return {"message": "Deleted"}
+
+async def get_platform_meta(db) -> dict:
+    docs = await db.peering_platforms.find({}, {"_id": 0, "name": 1, "icon": 1, "color": 1}).to_list(1000)
+    meta = {}
+    for d in docs:
+        meta[d["name"]] = {"icon": d.get("icon", "🌐"), "color": d.get("color", "#64748b")}
+    return meta
+
+# Platform metadata is now fetched dynamically from DB via get_platform_meta()
 
 def fmt_bytes(b: int) -> str:
     if b >= 1e9:
@@ -145,9 +151,10 @@ async def peering_eye_stats(
     total_bytes = sum(d.get("bytes", 0) for d in docs)
 
     platforms = []
+    meta_map = await get_platform_meta(db)
     for d in docs:
         p = d["_id"]
-        meta = PLATFORM_META.get(p, {"icon": "🌐", "color": "#64748b"})
+        meta = meta_map.get(p, {"icon": "🌐", "color": "#64748b"})
         hits  = d.get("hits", 0)
         bytes_val = d.get("bytes", 0)
         platforms.append({
@@ -215,6 +222,7 @@ async def peering_eye_timeline(
 
     # Reshape: { time: [{ platform, hits, bytes }] }
     time_map: dict = {}
+    meta_map = await get_platform_meta(db)
     for d in docs:
         bucket_ms_val = d["_id"]["bucket"]
         if not isinstance(bucket_ms_val, (int, float)):
@@ -224,7 +232,7 @@ async def peering_eye_timeline(
         label = local.strftime("%H:%M" if range in ("1h","6h","12h") else "%d/%m %H:%M")
 
         p = d["_id"]["platform"]
-        meta = PLATFORM_META.get(p, {"icon": "🌐", "color": "#64748b"})
+        meta = meta_map.get(p, {"icon": "🌐", "color": "#64748b"})
 
         if label not in time_map:
             time_map[label] = {"time": label}
@@ -317,17 +325,29 @@ async def peering_eye_top_clients(
         match, {"_id": 0, "top_clients": 1, "platform": 1, "icon": 1, "color": 1}
     ).to_list(5000)
 
-    client_agg: dict = defaultdict(lambda: {"hits": 0, "platform": "", "icon": "🌐", "color": "#64748b"})
+    client_agg: dict = defaultdict(lambda: {"hits": 0, "bytes": 0, "platform": "", "icon": "🌐", "color": "#64748b"})
     for doc in docs:
         tc = doc.get("top_clients") or {}
-        for ip, hits in tc.items():
-            client_agg[ip]["hits"] += hits
+        for ip, stats in tc.items():
+            if isinstance(stats, dict):
+                h = stats.get("hits", 0)
+                b = stats.get("bytes", 0)
+            else:
+                h = stats
+                b = 0
+                
+            client_agg[ip]["hits"] += h
+            client_agg[ip]["bytes"] += b
             if not client_agg[ip]["platform"]:
                 client_agg[ip]["platform"] = doc.get("platform", "Others")
                 client_agg[ip]["icon"]     = doc.get("icon", "🌐")
                 client_agg[ip]["color"]    = doc.get("color", "#64748b")
 
-    sorted_clients = sorted(client_agg.items(), key=lambda x: x[1]["hits"], reverse=True)[:limit]
+    # Sort by Bytes if available, otherwise Hits
+    sorted_clients = sorted(client_agg.items(), key=lambda x: (x[1]["bytes"], x[1]["hits"]), reverse=True)[:limit]
+
+    # Fetch mapping
+    ip_mapping = await get_active_ip_mapping(db, device_id)
 
     return {
         "device_id": device_id or "all",
@@ -335,7 +355,10 @@ async def peering_eye_top_clients(
         "clients": [
             {
                 "ip":       ip,
+                "name":     ip_mapping.get(ip, {}).get("name", "Unknown"),
+                "mac":      ip_mapping.get(ip, {}).get("mac", ""),
                 "hits":     info["hits"],
+                "bytes":    info["bytes"],
                 "platform": info["platform"],
                 "icon":     info["icon"],
                 "color":    info["color"],
@@ -402,7 +425,8 @@ async def peering_eye_ingest(payload: dict, user=Depends(get_current_user)):
 
     now = datetime.now(timezone.utc).isoformat()
     platform = payload["platform"]
-    meta = PLATFORM_META.get(platform, {"icon": "🌐", "color": "#64748b"})
+    meta_map = await get_platform_meta(db)
+    meta = meta_map.get(platform, {"icon": "🌐", "color": "#64748b"})
 
     doc = {
         "device_id":   payload["device_id"],
@@ -460,7 +484,8 @@ async def peering_eye_summary(
     total_bytes  = sum(d["bytes"] for d in docs)
     total_domains = sum(d["domain_count"] for d in docs)
     top = docs[0]
-    top_meta = PLATFORM_META.get(top["_id"], {"icon": "🌐"})
+    meta_map = await get_platform_meta(db)
+    top_meta = meta_map.get(top["_id"], {"icon": "🌐"})
 
     return {
         "total_hits":       total_hits,
@@ -472,3 +497,62 @@ async def peering_eye_summary(
         "unique_platforms": len(docs),
         "unique_domains":   total_domains,
     }
+
+
+# ─── Endpoint: 1-Click Block ─────────────────────────────────────────────────
+@router.post("/block")
+async def peering_eye_block(
+    device_id: str = Body(..., embed=True),
+    target_type: str = Body(..., embed=True), # 'domain' atau 'client'
+    target: str = Body(..., embed=True), # namadomain.com atau nama_pelanggan/ip
+    user=Depends(get_current_user),
+):
+    """Blokir domain atau klien via MikroTik API."""
+    db = get_db()
+    
+    if not device_id or device_id == "all":
+        raise HTTPException(status_code=400, detail="Pilih device spesifik untuk melakukan blokir.")
+        
+    dev = await db.devices.find_one({"_id": device_id})
+    if not dev:
+        raise HTTPException(status_code=404, detail="Device tidak ditemukan")
+        
+    api = get_api_client(dev)
+    await api.test_connection()
+    
+    try:
+        if target_type == "domain":
+            # Add to Address List 'peering_eye_block'
+            await api.add_firewall_address_list(
+                list_name="peering_eye_block",
+                address=target,
+                comment="Auto-blocked by Sentinel Peering-Eye"
+            )
+            val = f"Domain {target} berhasil diblokir"
+
+        elif target_type == "client":
+            # Target is the client name (from PPPoE/Hotspot)
+            # Find and disable in PPPoE
+            try:
+                await api.disable_pppoe_user(target)
+                val = f"PPPoE User '{target}' diisolir"
+            except Exception as e:
+                # If not PPPoE, check Hotspot
+                try:
+                    await api.disable_hotspot_user(target)
+                    val = f"Hotspot User '{target}' diisolir"
+                except Exception as e2:
+                    # If not found mapped, block by target (IP)
+                    await api.add_firewall_address_list(
+                        list_name="peering_eye_block",
+                        address=target,
+                        comment="Client IP Auto-blocked by Sentinel Peering-Eye"
+                    )
+                    val = f"Client IP {target} berhasil diblokir via Address List"
+        else:
+            raise HTTPException(status_code=400, detail="Invalid target_type. Use 'domain' or 'client'")
+            
+        return {"success": True, "message": val}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

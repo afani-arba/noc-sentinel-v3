@@ -106,12 +106,23 @@ PLATFORM_PATTERNS = [
     (r"(pubgmobile\.com|tencentgames\.com|igamecj\.com)", "PUBG Mobile", "🔫", "#f59e0b"),
 ]
 
+dynamic_platforms_cache = list(PLATFORM_PATTERNS)
+platform_thresholds = {}  # {platform_name: (thresh_hits, thresh_mb)}
+platform_lock = threading.Lock()
+
 def match_platform(domain: str) -> tuple[str, str, str]:
     """Return (platform_name, icon, color) matching a domain."""
     d = domain.lower().strip(".")
-    for pattern, name, icon, color in PLATFORM_PATTERNS:
-        if re.search(pattern, d):
-            return name, icon, color
+    with platform_lock:
+        platforms = list(dynamic_platforms_cache)
+    
+    for pattern, name, icon, color in platforms:
+        try:
+            if re.search(pattern, d):
+                return name, icon, color
+        except re.error:
+            # Skip invalid regex
+            continue
     return "Others", "🌐", "#64748b"
 
 
@@ -131,6 +142,71 @@ acc_lock  = threading.Lock()
 ip_platform_cache: dict[str, str] = {}   # dst_ip → platform_name
 cache_lock = threading.Lock()
 
+# Alert duplicate prevention: (client_ip, platform) -> timestamp
+alert_cache = {}
+
+def trigger_peering_alert(db, device_name, platform, client_ip, hits, bytes_val, thresh_hits, thresh_mb):
+    """Check notification_settings and send WA/Telegram if alert enabled."""
+    import urllib.request, urllib.parse, json, time
+    
+    # Anti-spam: Only 1 alert per client per platform every 1 hour
+    alert_key = f"{client_ip}_{platform}"
+    now = time.time()
+    if alert_key in alert_cache and now - alert_cache[alert_key] < 3600:
+        return
+    
+    try:
+        settings = db.notification_settings.find_one({}, {"_id": 0}) or {}
+        if not settings.get("enabled", False):
+            return
+
+        mb_val = bytes_val / (1024 * 1024)
+        
+        reason = []
+        if thresh_mb > 0 and mb_val >= thresh_mb:
+            reason.append(f"Traffic {mb_val:.2f} MB (atas {thresh_mb} MB)")
+        if thresh_hits > 0 and hits >= thresh_hits:
+            reason.append(f"Hits {hits}x (atas {thresh_hits}x)")
+            
+        if not reason:
+            return
+            
+        alert_cache[alert_key] = now
+        logger.info(f"Triggering peering alert for {client_ip} on {platform}: {reason}")
+            
+        msg = (
+            f"🚨 *PEERING-EYE ALERT*\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"📡 Router: *{device_name}*\n"
+            f"🎯 Klien IP: {client_ip}\n"
+            f"🌐 Platform: *{platform}*\n"
+            f"⚠️ Deteksi Anomali:\n"
+            f"   {', '.join(reason)}\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"NOC-Sentinel Monitoring"
+        )
+        
+        # WA Fonnte
+        token = settings.get("fonnte_token")
+        for r in settings.get("recipients", []):
+            if r.get("active", True) and token:
+                phone = r.get("phone")
+                data = urllib.parse.urlencode({"target": phone, "message": msg, "countryCode": "62"}).encode()
+                req = urllib.request.Request("https://api.fonnte.com/send", data=data, headers={"Authorization": token})
+                try: urllib.request.urlopen(req, timeout=5)
+                except: pass
+                
+        # Telegram
+        if settings.get("telegram_enabled", False):
+            bot_token = settings.get("telegram_bot_token")
+            for cid in settings.get("telegram_chat_ids", []):
+                if cid and bot_token:
+                    t_data = json.dumps({"chat_id": str(cid), "text": msg, "parse_mode": "Markdown"}).encode()
+                    req = urllib.request.Request(f"https://api.telegram.org/bot{bot_token}/sendMessage", data=t_data, headers={"Content-Type": "application/json"})
+                    try: urllib.request.urlopen(req, timeout=5)
+                    except: pass
+    except Exception as e:
+        logger.warning(f"Failed to send peering alert: {e}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # THREAD 1 — DNS SYSLOG LISTENER (UDP:5514)
@@ -254,10 +330,13 @@ def parse_netflow_v5(data: bytes, sender_ip: str) -> list[dict]:
                 # Try reverse lookup (optional; skip to keep it fast)
                 platform = "Others"
 
+            client_ip = src_ip if is_local_ip(src_ip) else (dst_ip if is_local_ip(dst_ip) else None)
+
             records.append({
                 "device_id": sender_ip,
                 "src_ip": src_ip,
                 "dst_ip": dst_ip,
+                "client_ip": client_ip,
                 "bytes": octets,
                 "packets": packets,
                 "platform": platform,
@@ -285,9 +364,11 @@ def parse_netflow_v9_or_ipfix(data: bytes, sender_ip: str) -> list[dict]:
         # Full implementation requires template cache which is stateful
         # Using placeholder: count total bytes and attribute to "Others" by flow
         count_bytes = len(data)
+        # We don't have src_ip/dst_ip without template decoding
         records.append({
             "device_id": sender_ip,
             "bytes": count_bytes,
+            "packets": 1,
             "platform": "Others",  # Without template, we can't classify
         })
     except Exception as e:
@@ -322,6 +403,8 @@ def netflow_listener():
                     key = (flow["device_id"], flow["platform"])
                     flow_acc[key]["bytes"] += flow.get("bytes", 0)
                     flow_acc[key]["packets"] += flow.get("packets", 0)
+                    if flow.get("client_ip"):
+                        flow_acc[key]["client_bytes_" + flow["client_ip"]] += flow.get("bytes", 0)
 
         except socket.timeout:
             continue
@@ -369,6 +452,42 @@ def refresh_ip_cache(db):
     except Exception as e:
         logger.warning(f"IP platform cache refresh failed: {e}")
 
+def refresh_platforms(db):
+    """Refresh platform regex patterns from MongoDB."""
+    global dynamic_platforms_cache
+    try:
+        docs = list(db.peering_platforms.find({"is_active": {"$ne": False}}, {"_id": 0}))
+        if not docs:
+            # Seed default platforms if empty
+            import uuid
+            new_ops = []
+            for pat, name, icon, color in PLATFORM_PATTERNS:
+                new_ops.append({
+                    "id": str(uuid.uuid4()),
+                    "name": name,
+                    "regex_pattern": pat,
+                    "icon": icon,
+                    "color": color,
+                    "is_active": True
+                })
+            db.peering_platforms.insert_many(new_ops)
+            docs = new_ops
+            logger.info("Seeded default platforms to peering_platforms collection")
+
+        new_cache = []
+        new_thresh = {}
+        for d in docs:
+            name = d["name"]
+            new_cache.append((d.get("regex_pattern", ""), name, d.get("icon", "🌐"), d.get("color", "#64748b")))
+            new_thresh[name] = (d.get("alert_threshold_hits", 0), d.get("alert_threshold_mb", 0))
+        
+        with platform_lock:
+            dynamic_platforms_cache = new_cache
+            global platform_thresholds
+            platform_thresholds = new_thresh
+    except Exception as e:
+        logger.warning(f"Platform regex cache refresh failed: {e}")
+
 def flush_to_mongo():
     """Periodic flush: combine dns_acc + flow_acc → MongoDB."""
     db = get_db()
@@ -377,12 +496,14 @@ def flush_to_mongo():
     # Run initial cache population before entering the sleep loop
     refresh_device_cache(db)
     refresh_ip_cache(db)
+    refresh_platforms(db)
 
     while True:
         time.sleep(FLUSH_INTERVAL)
         try:
             refresh_device_cache(db)
             refresh_ip_cache(db)
+            refresh_platforms(db)
 
             with acc_lock:
                 dns_snapshot  = {k: dict(v) for k, v in dns_acc.items()}
@@ -420,11 +541,37 @@ def flush_to_mongo():
                     for k, v in dns_data.items()
                     if k.startswith("domain_")
                 }
-                clients = {
-                    k.replace("client_", ""): v
+                
+                clients_from_dns = {
+                    k.replace("client_", ""): {"hits": v}
                     for k, v in dns_data.items()
                     if k.startswith("client_")
                 }
+                clients_from_flow = {
+                    k.replace("client_bytes_", ""): {"bytes": v}
+                    for k, v in flow_data.items()
+                    if k.startswith("client_bytes_")
+                }
+                
+                clients = {}
+                for c_ip, data in clients_from_dns.items():
+                    clients[c_ip] = {"hits": data["hits"], "bytes": 0}
+                for c_ip, data in clients_from_flow.items():
+                    if c_ip not in clients:
+                        clients[c_ip] = {"hits": 0, "bytes": data["bytes"]}
+                    else:
+                        clients[c_ip]["bytes"] = data["bytes"]
+
+                # Check alerts
+                with platform_lock:
+                    thresh_hits, thresh_mb = platform_thresholds.get(platform, (0, 0))
+                
+                if thresh_hits > 0 or thresh_mb > 0:
+                    for c_ip, c_data in clients.items():
+                        c_hits = c_data["hits"]
+                        c_bytes = c_data["bytes"]
+                        if (thresh_hits > 0 and c_hits >= thresh_hits) or (thresh_mb > 0 and c_bytes >= thresh_mb * 1024 * 1024):
+                            trigger_peering_alert(db, device_name, platform, c_ip, c_hits, c_bytes, thresh_hits, thresh_mb)
 
                 doc = {
                     "device_id":   device_id,

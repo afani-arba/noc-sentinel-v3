@@ -9,6 +9,7 @@ import {
   TrendingUp, HardDrive, Radio, Server, AlertCircle, Users,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import PeeringPlatformModal from "@/components/PeeringPlatformModal";
 import Highcharts from 'highcharts';
 import HighchartsReact from 'highcharts-react-official';
 import highcharts3d from 'highcharts/highcharts-3d';
@@ -105,6 +106,7 @@ export default function PeeringEyePage() {
   const [showDevDropdown, setShowDevDropdown] = useState(false);
   const [showRangeDropdown, setShowRangeDropdown] = useState(false);
   const [showDomainDropdown, setShowDomainDropdown] = useState(false);
+  const [showPlatformsModal, setShowPlatformsModal] = useState(false);
 
   const intervalRef = useRef(null);
 
@@ -135,6 +137,29 @@ export default function PeeringEyePage() {
       setLoading(false);
     }
   }, [selectedDev, range, domainPlatform]);
+
+  const handleBlock = async (targetType, target) => {
+    if (!selectedDev?.device_id) {
+      alert("Silakan pilih perangkat/router spesifik (bukan 'Semua Router') terlebih dahulu sebelum melakukan aksi blokir.");
+      return;
+    }
+    const msg = targetType === "domain" 
+      ? `Anda yakin ingin memblokir akses ke domain ${target}?` 
+      : `Anda yakin ingin memblokir/mengisolir klien ${target}?`;
+    
+    if (!window.confirm(msg)) return;
+    
+    try {
+      const res = await api.post("/peering-eye/block", {
+        device_id: selectedDev.device_id,
+        target_type: targetType,
+        target: target
+      });
+      alert(res.data?.message || "Berhasil diblokir!");
+    } catch (e) {
+      alert("Gagal memblokir: " + (e.response?.data?.detail || e.message));
+    }
+  };
 
   // ── Load devices ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -266,6 +291,13 @@ export default function PeeringEyePage() {
             className="p-2 bg-card border border-border rounded-sm hover:bg-secondary/20 transition-colors"
           >
             <RefreshCw className={`w-4 h-4 text-muted-foreground ${loading ? "animate-spin" : ""}`} />
+          </button>
+          
+          <button
+            onClick={() => setShowPlatformsModal(true)}
+            className="flex items-center gap-1.5 px-3 py-2 bg-primary/10 border border-primary/30 text-primary rounded-sm text-xs font-semibold hover:bg-primary/20 transition-colors ml-2"
+          >
+            <Server className="w-3.5 h-3.5" /> Kelola Platform
           </button>
         </div>
       </div>
@@ -575,9 +607,18 @@ export default function PeeringEyePage() {
                       <p className="text-[9px]" style={{ color: d.color }}>{d.platform}</p>
                     </div>
                   </div>
-                  <div className="flex-shrink-0 text-right">
-                    <p className="text-xs font-mono text-cyan-300">{fmtNum(d.hits)}</p>
-                    <p className="text-[9px] text-muted-foreground">hits</p>
+                  <div className="flex-shrink-0 flex items-center gap-3">
+                    <div className="text-right">
+                      <p className="text-xs font-mono text-cyan-300">{fmtNum(d.hits)}</p>
+                      <p className="text-[9px] text-muted-foreground">hits</p>
+                    </div>
+                    <button
+                      onClick={() => handleBlock("domain", d.domain)}
+                      className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded transition-colors"
+                      title="Blokir Domain"
+                    >
+                      <AlertCircle className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
               ))}
@@ -606,14 +647,32 @@ export default function PeeringEyePage() {
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-[10px] text-muted-foreground font-mono w-5 text-right flex-shrink-0">{i + 1}</span>
                     <span className="text-base leading-none">{c.icon}</span>
-                    <div className="min-w-0">
-                      <p className="text-xs font-mono font-semibold truncate text-foreground">{c.ip}</p>
-                      <p className="text-[9px]" style={{ color: c.color }}>{c.platform}</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-mono font-semibold truncate text-foreground">
+                        {c.name && c.name !== "Unknown" ? c.name : c.ip}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-[9px]" style={{ color: c.color }}>{c.platform}</p>
+                        <p className="text-[9px] text-muted-foreground font-mono">{c.name && c.name !== "Unknown" ? c.ip : ""}{c.mac ? ` • ${c.mac}` : ""}</p>
+                      </div>
                     </div>
                   </div>
-                  <div className="flex-shrink-0 text-right">
-                    <p className="text-xs font-mono text-emerald-300">{fmtNum(c.hits)}</p>
-                    <p className="text-[9px] text-muted-foreground">hits</p>
+                  <div className="flex-shrink-0 flex items-center gap-3">
+                    <div className="text-right">
+                      <p className="text-xs font-mono text-emerald-300">
+                        {c.bytes > 0 ? fmtBytes(c.bytes) : `${fmtNum(c.hits)} hits`}
+                      </p>
+                      <p className="text-[9px] text-muted-foreground">
+                        {c.bytes > 0 ? `${fmtNum(c.hits)} hits` : "DNS only"}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleBlock("client", c.name && c.name !== "Unknown" ? c.name : c.ip)}
+                      className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded transition-colors"
+                      title="Blokir/Isolir Klien"
+                    >
+                      <AlertCircle className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
               ))}
@@ -622,6 +681,13 @@ export default function PeeringEyePage() {
         </div>
 
       </div>
+
+      {showPlatformsModal && (
+        <PeeringPlatformModal 
+          onClose={() => setShowPlatformsModal(false)} 
+          onChange={() => fetchAll(true)} 
+        />
+      )}
     </div>
   );
 }
