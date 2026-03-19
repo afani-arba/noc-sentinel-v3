@@ -138,7 +138,7 @@ cache_lock = threading.Lock()
 
 DNS_LOG_PATTERNS = [
     # RouterOS logging format: "dns query from 192.168.1.1: youtube.com"
-    re.compile(r"query\s+from\s+[\d.]+:\s+([\w.\-]+)", re.IGNORECASE),
+    re.compile(r"query\s+from\s+([\d.]+):\s+([\w.\-]+)", re.IGNORECASE),
     # Alternative: "dns,packet youtube.com A"
     re.compile(r"dns.*?\s+([\w.\-]+)\s+(?:A|AAAA|CNAME)", re.IGNORECASE),
     # Simple: just a domain somewhere in the line
@@ -152,11 +152,16 @@ def parse_dns_syslog(raw: bytes, sender_ip: str) -> dict | None:
     except Exception:
         return None
 
+    client_ip = None
     domain = None
     for pat in DNS_LOG_PATTERNS:
         m = pat.search(msg)
         if m:
-            domain = m.group(1).lower().strip(".")
+            if "query\\s+from" in pat.pattern:
+                client_ip = m.group(1)
+                domain = m.group(2).lower().strip(".")
+            else:
+                domain = m.group(1).lower().strip(".")
             break
 
     if not domain or len(domain) < 4:
@@ -175,6 +180,7 @@ def parse_dns_syslog(raw: bytes, sender_ip: str) -> dict | None:
     return {
         "device_id": device_id,
         "domain": domain,
+        "client_ip": client_ip,
         "platform": platform,
         "icon": icon,
         "color": color,
@@ -201,6 +207,8 @@ def dns_syslog_listener():
                     dns_acc[key]["hits"] += 1
                     dns_names[key] = (result["icon"], result["color"])
                     dns_acc[key]["domain_" + result["domain"][:64]] += 1
+                    if result.get("client_ip"):
+                        dns_acc[key]["client_" + result["client_ip"]] += 1
                 # Cache: any IP we know is Google's CDN → YouTube, etc.
                 # Will be updated by NetFlow enrichment
         except socket.timeout:
@@ -420,6 +428,11 @@ def flush_to_mongo():
                     for k, v in dns_data.items()
                     if k.startswith("domain_")
                 }
+                clients = {
+                    k.replace("client_", ""): v
+                    for k, v in dns_data.items()
+                    if k.startswith("client_")
+                }
 
                 doc = {
                     "device_id":   device_id,
@@ -431,6 +444,7 @@ def flush_to_mongo():
                     "bytes":       bytes_val,
                     "packets":     packets,
                     "top_domains": domains,
+                    "top_clients": clients,
                     "timestamp":   now_iso,
                 }
 

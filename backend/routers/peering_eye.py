@@ -294,6 +294,57 @@ async def peering_eye_top_domains(
     }
 
 
+# ─── Endpoint: Top Clients ────────────────────────────────────────────────────
+@router.get("/top-clients")
+async def peering_eye_top_clients(
+    device_id: str = "",
+    platform:  str = "",
+    range:     str = "24h",
+    limit:     int = 20,
+    user=Depends(get_current_user),
+):
+    """Return top client IPs ordered by hit count."""
+    db = get_db()
+    start = range_to_start(range)
+
+    match: dict = {"timestamp": {"$gte": start}}
+    if device_id and device_id != "all":
+        match["device_id"] = device_id
+    if platform and platform != "all":
+        match["platform"] = platform
+
+    docs = await db.peering_eye_stats.find(
+        match, {"_id": 0, "top_clients": 1, "platform": 1, "icon": 1, "color": 1}
+    ).to_list(5000)
+
+    client_agg: dict = defaultdict(lambda: {"hits": 0, "platform": "", "icon": "🌐", "color": "#64748b"})
+    for doc in docs:
+        tc = doc.get("top_clients") or {}
+        for ip, hits in tc.items():
+            client_agg[ip]["hits"] += hits
+            if not client_agg[ip]["platform"]:
+                client_agg[ip]["platform"] = doc.get("platform", "Others")
+                client_agg[ip]["icon"]     = doc.get("icon", "🌐")
+                client_agg[ip]["color"]    = doc.get("color", "#64748b")
+
+    sorted_clients = sorted(client_agg.items(), key=lambda x: x[1]["hits"], reverse=True)[:limit]
+
+    return {
+        "device_id": device_id or "all",
+        "range":     range,
+        "clients": [
+            {
+                "ip":       ip,
+                "hits":     info["hits"],
+                "platform": info["platform"],
+                "icon":     info["icon"],
+                "color":    info["color"],
+            }
+            for ip, info in sorted_clients
+        ]
+    }
+
+
 # ─── Endpoint: BGP Status ────────────────────────────────────────────────────
 @router.get("/bgp/status")
 async def bgp_status(user=Depends(get_current_user)):
@@ -363,6 +414,7 @@ async def peering_eye_ingest(payload: dict, user=Depends(get_current_user)):
         "bytes":       int(payload.get("bytes", 0)),
         "packets":     int(payload.get("packets", 0)),
         "top_domains": payload.get("top_domains", {}),
+        "top_clients": payload.get("top_clients", {}),
         "timestamp":   payload.get("timestamp", now),
     }
 

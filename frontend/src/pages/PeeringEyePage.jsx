@@ -6,7 +6,7 @@ import {
 } from "recharts";
 import {
   Radar, RefreshCw, ChevronDown, Globe, Activity, Wifi,
-  TrendingUp, HardDrive, Radio, Server, AlertCircle,
+  TrendingUp, HardDrive, Radio, Server, AlertCircle, Users,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import Highcharts from 'highcharts';
@@ -96,6 +96,7 @@ export default function PeeringEyePage() {
   const [stats, setStats]           = useState(null);
   const [timeline, setTimeline]     = useState([]);
   const [topDomains, setTopDomains] = useState([]);
+  const [topClients, setTopClients] = useState([]);
   const [bgpStatus, setBgpStatus]   = useState(null);
   const [loading, setLoading]       = useState(true);
   const [lastUpdate, setLastUpdate] = useState(null);
@@ -112,11 +113,12 @@ export default function PeeringEyePage() {
     if (showLoader) setLoading(true);
     const devId = selectedDev?.device_id || "";
     try {
-      const [sumRes, statsRes, tlRes, domainsRes, bgpRes] = await Promise.allSettled([
+      const [sumRes, statsRes, tlRes, domainsRes, clientsRes, bgpRes] = await Promise.allSettled([
         api.get(`/peering-eye/summary?device_id=${devId}&range=${range}`),
         api.get(`/peering-eye/stats?device_id=${devId}&range=${range}`),
         api.get(`/peering-eye/timeline?device_id=${devId}&range=${range}`),
         api.get(`/peering-eye/top-domains?device_id=${devId}&range=${range}&limit=20&platform=${domainPlatform}`),
+        api.get(`/peering-eye/top-clients?device_id=${devId}&range=${range}&limit=20&platform=${domainPlatform}`),
         api.get("/peering-eye/bgp/status"),
       ]);
 
@@ -124,6 +126,7 @@ export default function PeeringEyePage() {
       if (statsRes.status  === "fulfilled") setStats(statsRes.value.data);
       if (tlRes.status     === "fulfilled") setTimeline(tlRes.value.data.data || []);
       if (domainsRes.status === "fulfilled") setTopDomains(domainsRes.value.data.domains || []);
+      if (clientsRes.status === "fulfilled") setTopClients(clientsRes.value.data.clients || []);
       if (bgpRes.status    === "fulfilled") setBgpStatus(bgpRes.value.data);
       setLastUpdate(new Date());
     } catch (e) {
@@ -461,8 +464,8 @@ export default function PeeringEyePage() {
         )}
       </div>
 
-      {/* ── Bottom Row: BGP Status + Top Domains ─────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* ── Bottom Row: BGP Status + Top Domains + Top Clients ─────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* BGP Status Panel */}
         <div className="bg-card border border-border rounded-sm p-4">
           <div className="flex items-center justify-between mb-3">
@@ -581,6 +584,43 @@ export default function PeeringEyePage() {
             </div>
           )}
         </div>
+
+        {/* Top Clients Panel */}
+        <div className="bg-card border border-border rounded-sm p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <p className="text-xs font-semibold flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5 text-emerald-400" />
+                Top 20 Klien
+              </p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">IP klien terbanyak mengakses</p>
+            </div>
+          </div>
+
+          {topClients.length === 0 ? (
+            <NoData message="Belum ada data klien" />
+          ) : (
+            <div className="space-y-1 max-h-[400px] overflow-y-auto pr-1">
+              {topClients.map((c, i) => (
+                <div key={i} className="flex items-center justify-between gap-2 py-1.5 border-b border-border/20">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-[10px] text-muted-foreground font-mono w-5 text-right flex-shrink-0">{i + 1}</span>
+                    <span className="text-base leading-none">{c.icon}</span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-mono font-semibold truncate text-foreground">{c.ip}</p>
+                      <p className="text-[9px]" style={{ color: c.color }}>{c.platform}</p>
+                    </div>
+                  </div>
+                  <div className="flex-shrink-0 text-right">
+                    <p className="text-xs font-mono text-emerald-300">{fmtNum(c.hits)}</p>
+                    <p className="text-[9px] text-muted-foreground">hits</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
       </div>
     </div>
   );
