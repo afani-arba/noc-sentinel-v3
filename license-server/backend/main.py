@@ -41,8 +41,13 @@ if os.path.exists(noc_env_path):
 
 # DB Setup
 mongo_uri = os.environ.get("MONGO_URI") or os.environ.get("MONGO_URL") or "mongodb://localhost:27017/"
+db_name = os.environ.get("MONGO_DB_NAME") or os.environ.get("DB_NAME", "nocsentinel")
 client = pymongo.MongoClient(mongo_uri)
-db = client["noc_license_db"]
+db = client[db_name]
+
+c_products = db["license_products"]
+c_licenses = db["license_keys"]
+c_logs = db["license_logs"]
 
 # ── FRONTEND VIEWS ────────────────────────────────────────────────────────────
 
@@ -61,16 +66,16 @@ def create_product(prod: ProductCreate):
     doc = prod.model_dump()
     doc["id"] = str(uuid.uuid4())
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
-    db.products.insert_one(doc)
+    c_products.insert_one(doc)
     return {"message": "Product created", "product": doc}
 
 @app.get("/api/v1/products")
 def get_products():
-    return list(db.products.find({}, {"_id": 0}))
+    return list(c_products.find({}, {"_id": 0}))
 
 @app.post("/api/v1/licenses")
 def generate_license(req: LicenseCreate):
-    product = db.products.find_one({"id": req.product_id})
+    product = c_products.find_one({"id": req.product_id})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
         
@@ -97,18 +102,18 @@ def generate_license(req: LicenseCreate):
         "is_active": True,
         "notes": req.notes
     }
-    db.licenses.insert_one(doc)
+    c_licenses.insert_one(doc)
     return {"message": "License generated", "license": doc}
 
 @app.get("/api/v1/licenses")
 def get_licenses():
-    return list(db.licenses.find({}, {"_id": 0}).sort("created_at", -1))
+    return list(c_licenses.find({}, {"_id": 0}).sort("created_at", -1))
 
 @app.post("/api/v1/license/verify")
 def verify_license(req: VerifyRequest):
     now_iso = datetime.now(timezone.utc).isoformat()
     def log_activity(status):
-        db.monitoring_logs.insert_one({
+        c_logs.insert_one({
             "id": str(uuid.uuid4()),
             "license_key": req.license_key,
             "hardware_id": req.hardware_id,
@@ -117,7 +122,7 @@ def verify_license(req: VerifyRequest):
             "timestamp": now_iso
         })
         
-    license_doc = db.licenses.find_one({"license_key": req.license_key})
+    license_doc = c_licenses.find_one({"license_key": req.license_key})
     
     if not license_doc:
         log_activity("Cracked")
@@ -135,10 +140,10 @@ def verify_license(req: VerifyRequest):
     hw_ids = license_doc.get("hardware_ids", [])
     if not hw_ids:
         # First use, bind hardware ID
-        db.licenses.update_one({"id": license_doc["id"]}, {"$push": {"hardware_ids": req.hardware_id}})
+        c_licenses.update_one({"id": license_doc["id"]}, {"$push": {"hardware_ids": req.hardware_id}})
     elif req.hardware_id not in hw_ids:
         if len(hw_ids) < license_doc.get("max_devices", 1):
-            db.licenses.update_one({"id": license_doc["id"]}, {"$push": {"hardware_ids": req.hardware_id}})
+            c_licenses.update_one({"id": license_doc["id"]}, {"$push": {"hardware_ids": req.hardware_id}})
         else:
             log_activity("Cloned")
             raise HTTPException(status_code=403, detail="License is already bound to maximum number of devices (Cloned detected)")
@@ -156,11 +161,11 @@ def verify_license(req: VerifyRequest):
 @app.get("/api/v1/dashboard/stats")
 def get_dashboard_stats():
     now_iso = datetime.now(timezone.utc).isoformat()
-    total = db.licenses.count_documents({})
-    active = db.licenses.count_documents({"is_active": True, "expires_at": {"$gt": now_iso}})
-    inactive = db.licenses.count_documents({"$or": [{"is_active": False}, {"expires_at": {"$lt": now_iso}}]})
-    cracked = db.monitoring_logs.count_documents({"status": "Cracked"})
-    cloned = db.monitoring_logs.count_documents({"status": "Cloned"})
+    total = c_licenses.count_documents({})
+    active = c_licenses.count_documents({"is_active": True, "expires_at": {"$gt": now_iso}})
+    inactive = c_licenses.count_documents({"$or": [{"is_active": False}, {"expires_at": {"$lt": now_iso}}]})
+    cracked = c_logs.count_documents({"status": "Cracked"})
+    cloned = c_logs.count_documents({"status": "Cloned"})
     
     return {
         "total": total,
@@ -172,7 +177,7 @@ def get_dashboard_stats():
 
 @app.get("/api/v1/monitoring_logs")
 def get_logs(limit: int = 50):
-    logs = list(db.monitoring_logs.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit))
+    logs = list(c_logs.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit))
     return logs
 
 if __name__ == "__main__":
