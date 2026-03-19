@@ -50,8 +50,8 @@ FLUSH_INTERVAL  = int(os.getenv("FLUSH_INTERVAL", "60"))
 # Format: (regex_pattern, platform_name, icon_emoji, color_hex)
 PLATFORM_PATTERNS = [
     # Clandestine / Restricted
-    (r"(sbobet|m88|88tangkas|slot88|pragmaticplay|habanero|joker123|spadegaming|maxbet|cmd368|pgsoft)", "Judi Online", "🎰", "#be123c"),
-    (r"(pornhub\.com|xvideos\.com|xnxx\.com|redtube\.com|xhamster\.com|brazzers\.com|chaturbate\.com|onlyfans\.com)", "Situs Dewasa", "🔞", "#be185d"),
+    (r"(sbobet|m88|88tangkas|slot88|pragmatic|habanero|joker123|spadegaming|maxbet|cmd368|pgsoft|sbotop|togel|bola88|bandarq|dominoqq|situsjudi|judionline|slotgacor|maxwin|mahjongways|zeus138|rtpslot|slot777|bet365|bovada|1xBet|dafabet|w88|bk8|kakekslot|jp138)", "Judi Online", "🎰", "#be123c"),
+    (r"(pornhub|xvideos|xnxx|redtube|xhamster|brazzers|chaturbate|onlyfans|spankbang|eporner|hqporner|tube8|youporn|javhd|nhentai|bokep|simontok|nekopoi|txxx|cam4|bonga|livejasmin|stripchat|xnx|javhoho|missav|javguru)", "Situs Dewasa", "🔞", "#be185d"),
     # Streaming Video
     (r"(youtube\.com|googlevideo\.com|ytimg\.com|youtu\.be)", "YouTube", "▶", "#ef4444"),
     (r"(netflix\.com|nflxvideo\.net|nflximg\.net|nflxso\.net|nflxext\.com)", "Netflix", "🎬", "#f43f5e"),
