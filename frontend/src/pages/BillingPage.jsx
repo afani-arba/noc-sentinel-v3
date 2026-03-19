@@ -13,7 +13,7 @@ import {
   Receipt, Users, Package, LayoutDashboard, RefreshCw, Plus,
   Search, CheckCircle2, Clock, AlertTriangle, Trash2, Edit2,
   DollarSign, MessageCircle, ChevronDown, X, Download, Upload,
-  PhoneCall, ArrowUpDown, WifiOff, Wifi, Printer, Send, TrendingUp
+  PhoneCall, ArrowUpDown, WifiOff, Wifi, Printer, Send, TrendingUp, Settings
 } from "lucide-react";
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
