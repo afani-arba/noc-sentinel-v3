@@ -136,33 +136,25 @@ cache_lock = threading.Lock()
 # THREAD 1 — DNS SYSLOG LISTENER (UDP:5514)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-DNS_LOG_PATTERNS = [
-    # RouterOS logging format: "dns query from 192.168.1.1: youtube.com"
-    re.compile(r"query\s+from\s+([\d.]+):\s+([\w.\-]+)", re.IGNORECASE),
-    # Alternative: "dns,packet youtube.com A"
-    re.compile(r"dns.*?\s+([\w.\-]+)\s+(?:A|AAAA|CNAME)", re.IGNORECASE),
-    # Simple: just a domain somewhere in the line
-    re.compile(r"\b((?:[a-z0-9\-]+\.)+(?:com|net|org|id|io|co|tv|me|app|dev))\b", re.IGNORECASE),
-]
-
 def parse_dns_syslog(raw: bytes, sender_ip: str) -> dict | None:
-    """Parse a RouterOS syslog line and extract device + domain info."""
+    """Parse a RouterOS syslog line and extract device + domain info + client IP."""
     try:
         msg = raw.decode("utf-8", errors="replace").strip()
     except Exception:
         return None
 
+    # Step 1: Tarik Domain apa saja yang valid (com/net/org/id dll)
+    domain_match = re.search(r"\b((?:[a-z0-9\-]+\.)+(?:com|net|org|id|io|co|tv|me|app|dev|biz|info))\b", msg, re.IGNORECASE)
+    if not domain_match:
+        return None
+    
+    domain = domain_match.group(1).lower().strip(".")
+
+    # Step 2: Tarik IP Klien jika ada teks "from 192.x.x.x" (khas Mikrotik query log)
     client_ip = None
-    domain = None
-    for pat in DNS_LOG_PATTERNS:
-        m = pat.search(msg)
-        if m:
-            if "query\\s+from" in pat.pattern:
-                client_ip = m.group(1)
-                domain = m.group(2).lower().strip(".")
-            else:
-                domain = m.group(1).lower().strip(".")
-            break
+    ip_match = re.search(r"from\s+([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})", msg, re.IGNORECASE)
+    if ip_match:
+        client_ip = ip_match.group(1)
 
     if not domain or len(domain) < 4:
         return None
