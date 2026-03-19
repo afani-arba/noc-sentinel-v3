@@ -247,6 +247,7 @@ async def peering_eye_timeline(
 @router.get("/top-domains")
 async def peering_eye_top_domains(
     device_id: str = "",
+    platform:  str = "",
     range:     str = "24h",
     limit:     int = 20,
     user=Depends(get_current_user),
@@ -258,6 +259,8 @@ async def peering_eye_top_domains(
     match: dict = {"timestamp": {"$gte": start}}
     if device_id and device_id != "all":
         match["device_id"] = device_id
+    if platform and platform != "all":
+        match["platform"] = platform
 
     docs = await db.peering_eye_stats.find(
         match, {"_id": 0, "top_domains": 1, "platform": 1, "icon": 1, "color": 1}

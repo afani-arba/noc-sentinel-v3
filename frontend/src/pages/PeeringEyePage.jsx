@@ -99,9 +99,11 @@ export default function PeeringEyePage() {
   const [bgpStatus, setBgpStatus]   = useState(null);
   const [loading, setLoading]       = useState(true);
   const [lastUpdate, setLastUpdate] = useState(null);
+  const [domainPlatform, setDomainPlatform] = useState("all");
 
   const [showDevDropdown, setShowDevDropdown] = useState(false);
   const [showRangeDropdown, setShowRangeDropdown] = useState(false);
+  const [showDomainDropdown, setShowDomainDropdown] = useState(false);
 
   const intervalRef = useRef(null);
 
@@ -114,7 +116,7 @@ export default function PeeringEyePage() {
         api.get(`/peering-eye/summary?device_id=${devId}&range=${range}`),
         api.get(`/peering-eye/stats?device_id=${devId}&range=${range}`),
         api.get(`/peering-eye/timeline?device_id=${devId}&range=${range}`),
-        api.get(`/peering-eye/top-domains?device_id=${devId}&range=${range}&limit=20`),
+        api.get(`/peering-eye/top-domains?device_id=${devId}&range=${range}&limit=20&platform=${domainPlatform}`),
         api.get("/peering-eye/bgp/status"),
       ]);
 
@@ -129,7 +131,7 @@ export default function PeeringEyePage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedDev, range]);
+  }, [selectedDev, range, domainPlatform]);
 
   // ── Load devices ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -512,11 +514,49 @@ export default function PeeringEyePage() {
 
         {/* Top Domains Panel */}
         <div className="bg-card border border-border rounded-sm p-4">
-          <p className="text-xs font-semibold mb-1 flex items-center gap-1.5">
-            <Globe className="w-3.5 h-3.5 text-cyan-400" />
-            Top 20 Domain
-          </p>
-          <p className="text-[10px] text-muted-foreground mb-3">Raw domain dengan hits terbanyak</p>
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <p className="text-xs font-semibold flex items-center gap-1.5">
+                <Globe className="w-3.5 h-3.5 text-cyan-400" />
+                Top 20 Domain
+              </p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Filter raw domain per platform</p>
+            </div>
+            
+            <div className="relative">
+              <button
+                onClick={() => setShowDomainDropdown(!showDomainDropdown)}
+                className="flex items-center gap-2 px-2 py-1 bg-secondary/30 hover:bg-secondary/50 rounded border border-border/50 text-[10px] font-medium transition-colors"
+                title="Filter by Platform"
+              >
+                {domainPlatform === "all" ? "Semua Platform" : domainPlatform}
+                <ChevronDown className="w-3 h-3 text-muted-foreground" />
+              </button>
+              
+              {showDomainDropdown && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowDomainDropdown(false)} />
+                  <div className="absolute right-0 top-full mt-1 w-40 bg-card border border-border rounded-md shadow-xl z-50 overflow-hidden text-[10px] max-h-64 overflow-y-auto">
+                    <button
+                      onClick={() => { setDomainPlatform("all"); setShowDomainDropdown(false); fetchAll(true); }}
+                      className={`w-full text-left px-3 py-2 hover:bg-secondary/40 transition-colors ${domainPlatform === "all" ? "text-primary font-semibold" : "text-muted-foreground"}`}
+                    >
+                      Semua Platform
+                    </button>
+                    {["Situs Dewasa", "Judi Online", "YouTube", "TikTok", "Facebook", "Instagram", "WhatsApp", "Telegram", "Netflix", "Google", "Shopee", "Tokopedia"].map(p => (
+                      <button
+                        key={p}
+                        onClick={() => { setDomainPlatform(p); setShowDomainDropdown(false); fetchAll(true); }}
+                        className={`w-full text-left px-3 py-2 hover:bg-secondary/40 transition-colors ${domainPlatform === p ? "text-primary font-semibold" : "text-muted-foreground"}`}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
 
           {topDomains.length === 0 ? (
             <NoData message="Belum ada data domain" />
