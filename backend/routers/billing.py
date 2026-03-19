@@ -46,6 +46,7 @@ class BillingSettingsUpdate(BaseModel):
     wa_template_unpaid: Optional[str] = None
     wa_template_isolir: Optional[str] = None
     auto_isolir_enabled: Optional[bool] = None
+    auto_isolir_method: Optional[str] = None
     auto_isolir_time: Optional[str] = None
     auto_isolir_grace_days: Optional[int] = None
 
@@ -62,6 +63,7 @@ async def get_billing_settings(user=Depends(get_current_user)):
             "wa_template_unpaid": "Yth. *{customer_name}*,\n\nTagihan internet Anda sebesar *{total}* untuk paket {package_name} periode {period} telah terbit. Nomor invoice: {invoice_number}.\nJatuh tempo pada: *{due_date}*.\n\nMohon segera melakukan pembayaran. Abaikan pesan ini jika sudah mengkonfirmasi pembayaran.",
             "wa_template_isolir": "Yth. *{customer_name}*,\n\nMohon maaf, layanan internet Anda untuk paket {package_name} (Invoice: {invoice_number}) telah kami *ISOLIR* (putus sementara) karena melewati batas waktu pembayaran.\nTotal tagihan: *{total}* (Jatuh tempo: {due_date}).\n\nSilakan lakukan pembayaran agar layanan dapat segera aktif kembali. Terima kasih.",
             "auto_isolir_enabled": False,
+            "auto_isolir_method": "whatsapp",
             "auto_isolir_time": "00:05",
             "auto_isolir_grace_days": 1,
         }
@@ -678,6 +680,22 @@ async def mark_paid(invoice_id: str, data: PaymentUpdate, user=Depends(require_w
                     else:
                         await mt.enable_hotspot_user(username)
                     mt_msg = f" | User '{username}' di-enable di MikroTik"
+                
+                # Restore SSID via GenieACS if applicable
+                if inv.get("original_ssid") and inv.get("genieacs_device_id"):
+                    from services import genieacs_service as genie_svc
+                    try:
+                        await asyncio.to_thread(
+                            genie_svc.set_parameter,
+                            inv["genieacs_device_id"],
+                            "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID",
+                            inv["original_ssid"]
+                        )
+                        mt_msg += " | Nama WiFi (SSID) dikembalikan"
+                    except Exception as ge:
+                        logger.error(f"GenieACS restore SSID failed ({inv['genieacs_device_id']}): {ge}")
+                        mt_msg += " | Gagal mengembalikan nama WiFi"
+                        
     except Exception as e:
         mt_msg = f" | Gagal enable MikroTik: {e}"
 

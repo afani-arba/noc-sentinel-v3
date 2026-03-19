@@ -1275,6 +1275,7 @@ function SettingsTab() {
     wa_template_unpaid: "",
     wa_template_isolir: "",
     auto_isolir_enabled: false,
+    auto_isolir_method: "whatsapp",
     auto_isolir_time: "00:05",
     auto_isolir_grace_days: 1,
   });
@@ -1382,11 +1383,22 @@ function SettingsTab() {
           
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pl-6 pt-2">
             <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Jam Eksekusi (Harian)</Label>
+              <Label className="text-xs text-muted-foreground">Metode Notifikasi Isolir</Label>
+              <select value={settings.auto_isolir_method || "whatsapp"} onChange={e => setSettings({ ...settings, auto_isolir_method: e.target.value })}
+                className="w-full h-8 text-xs rounded-sm border border-border bg-secondary px-2 text-foreground break-all" disabled={!settings.auto_isolir_enabled}>
+                <option value="whatsapp">Hanya Kirim Pesan WhatsApp</option>
+                <option value="ssid">Hanya Ganti Nama WiFi (SSID)</option>
+                <option value="both">Keduanya (WA + Ganti Nama WiFi)</option>
+              </select>
+            </div>
+            
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Jam Eksekusi Harian</Label>
               <Input value={settings.auto_isolir_time || "00:05"} onChange={e => setSettings({ ...settings, auto_isolir_time: e.target.value })}
                 type="time" className="h-8 rounded-sm text-xs font-mono" disabled={!settings.auto_isolir_enabled} />
             </div>
-            <div className="space-y-1.5">
+
+            <div className="space-y-1.5 sm:col-span-2">
               <Label className="text-xs text-muted-foreground">Toleransi Keterlambatan (Hari lewat jatuh tempo)</Label>
               <Input value={settings.auto_isolir_grace_days || 1} onChange={e => setSettings({ ...settings, auto_isolir_grace_days: Number(e.target.value) })}
                 type="number" min="0" className="h-8 rounded-sm text-xs font-mono" disabled={!settings.auto_isolir_enabled} />

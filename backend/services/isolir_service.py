@@ -53,54 +53,97 @@ async def auto_isolir_loop():
                             continue
                         
                         try:
-                            mt = get_api_client(device)
+                            auto_isolir_method = settings.get("auto_isolir_method", "whatsapp")
                             username = customer.get("username", "")
-                            svc = customer.get("service_type", "pppoe")
-                            if svc == "pppoe":
-                                await mt.disable_pppoe_user(username)
-                            else:
-                                await mt.disable_hotspot_user(username)
                             
-                            # Tandai sebagai overdue dan disable=True
+                            if auto_isolir_method in ("whatsapp", "both"):
+                                mt = get_api_client(device)
+                                svc_type = customer.get("service_type", "pppoe")
+                                if svc_type == "pppoe":
+                                    await mt.disable_pppoe_user(username)
+                                else:
+                                    await mt.disable_hotspot_user(username)
+                            
+                            original_ssid = None
+                            genieacs_device_id = None
+                            
+                            if auto_isolir_method in ("ssid", "both") and username:
+                                from services import genieacs_service as genie_svc
+                                try:
+                                    g_devs = await asyncio.to_thread(genie_svc.get_devices, 1, username, "")
+                                    if g_devs:
+                                        g_dev = g_devs[0]
+                                        genieacs_device_id = g_dev.get("_id")
+                                        
+                                        # Parse current SSID safely
+                                        lan1 = g_dev.get("InternetGatewayDevice", {}).get("LANDevice", {}).get("1", {})
+                                        wlan = lan1.get("WLANConfiguration", {}).get("1", {})
+                                        ssid_obj = wlan.get("SSID", {})
+                                        
+                                        if isinstance(ssid_obj, dict):
+                                            original_ssid = ssid_obj.get("_value")
+                                        elif isinstance(ssid_obj, str) or isinstance(ssid_obj, int):
+                                            original_ssid = str(ssid_obj)
+                                            
+                                        if original_ssid and "ISOLIR" not in str(original_ssid):
+                                            new_ssid = f"ISOLIR_{str(original_ssid)[:20]}" # Safe max length
+                                            await asyncio.to_thread(
+                                                genie_svc.set_parameter,
+                                                genieacs_device_id,
+                                                "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID",
+                                                new_ssid
+                                            )
+                                except Exception as ge:
+                                    logger.error(f"GenieACS Isolir error for {username}: {ge}")
+                            
+                            # Update status invoice and save states
+                            update_fields = {"status": "overdue"}
+                            if auto_isolir_method in ("whatsapp", "both"):
+                                update_fields["mt_disabled"] = True
+                            if original_ssid and genieacs_device_id:
+                                update_fields["original_ssid"] = str(original_ssid)
+                                update_fields["genieacs_device_id"] = genieacs_device_id
+                                
                             await db.invoices.update_one(
                                 {"id": inv["id"]}, 
-                                {"$set": {"status": "overdue", "mt_disabled": True}}
+                                {"$set": update_fields}
                             )
                             success += 1
                             
                             # Kirim WA notifikasi isolir
-                            phone = customer.get("phone")
-                            template = settings.get("wa_template_isolir", "")
-                            wa_type = settings.get("wa_gateway_type", "fonnte")
-                            url = settings.get("wa_api_url", "https://api.fonnte.com/send")
-                            token = settings.get("wa_token", "")
-                            
-                            if phone and template and url:
-                                pkg = await db.billing_packages.find_one({"id": inv.get("package_id")})
+                            if auto_isolir_method in ("whatsapp", "both"):
+                                phone = customer.get("phone")
+                                template = settings.get("wa_template_isolir", "")
+                                wa_type = settings.get("wa_gateway_type", "fonnte")
+                                url = settings.get("wa_api_url", "https://api.fonnte.com/send")
+                                token = settings.get("wa_token", "")
                                 
-                                def _rupiah(amount: int) -> str:
-                                    return f"Rp {amount:,.0f}".replace(",", ".")
-                                
-                                msg = template.replace("{customer_name}", customer.get("name", ""))
-                                msg = msg.replace("{invoice_number}", inv.get("invoice_number", ""))
-                                msg = msg.replace("{package_name}", pkg.get("name", "") if pkg else "")
-                                msg = msg.replace("{total}", _rupiah(inv.get("total", 0)))
-                                msg = msg.replace("{period}", f"{inv.get('period_start')} s/d {inv.get('period_end')}")
-                                msg = msg.replace("{due_date}", inv.get("due_date", ""))
-                                
-                                try:
-                                    import httpx
-                                    async with httpx.AsyncClient(timeout=10) as client:
-                                        if wa_type == "fonnte":
-                                            await client.post(url, headers={"Authorization": token}, data={"target": phone, "message": msg, "countryCode": "62"})
-                                        elif wa_type == "wablas":
-                                            await client.post(url, headers={"Authorization": token}, json={"phone": phone, "message": msg})
-                                        else:
-                                            headers = {"Authorization": token} if token else {}
-                                            await client.post(url, headers=headers, json={"phone": phone, "message": msg})
-                                except Exception as we:
-                                    logger.error(f"Auto Isolir WA error for {customer.get('name')}: {we}")
+                                if phone and template and url:
+                                    pkg = await db.billing_packages.find_one({"id": inv.get("package_id")})
                                     
+                                    def _rupiah(amount: int) -> str:
+                                        return f"Rp {amount:,.0f}".replace(",", ".")
+                                    
+                                    msg = template.replace("{customer_name}", customer.get("name", ""))
+                                    msg = msg.replace("{invoice_number}", inv.get("invoice_number", ""))
+                                    msg = msg.replace("{package_name}", pkg.get("name", "") if pkg else "")
+                                    msg = msg.replace("{total}", _rupiah(inv.get("total", 0)))
+                                    msg = msg.replace("{period}", f"{inv.get('period_start')} s/d {inv.get('period_end')}")
+                                    msg = msg.replace("{due_date}", inv.get("due_date", ""))
+                                    
+                                    try:
+                                        import httpx
+                                        async with httpx.AsyncClient(timeout=10) as client:
+                                            if wa_type == "fonnte":
+                                                await client.post(url, headers={"Authorization": token}, data={"target": phone, "message": msg, "countryCode": "62"})
+                                            elif wa_type == "wablas":
+                                                await client.post(url, headers={"Authorization": token}, json={"phone": phone, "message": msg})
+                                            else:
+                                                headers = {"Authorization": token} if token else {}
+                                                await client.post(url, headers=headers, json={"phone": phone, "message": msg})
+                                    except Exception as we:
+                                        logger.error(f"Auto Isolir WA error for {customer.get('name')}: {we}")
+                                        
                         except Exception as e:
                             logger.error(f"Auto Isolir failed for {customer.get('name', '?')}: {e}")
                             failed += 1

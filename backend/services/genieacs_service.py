@@ -93,7 +93,8 @@ def get_devices(limit: int = 200, search: str = "", model: str = "") -> list:
             '{"$or":['
             f'{{"_id":{{"$regex":"{search}","$options":"i"}}}},'
             f'{{"InternetGatewayDevice.DeviceInfo.ModelName._value":{{"$regex":"{search}","$options":"i"}}}},'
-            f'{{"InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress._value":{{"$regex":"{search}","$options":"i"}}}}'
+            f'{{"InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress._value":{{"$regex":"{search}","$options":"i"}}}},'
+            f'{{"InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username._value":{{"$regex":"{search}","$options":"i"}}}}'
             ']}'
         )
     elif model:
