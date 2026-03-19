@@ -234,16 +234,16 @@ function InvoiceModal({ invoice, packages, onClose, onPaid, onDelete }) {
 
 // ── Dashboard Tab ─────────────────────────────────────────────────────────────
 
-function DashboardTab({ month, year }) {
+function DashboardTab({ month, year, deviceId }) {
   const [stats, setStats] = useState(null);
   const [recent, setRecent] = useState([]);
   const [trend, setTrend] = useState([]);
 
   useEffect(() => {
-    api.get("/billing/stats", { params: { month, year } }).then(r => setStats(r.data)).catch(() => { });
-    api.get("/billing/invoices", { params: { month, year, status: "overdue" } }).then(r => setRecent(r.data.slice(0, 5))).catch(() => { });
-    api.get("/billing/monthly-summary", { params: { months: 6 } }).then(r => setTrend(r.data)).catch(() => { });
-  }, [month, year]);
+    api.get("/billing/stats", { params: { month, year, device_id: deviceId } }).then(r => setStats(r.data)).catch(() => { });
+    api.get("/billing/invoices", { params: { month, year, status: "overdue", device_id: deviceId } }).then(r => setRecent(r.data.slice(0, 5))).catch(() => { });
+    api.get("/billing/monthly-summary", { params: { months: 6, device_id: deviceId } }).then(r => setTrend(r.data)).catch(() => { });
+  }, [month, year, deviceId]);
 
   const fmtRp = (val) => {
     if (val >= 1_000_000) return `Rp ${(val / 1_000_000).toFixed(1)}jt`;
@@ -311,7 +311,7 @@ function DashboardTab({ month, year }) {
 
 // ── Invoices Tab ──────────────────────────────────────────────────────────────
 
-function InvoicesTab({ month, year, packages, customers }) {
+function InvoicesTab({ month, year, packages, customers, deviceId }) {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("");
@@ -328,18 +328,18 @@ function InvoicesTab({ month, year, packages, customers }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await api.get("/billing/invoices", { params: { month, year, status, search } });
+      const r = await api.get("/billing/invoices", { params: { month, year, status, search, device_id: deviceId } });
       setInvoices(r.data);
     } catch { toast.error("Gagal memuat tagihan"); }
     setLoading(false);
-  }, [month, year, status, search]);
+  }, [month, year, status, search, deviceId]);
 
   useEffect(() => { load(); }, [load]);
 
   const bulkCreate = async () => {
     setBulking(true);
     try {
-      const r = await api.post("/billing/invoices/bulk-create", null, { params: { month, year } });
+      const r = await api.post("/billing/invoices/bulk-create", null, { params: { month, year, device_id: deviceId } });
       toast.success(r.data.message);
       load();
     } catch (e) { toast.error(e.response?.data?.detail || "Gagal"); }
@@ -575,7 +575,7 @@ function CreateInvoiceModal({ packages, customers, month, year, onClose, onCreat
 
 // ── Customers Tab ─────────────────────────────────────────────────────────────
 
-function CustomersTab({ packages, onRefresh }) {
+function CustomersTab({ packages, onRefresh, deviceId }) {
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -587,10 +587,10 @@ function CustomersTab({ packages, onRefresh }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { const r = await api.get("/customers", { params: { search } }); setCustomers(r.data); }
+    try { const r = await api.get("/customers", { params: { search, device_id: deviceId } }); setCustomers(r.data); }
     catch { toast.error("Gagal memuat pelanggan"); }
     setLoading(false);
-  }, [search]);
+  }, [search, deviceId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -846,7 +846,7 @@ function ImportModal({ onClose, onImported }) {
 
 // ── Packages Tab ──────────────────────────────────────────────────────────────
 
-function PackagesTab({ packages, onRefresh }) {
+function PackagesTab({ packages, onRefresh, deviceId }) {
   const [showForm, setShowForm] = useState(false);
   const [editPkg, setEditPkg] = useState(null);
   const [devices, setDevices] = useState([]);
@@ -856,6 +856,8 @@ function PackagesTab({ packages, onRefresh }) {
   const [savingPrice, setSavingPrice] = useState({});
   const { user } = useAuth();
   const isAdmin = user?.role === "administrator";
+
+  const filteredPackages = deviceId ? packages.filter(p => p.source_device_id === deviceId) : packages;
 
   useEffect(() => {
     api.get("/devices").then(r => setDevices(r.data)).catch(() => { });
@@ -927,7 +929,7 @@ function PackagesTab({ packages, onRefresh }) {
       )}
 
       {/* Info hint */}
-      {packages.length === 0 ? (
+      {filteredPackages.length === 0 ? (
         <div className="text-center py-10">
           <Package className="w-10 h-10 text-muted-foreground/30 mx-auto mb-2" />
           <p className="text-muted-foreground text-sm mb-1">Belum ada paket</p>
@@ -944,7 +946,7 @@ function PackagesTab({ packages, onRefresh }) {
               </tr>
             </thead>
             <tbody>
-              {packages.map(p => (
+              {filteredPackages.map(p => (
                 <tr key={p.id} className="border-b border-border/40 hover:bg-secondary/20">
                   <td className="px-3 py-2.5">
                     <p className="text-xs font-medium">{p.name}</p>
@@ -1018,7 +1020,7 @@ function PackagesTab({ packages, onRefresh }) {
               ))}
             </tbody>
           </table>
-          <p className="text-[10px] text-muted-foreground mt-2 text-right font-mono">{packages.length} paket</p>
+          <p className="text-[10px] text-muted-foreground mt-2 text-right font-mono">{filteredPackages.length} paket</p>
         </div>
       )}
       {showForm && <PackageForm initial={editPkg} onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); onRefresh(); }} />}
@@ -1192,6 +1194,8 @@ export default function BillingPage() {
   const today = new Date();
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [year, setYear] = useState(today.getFullYear());
+  const [devices, setDevices] = useState([]);
+  const [globalDeviceId, setGlobalDeviceId] = useState("");
 
   const loadPackages = useCallback(() => {
     api.get("/billing/packages").then(r => setPackages(r.data)).catch(() => { });
@@ -1202,6 +1206,10 @@ export default function BillingPage() {
   }, []);
 
   useEffect(() => { loadPackages(); loadCustomers(); }, [loadPackages, loadCustomers]);
+
+  useEffect(() => {
+    api.get("/devices").then(r => setDevices(r.data)).catch(() => {});
+  }, []);
 
   // Deteksi PPPoE user baru yang belum ada billing record
   useEffect(() => {
@@ -1250,6 +1258,11 @@ export default function BillingPage() {
         </div>
         {/* Month selector */}
         <div className="flex items-center gap-2 self-start">
+          <select value={globalDeviceId} onChange={e => setGlobalDeviceId(e.target.value)}
+            className="h-8 text-xs rounded-sm border border-border bg-secondary px-2 text-foreground min-w-[140px]">
+            <option value="">Semua Router</option>
+            {devices.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
           <select value={month} onChange={e => setMonth(Number(e.target.value))}
             className="h-8 text-xs rounded-sm border border-border bg-secondary px-2 text-foreground">
             {MONTHS.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
@@ -1298,10 +1311,10 @@ export default function BillingPage() {
 
       {/* Content */}
       <div className="bg-card border border-border rounded-sm p-4">
-        {tab === "dashboard" && <DashboardTab month={month} year={year} />}
-        {tab === "invoices" && <InvoicesTab month={month} year={year} packages={packages} customers={customers} />}
-        {tab === "customers" && <CustomersTab packages={packages} onRefresh={loadCustomers} />}
-        {tab === "packages" && <PackagesTab packages={packages} onRefresh={loadPackages} />}
+        {tab === "dashboard" && <DashboardTab month={month} year={year} deviceId={globalDeviceId} />}
+        {tab === "invoices" && <InvoicesTab month={month} year={year} packages={packages} customers={customers} deviceId={globalDeviceId} />}
+        {tab === "customers" && <CustomersTab packages={packages} onRefresh={loadCustomers} deviceId={globalDeviceId} />}
+        {tab === "packages" && <PackagesTab packages={packages} onRefresh={loadPackages} deviceId={globalDeviceId} />}
       </div>
     </div>
   );

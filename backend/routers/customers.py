@@ -48,6 +48,7 @@ async def list_customers(
     search: str = Query(""),
     service_type: str = Query(""),
     active: Optional[bool] = Query(None),
+    device_id: str = Query(""),
     user=Depends(get_current_user),
 ):
     db = get_db()
@@ -56,6 +57,8 @@ async def list_customers(
         q["service_type"] = service_type
     if active is not None:
         q["active"] = active
+    if device_id:
+        q["device_id"] = device_id
 
     cursor = db.customers.find(q, {"_id": 0})
     results = await cursor.to_list(length=1000)

@@ -248,6 +248,7 @@ class PaymentUpdate(BaseModel):
 async def billing_stats(
     month: int = Query(0),    # 0 = bulan ini
     year: int = Query(0),
+    device_id: str = Query(""),
     user=Depends(get_current_user),
 ):
     """Dashboard stats: total tagihan, lunas, belum bayar, jatuh tempo."""
@@ -259,6 +260,10 @@ async def billing_stats(
     # Filter periode bulan
     period_prefix = f"{y}-{m:02d}"
     q = {"period_start": {"$regex": f"^{period_prefix}"}}
+
+    if device_id:
+        customers = await db.customers.find({"device_id": device_id}, {"id": 1}).to_list(None)
+        q["customer_id"] = {"$in": [c["id"] for c in customers]}
 
     all_inv = await db.invoices.find(q, {"_id": 0}).to_list(5000)
 
@@ -300,6 +305,7 @@ async def list_invoices(
     status: str = Query(""),       # "" | "paid" | "unpaid" | "overdue"
     search: str = Query(""),
     customer_id: str = Query(""),
+    device_id: str = Query(""),
     user=Depends(get_current_user),
 ):
     db = get_db()
@@ -313,6 +319,9 @@ async def list_invoices(
         q["status"] = status
     if customer_id:
         q["customer_id"] = customer_id
+    if device_id:
+        customers = await db.customers.find({"device_id": device_id}, {"id": 1}).to_list(None)
+        q["customer_id"] = {"$in": [c["id"] for c in customers]}
 
     invoices = await db.invoices.find(q, {"_id": 0}).sort("due_date", 1).to_list(5000)
 
@@ -423,6 +432,7 @@ async def bulk_create_invoices(
     month: int = Query(...),
     year: int = Query(...),
     service_type: str = Query(""),    # "" = semua, "pppoe", "hotspot"
+    device_id: str = Query(""),
     user=Depends(require_write),
 ):
     """
@@ -440,6 +450,8 @@ async def bulk_create_invoices(
     q = {"active": True}
     if service_type:
         q["service_type"] = service_type
+    if device_id:
+        q["device_id"] = device_id
 
     customers = await db.customers.find(q).to_list(5000)
 
@@ -686,6 +698,7 @@ async def sync_mikrotik_status(
 @router.get("/monthly-summary")
 async def monthly_summary(
     months: int = Query(6),   # jumlah bulan ke belakang
+    device_id: str = Query(""),
     user=Depends(get_current_user),
 ):
     """Data tren pendapatan N bulan terakhir untuk grafik bar/line chart."""
@@ -694,11 +707,21 @@ async def monthly_summary(
     today = date.today()
     result = []
 
+    customer_ids = None
+    if device_id:
+        customers = await db.customers.find({"device_id": device_id}, {"id": 1}).to_list(None)
+        customer_ids = [c["id"] for c in customers]
+
     for i in range(months - 1, -1, -1):
         d = today - relativedelta(months=i)
         prefix = f"{d.year}-{d.month:02d}"
+        
+        q_inv = {"period_start": {"$regex": f"^{prefix}"}}
+        if customer_ids is not None:
+            q_inv["customer_id"] = {"$in": customer_ids}
+            
         inv_month = await db.invoices.find(
-            {"period_start": {"$regex": f"^{prefix}"}}, {"_id": 0}
+            q_inv, {"_id": 0}
         ).to_list(5000)
 
         paid = [x for x in inv_month if x.get("status") == "paid"]
