@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/App";
 import {
   LayoutDashboard, Users, Wifi, FileText, Server, Shield, LogOut, Menu, ChevronLeft, Settings, Bell, HardDrive, Terminal,
-  GitBranch, Route, Cable, ShieldAlert, Cpu, Receipt, Monitor, BarChart2, AlertTriangle, ClipboardList, Activity, Download, CalendarClock, Radar
+  GitBranch, Route, Cable, ShieldAlert, Cpu, Receipt, Monitor, BarChart2, AlertTriangle, ClipboardList, Activity, Download, CalendarClock, Radar, Wallet, Ticket
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,7 +31,8 @@ const navItems = [
   { separator: true, label: "VS NOC Analytics" },
   { to: "/peering-eye", icon: Radar, label: "Sentinel Peering-Eye" },
   { separator: true, label: "Admin", adminOnly: true },
-  { to: "/billing", icon: Receipt, label: "Billing", adminOnly: true },
+  { to: "/billing", icon: Wallet, label: "Billing PPPoE", adminOnly: true },
+  { to: "/hotspot-billing", icon: Ticket, label: "Billing Hotspot", adminOnly: true },
   { to: "/notifications", icon: Bell, label: "Notifikasi", adminOnly: true },
   { to: "/backups", icon: HardDrive, label: "Backup Config", adminOnly: true },
   { to: "/scheduler", icon: CalendarClock, label: "Scheduler & Monitor", adminOnly: true },

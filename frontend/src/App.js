@@ -19,6 +19,7 @@ import BGPPage from "@/pages/BGPPage";
 import RoutingPage from "@/pages/RoutingPage";
 import GenieACSPage from "@/pages/GenieACSPage";
 import BillingPage from "@/pages/BillingPage";
+import HotspotBillingPage from "@/pages/HotspotBillingPage";
 import WallDisplayPage from "@/pages/WallDisplayPage";
 import SLAPage from "@/pages/SLAPage";
 import IncidentsPage from "@/pages/IncidentsPage";
@@ -129,6 +130,7 @@ function App() {
               <Route path="routing" element={<RoutingPage />} />
               <Route path="genieacs" element={<GenieACSPage />} />
               <Route path="billing" element={<ProtectedRoute allowedRoles={["administrator"]}><BillingPage /></ProtectedRoute>} />
+              <Route path="hotspot-billing" element={<ProtectedRoute allowedRoles={["administrator"]}><HotspotBillingPage /></ProtectedRoute>} />
               {/* v3 New Features */}
               <Route path="wallboard" element={<WallDisplayPage />} />
               <Route path="sla" element={<SLAPage />} />

@@ -112,6 +112,7 @@ class MikroTikBase:
     async def list_hotspot_active(self): raise NotImplementedError
     async def disable_hotspot_user(self, username): raise NotImplementedError
     async def enable_hotspot_user(self, username): raise NotImplementedError
+    async def remove_hotspot_active_session(self, username): raise NotImplementedError
     async def list_pppoe_profiles(self): raise NotImplementedError
     async def list_hotspot_profiles(self): raise NotImplementedError
     async def list_hotspot_servers(self): raise NotImplementedError
@@ -694,6 +695,18 @@ class MikroTikRestAPI(MikroTikBase):
                 return await self._async_req("PATCH", f"ip/hotspot/user/{mt_id}", {"disabled": "false"})
         raise Exception(f"Hotspot user '{username}' tidak ditemukan")
 
+    async def remove_hotspot_active_session(self, username):
+        try:
+            active_sessions = await self.list_hotspot_active()
+            for s in active_sessions:
+                if s.get("user") == username:
+                    mt_id = s.get(".id", "")
+                    await self._async_req("DELETE", f"ip/hotspot/active/{mt_id}")
+            return {"success": True}
+        except Exception as e:
+            logger.warning(f"Gagal remove hotspot active session '{username}': {e}")
+            return {"success": False, "error": str(e)}
+
     async def list_hotspot_profiles(self):
         try:
             items = await self._async_req("GET", "ip/hotspot/user/profile")
@@ -917,6 +930,18 @@ class MikroTikLegacyAPI(MikroTikBase):
                 mt_id = u.get(".id") or u.get("id", "")
                 return await asyncio.to_thread(self._set_resource, "/ip/hotspot/user", mt_id, {"disabled": "false"})
         raise Exception(f"Hotspot user '{username}' tidak ditemukan")
+
+    async def remove_hotspot_active_session(self, username):
+        try:
+            active_sessions = await self.list_hotspot_active()
+            for s in active_sessions:
+                if s.get("user") == username:
+                    mt_id = s.get(".id") or s.get("id", "")
+                    await asyncio.to_thread(self._remove_resource, "/ip/hotspot/active", mt_id)
+            return {"success": True}
+        except Exception as e:
+            logger.warning(f"Gagal remove hotspot active session '{username}': {e}")
+            return {"success": False, "error": str(e)}
 
     async def list_pppoe_profiles(self):
         try:

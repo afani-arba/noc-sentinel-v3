@@ -63,6 +63,7 @@ async def auto_isolir_loop():
                                     await mt.disable_pppoe_user(username)
                                 else:
                                     await mt.disable_hotspot_user(username)
+                                    await mt.remove_hotspot_active_session(username)
                             
                             original_ssid = None
                             genieacs_device_id = None

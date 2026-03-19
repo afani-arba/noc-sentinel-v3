@@ -18,6 +18,9 @@ class HotspotUserCreate(BaseModel):
     server: str = "all"
     comment: str = ""
 
+class HotspotUserBatchCreate(BaseModel):
+    users: list[HotspotUserCreate]
+
 
 class HotspotUserUpdate(BaseModel):
     name: Optional[str] = None
@@ -64,6 +67,25 @@ async def create_hotspot_user(device_id: str, data: HotspotUserCreate, user=Depe
         return await mt.create_hotspot_user(body)
     except Exception as e:
         raise HTTPException(502, f"MikroTik: {e}")
+
+@router.post("/hotspot-users/batch", status_code=201)
+async def create_hotspot_users_batch(device_id: str, data: HotspotUserBatchCreate, user=Depends(require_write)):
+    mt, _ = await _get_mt_api(device_id)
+    created = 0
+    errors = []
+    
+    for u in data.users:
+        body = {k: v for k, v in u.model_dump().items() if v}
+        try:
+            await mt.create_hotspot_user(body)
+            created += 1
+        except Exception as e:
+            errors.append({"name": u.name, "error": str(e)})
+            
+    if errors and created == 0:
+        raise HTTPException(502, f"Failed to create any users. First error: {errors[0]['error']}")
+        
+    return {"message": f"Successfully created {created} users", "errors": errors if errors else None}
 
 
 @router.put("/hotspot-users/{mt_id}")
