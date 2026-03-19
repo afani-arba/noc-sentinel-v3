@@ -440,7 +440,14 @@ function InvoicesTab({ month, year, packages, customers, deviceId }) {
                   </td>
                   <td className="px-3 py-2.5 text-xs text-muted-foreground">{inv.package_name}</td>
                   <td className="px-3 py-2.5 text-xs font-mono font-bold">{Rp(inv.total)}</td>
-                  <td className="px-3 py-2.5 text-[10px] text-muted-foreground">{inv.due_date}</td>
+                  <td className="px-3 py-2.5 text-[10px] text-muted-foreground">
+                    <p>{inv.due_date}</p>
+                    {inv.last_reminder_at && (
+                      <p className="text-[9px] text-blue-400 mt-0.5" title="Terakhir Diingatkan">
+                        🔔 {new Date(inv.last_reminder_at).toLocaleDateString("id-ID", { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    )}
+                  </td>
                   <td className="px-3 py-2.5"><StatusBadge status={inv.status} /></td>
                   <td className="px-3 py-2.5">
                     <Button size="sm" variant="outline" className="rounded-sm h-6 text-[10px] px-2" onClick={() => setSelected(inv)}>
@@ -1112,16 +1119,15 @@ function BulkReminderModal({ invoices, onClose }) {
 
   const sendAll = async () => {
     setSending(true);
-    setProgress(0);
-    for (let i = 0; i < invoices.length; i++) {
-      try {
-        const r = await api.get(`/billing/invoices/${invoices[i].id}/whatsapp-link`);
-        window.open(r.data.link, "_blank");
-      } catch { /* skip */ }
-      setProgress(i + 1);
-      await new Promise(res => setTimeout(res, 800));
+    try {
+      const ids = invoices.map(i => i.id);
+      const r = await api.post("/billing/invoices/bulk-reminder", { invoice_ids: ids });
+      toast.success(r.data.message);
+      setDone(true);
+      if (onClose) setTimeout(onClose, 2500); // Tutup otomatis 2.5s jika sukses
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Gagal mengirim request");
     }
-    setDone(true);
     setSending(false);
   };
 
@@ -1138,8 +1144,8 @@ function BulkReminderModal({ invoices, onClose }) {
           <p className="text-sm text-muted-foreground">
             Akan mengirim pesan tagihan ke <strong className="text-foreground">{invoices.length} pelanggan</strong> yang belum bayar dan memiliki nomor telepon.
           </p>
-          <div className="bg-amber-500/10 border border-amber-500/20 rounded-sm p-3 text-xs text-amber-400">
-            ⚠️ Browser akan membuka tab WA baru untuk setiap pelanggan. Pastikan popup tidak diblokir browser.
+          <div className="bg-blue-500/10 border border-blue-500/20 rounded-sm p-3 text-xs text-blue-400">
+            ℹ️ Proses pengiriman akan berjalan bertahap secara otomatis di server (*Background Task*). Anda bebas menutup modal/tab ini setelah menekan "Kirim Semua".
           </div>
           <div className="max-h-48 overflow-y-auto space-y-1.5 border border-border rounded-sm p-2">
             {invoices.map((inv, i) => (
@@ -1151,19 +1157,13 @@ function BulkReminderModal({ invoices, onClose }) {
             ))}
           </div>
           {sending && (
-            <div className="space-y-1">
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>Mengirim...</span><span>{progress}/{invoices.length}</span>
-              </div>
-              <div className="w-full h-1.5 bg-secondary rounded-full overflow-hidden">
-                <div className="h-full bg-green-500 transition-all duration-300 rounded-full"
-                  style={{ width: `${(progress / invoices.length) * 100}%` }} />
-              </div>
+            <div className="p-2 bg-secondary/50 border border-border rounded-sm text-xs text-muted-foreground text-center animate-pulse">
+              Memproses pengiriman ke antrean server...
             </div>
           )}
           {done && (
             <div className="p-2 bg-green-500/10 border border-green-500/20 rounded-sm text-xs text-green-400 text-center">
-              ✓ Selesai! {progress} pesan telah dibuka.
+              ✓ Selesai! Reminder massal masuk ke proses background.
             </div>
           )}
         </div>
@@ -1178,6 +1178,97 @@ function BulkReminderModal({ invoices, onClose }) {
             </Button>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Settings Tab ──────────────────────────────────────────────────────────────
+
+function SettingsTab() {
+  const [settings, setSettings] = useState({
+    wa_gateway_type: "fonnte",
+    wa_api_url: "https://api.fonnte.com/send",
+    wa_token: "",
+    wa_delay_ms: 10000,
+    wa_template_unpaid: "",
+  });
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    api.get("/billing/settings")
+      .then(r => setSettings(r.data))
+      .catch(() => toast.error("Gagal memuat pengaturan API"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.put("/billing/settings", settings);
+      toast.success("Pengaturan WhatsApp tersimpan!");
+    } catch {
+      toast.error("Gagal menyimpan pengaturan");
+    }
+    setSaving(false);
+  };
+
+  if (loading) return <p className="text-muted-foreground text-sm text-center py-8 animate-pulse">Memuat pengaturan...</p>;
+
+  return (
+    <div className="space-y-4 max-w-3xl">
+      <div className="bg-card border border-border rounded-sm p-4 space-y-4">
+        <h3 className="font-semibold text-sm flex items-center gap-2 border-b border-border/50 pb-2 mb-2">
+          <Send className="w-4 h-4 text-green-400" /> Konfigurasi Auto WhatsApp Gateway
+        </h3>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Jenis Gateway API</Label>
+            <select value={settings.wa_gateway_type || "fonnte"} onChange={e => setSettings({ ...settings, wa_gateway_type: e.target.value })}
+              className="w-full h-8 text-xs rounded-sm border border-border bg-secondary px-2 text-foreground">
+              <option value="fonnte">Fonnte (Default)</option>
+              <option value="wablas">Wablas</option>
+              <option value="custom">Custom Server JSON</option>
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Jeda Antar Pesan (Rekomendasi 10000ms)</Label>
+            <Input value={settings.wa_delay_ms || 10000} onChange={e => setSettings({ ...settings, wa_delay_ms: Number(e.target.value) })}
+              type="number" className="h-8 rounded-sm text-xs font-mono" />
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">URL Endpoint API</Label>
+          <Input value={settings.wa_api_url || ""} onChange={e => setSettings({ ...settings, wa_api_url: e.target.value })}
+            placeholder="https://api.fonnte.com/send" className="h-8 rounded-sm text-xs font-mono" />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">API Token / Authorization Header</Label>
+          <Input value={settings.wa_token || ""} onChange={e => setSettings({ ...settings, wa_token: e.target.value })}
+            type="password" placeholder="Key token untuk validasi WA..." className="h-8 rounded-sm text-xs font-mono" />
+        </div>
+
+        <div className="space-y-1.5 pt-2">
+          <Label className="text-xs text-muted-foreground">Template Pesan Tagihan (Dukung Markdown: *Tebal*, _Miring_)</Label>
+          <p className="text-[10px] text-muted-foreground">
+            Variabel otomatis: <code className="bg-secondary/50 px-1 py-0.5 rounded text-primary">{'{customer_name}'}</code> <code className="bg-secondary/50 px-1 py-0.5 rounded text-primary">{'{invoice_number}'}</code> <code className="bg-secondary/50 px-1 py-0.5 rounded text-primary">{'{package_name}'}</code> <code className="bg-secondary/50 px-1 py-0.5 rounded text-primary">{'{period}'}</code> <code className="bg-secondary/50 px-1 py-0.5 rounded text-primary">{'{total}'}</code> <code className="bg-secondary/50 px-1 py-0.5 rounded text-primary">{'{due_date}'}</code>
+          </p>
+          <textarea
+            value={settings.wa_template_unpaid || ""}
+            onChange={e => setSettings({ ...settings, wa_template_unpaid: e.target.value })}
+            className="w-full h-40 text-xs rounded-sm border border-border bg-secondary p-2 text-foreground resize-y font-mono mt-1"
+          />
+        </div>
+
+        <Button onClick={handleSave} disabled={saving} className="w-full sm:w-auto text-xs h-8 rounded-sm gap-2">
+          <Save className="w-3.5 h-3.5" /> {saving ? "Menyimpan..." : "Simpan Pengaturan"}
+        </Button>
       </div>
     </div>
   );
@@ -1242,6 +1333,7 @@ export default function BillingPage() {
     { id: "invoices", label: "Tagihan", icon: Receipt },
     { id: "customers", label: "Pelanggan", icon: Users },
     { id: "packages", label: "Paket", icon: Package },
+    { id: "settings", label: "Pengaturan", icon: Settings },
   ];
 
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agt", "Sep", "Okt", "Nov", "Des"];
@@ -1315,6 +1407,7 @@ export default function BillingPage() {
         {tab === "invoices" && <InvoicesTab month={month} year={year} packages={packages} customers={customers} deviceId={globalDeviceId} />}
         {tab === "customers" && <CustomersTab packages={packages} onRefresh={loadCustomers} deviceId={globalDeviceId} />}
         {tab === "packages" && <PackagesTab packages={packages} onRefresh={loadPackages} deviceId={globalDeviceId} />}
+        {tab === "settings" && <SettingsTab />}
       </div>
     </div>
   );

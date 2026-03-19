@@ -5,7 +5,10 @@ Endpoint prefix: /billing
 import uuid
 from datetime import datetime, timezone, date
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Depends, Query
+import httpx
+import asyncio
+import logging
+from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks
 from pydantic import BaseModel
 from core.db import get_db
 from core.auth import get_current_user, require_admin, require_write
@@ -25,6 +28,53 @@ def _invoice_num(seq: int) -> str:
 def _rupiah(amount: int) -> str:
     return f"Rp {amount:,.0f}".replace(",", ".")
 
+
+def _rupiah(amount: int) -> str:
+    return f"Rp {amount:,.0f}".replace(",", ".")
+
+logger = logging.getLogger(__name__)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SETTINGS
+# ══════════════════════════════════════════════════════════════════════════════
+
+class BillingSettingsUpdate(BaseModel):
+    wa_gateway_type: Optional[str] = None
+    wa_api_url: Optional[str] = None
+    wa_token: Optional[str] = None
+    wa_delay_ms: Optional[int] = None
+    wa_template_unpaid: Optional[str] = None
+
+@router.get("/settings")
+async def get_billing_settings(user=Depends(get_current_user)):
+    db = get_db()
+    settings = await db.billing_settings.find_one({}, {"_id": 0})
+    if not settings:
+        settings = {
+            "wa_gateway_type": "fonnte",
+            "wa_api_url": "https://api.fonnte.com/send",
+            "wa_token": "",
+            "wa_delay_ms": 10000,
+            "wa_template_unpaid": "Yth. *{customer_name}*,\n\nTagihan internet Anda sebesar *{total}* untuk paket {package_name} periode {period} telah terbit. Nomor invoice: {invoice_number}.\nJatuh tempo pada: *{due_date}*.\n\nMohon segera melakukan pembayaran. Abaikan pesan ini jika sudah mengkonfirmasi pembayaran.",
+        }
+        await db.billing_settings.insert_one(settings)
+        settings.pop("_id", None)
+    return settings
+
+@router.put("/settings")
+async def update_billing_settings(data: BillingSettingsUpdate, user=Depends(require_admin)):
+    db = get_db()
+    update_data = {k: v for k, v in data.dict().items() if v is not None}
+    if not update_data:
+        raise HTTPException(400, "Tidak ada data yang dikirim")
+    
+    doc = await db.billing_settings.find_one({})
+    if not doc:
+        await get_billing_settings()  # trigger default creation
+        
+    await db.billing_settings.update_one({}, {"$set": update_data})
+    doc = await db.billing_settings.find_one({}, {"_id": 0})
+    return doc
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PACKAGES
@@ -511,6 +561,66 @@ async def bulk_create_invoices(
         "skipped": skipped,
         "errors": errors,
     }
+
+
+class InvoiceBulkReminderReq(BaseModel):
+    invoice_ids: list[str]
+
+async def _bg_send_whatsapp_reminders(invoice_ids: list[str]):
+    db = get_db()
+    settings = await db.billing_settings.find_one({}, {"_id": 0}) or {}
+    wa_type = settings.get("wa_gateway_type", "fonnte")
+    url = settings.get("wa_api_url", "https://api.fonnte.com/send")
+    token = settings.get("wa_token", "")
+    delay = settings.get("wa_delay_ms", 10000) / 1000.0
+    template = settings.get("wa_template_unpaid", "Tagihan {invoice_number} sebesar {total}")
+
+    if not url:
+        return
+
+    for inv_id in invoice_ids:
+        inv = await db.invoices.find_one({"id": inv_id})
+        if not inv or inv.get("status") == "paid":
+            continue
+        
+        c = await db.customers.find_one({"id": inv["customer_id"]})
+        if not c or not c.get("phone"):
+            continue
+            
+        p = await db.billing_packages.find_one({"id": inv["package_id"]})
+        
+        # Format message
+        msg = template.replace("{customer_name}", c.get("name", ""))
+        msg = msg.replace("{invoice_number}", inv.get("invoice_number", ""))
+        msg = msg.replace("{package_name}", p.get("name", "") if p else "")
+        msg = msg.replace("{total}", _rupiah(inv.get("total", 0)))
+        msg = msg.replace("{period}", f"{inv.get('period_start')} s/d {inv.get('period_end')}")
+        msg = msg.replace("{due_date}", inv.get("due_date", ""))
+        
+        phone = c["phone"]
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                if wa_type == "fonnte":
+                    await client.post(url, headers={"Authorization": token}, data={"target": phone, "message": msg, "countryCode": "62"})
+                elif wa_type == "wablas":
+                    await client.post(url, headers={"Authorization": token}, json={"phone": phone, "message": msg})
+                else:
+                    headers = {"Authorization": token} if token else {}
+                    await client.post(url, headers=headers, json={"phone": phone, "message": msg})
+        except Exception as e:
+            logger.error(f"Bulk WA error for {inv_id}: {e}")
+            
+        # Update last_reminder_at
+        await db.invoices.update_one({"id": inv_id}, {"$set": {"last_reminder_at": _now()}})
+        
+        await asyncio.sleep(delay)
+
+@router.post("/invoices/bulk-reminder")
+async def bulk_send_reminder(req: InvoiceBulkReminderReq, background_tasks: BackgroundTasks, user=Depends(require_admin)):
+    if not req.invoice_ids:
+        raise HTTPException(400, "Tidak ada invoice yang dipilih")
+    background_tasks.add_task(_bg_send_whatsapp_reminders, req.invoice_ids)
+    return {"message": f"Pengingat massal WA untuk {len(req.invoice_ids)} tagihan mulai diproses secara bertahap."}
 
 
 @router.patch("/invoices/{invoice_id}/pay")
