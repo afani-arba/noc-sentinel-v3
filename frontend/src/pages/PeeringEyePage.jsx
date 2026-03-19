@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import api from "@/lib/api";
 import {
   PieChart, Pie, Cell, Tooltip as ReTooltip, ResponsiveContainer,
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Legend,
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Legend,
 } from "recharts";
 import {
   Radar, RefreshCw, ChevronDown, Globe, Activity, Wifi,
@@ -146,9 +146,9 @@ export default function PeeringEyePage() {
     return () => clearInterval(intervalRef.current);
   }, [fetchAll]);
 
-  // ── Build area chart series keys ─────────────────────────────────────────────
+  // ── Build line chart series keys ─────────────────────────────────────────────
   const platformsInTimeline = timeline.length > 0
-    ? Object.keys(timeline[0]).filter(k => k !== "time" && k !== "Others").slice(0, 8)
+    ? Object.keys(timeline[0]).filter(k => k !== "time" && k !== "Others").slice(0, 10)
     : [];
 
   // ── Flatten timeline for recharts ────────────────────────────────────────────
@@ -362,50 +362,40 @@ export default function PeeringEyePage() {
             <NoData message="Belum ada data timeline" />
           ) : (
             <ResponsiveContainer width="100%" height={260} className="z-10 relative">
-              <AreaChart data={chartData} margin={{ left: -10, right: 10, top: 15, bottom: 0 }}>
+              <LineChart data={chartData} margin={{ left: -10, right: 10, top: 15, bottom: 0 }}>
                 <defs>
                   <filter id="neonLine" x="-50%" y="-50%" width="200%" height="200%">
-                    <feGaussianBlur stdDeviation="3" result="blur" />
+                    <feGaussianBlur stdDeviation="2" result="blur" />
                     <feMerge>
                       <feMergeNode in="blur" />
                       <feMergeNode in="SourceGraphic" />
                     </feMerge>
                   </filter>
-                  {platformsInTimeline.map((p, i) => {
-                    const color = platforms.find(pl => pl.platform === p)?.color || "#64748b";
-                    return (
-                      <linearGradient key={p} id={`grad_${i}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%"  stopColor={color} stopOpacity={0.4} />
-                        <stop offset="95%" stopColor={color} stopOpacity={0.05} />
-                      </linearGradient>
-                    );
-                  })}
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                <CartesianGrid strokeDasharray="5 5" stroke="#27272a" vertical={true} />
                 <XAxis dataKey="time" tick={{ fill: "#a1a1aa", fontSize: 9 }} tickLine={false} axisLine={false} />
                 <YAxis tick={{ fill: "#a1a1aa", fontSize: 10, fontWeight: 500 }} tickLine={false} axisLine={false} width={65} tickFormatter={fmtBytes} />
                 <ReTooltip
                   contentStyle={{ backgroundColor: "rgba(9, 9, 11, 0.95)", borderColor: "#27272a", borderRadius: "8px", fontSize: "12px", boxShadow: "0 0 20px rgba(0,0,0,0.8)", border: "1px solid rgba(255,255,255,0.1)" }}
                   formatter={(v, n) => [fmtBytes(v), n]}
                 />
-                <Legend iconSize={8} wrapperStyle={{ fontSize: 10, paddingTop: 8 }} />
+                <Legend iconSize={12} iconType="circle" wrapperStyle={{ fontSize: 11, paddingTop: 8, color: '#e4e4e7' }} />
                 {platformsInTimeline.map((p, i) => {
                   const color = platforms.find(pl => pl.platform === p)?.color || "#64748b";
                   return (
-                    <Area
+                    <Line
                       key={p}
-                      type="monotone"
+                      type="linear"
                       dataKey={p}
                       stroke={color}
-                      fill={`url(#grad_${i})`}
-                      strokeWidth={3}
+                      strokeWidth={2.5}
                       dot={false}
                       filter="url(#neonLine)"
-                      isAnimationActive={false}
+                      isAnimationActive={true}
                     />
                   );
                 })}
-              </AreaChart>
+              </LineChart>
             </ResponsiveContainer>
           )}
         </div>
