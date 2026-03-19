@@ -49,6 +49,6 @@ systemctl enable $SERVICE_NAME
 systemctl restart $SERVICE_NAME
 
 echo -e "\n${GREEN}✅ NOC License Server berhasil diinstall dan dijalankan!${NC}"
-echo "▶ Server Lisensi berjalan pada port 1777 secara otomatis."
-echo "▶ Anda bisa mengakses UI Dashboard Server Lisensi di: http://IP_BAPAK:1777"
+echo "▶ Server Lisensi berjalan pada port 1744 secara otomatis."
+echo "▶ Anda bisa mengakses UI Dashboard Server Lisensi di: http://103.217.217.36:1744"
 echo "▶ Cek log service dengan: journalctl -fu $SERVICE_NAME"

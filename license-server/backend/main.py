@@ -161,4 +161,4 @@ async def get_logs(limit: int = 50):
     return logs
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=1777, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=1744, reload=True)

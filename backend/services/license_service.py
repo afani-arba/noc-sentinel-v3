@@ -9,7 +9,7 @@ from core.db import get_db
 
 logger = logging.getLogger(__name__)
 
-LICENSE_SERVER_URL = os.environ.get("LICENSE_SERVER_URL", "http://103.217.217.36:1777").rstrip('/')
+LICENSE_SERVER_URL = os.environ.get("LICENSE_SERVER_URL", "http://103.217.217.36:1744").rstrip('/')
 
 def get_hardware_id():
     """Generate a unique hardware fingerprint using MAC address / node."""
