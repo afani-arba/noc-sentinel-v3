@@ -67,6 +67,7 @@ def create_product(prod: ProductCreate):
     doc["id"] = str(uuid.uuid4())
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     c_products.insert_one(doc)
+    doc.pop("_id", None)
     return {"message": "Product created", "product": doc}
 
 @app.get("/api/v1/products")
@@ -103,6 +104,7 @@ def generate_license(req: LicenseCreate):
         "notes": req.notes
     }
     c_licenses.insert_one(doc)
+    doc.pop("_id", None)
     return {"message": "License generated", "license": doc}
 
 @app.get("/api/v1/licenses")
