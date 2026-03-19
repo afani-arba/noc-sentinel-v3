@@ -3,8 +3,7 @@ import uvicorn
 import pymongo
 import uuid
 import secrets
-from datetime import datetime, timezone
-from dateutil.relativedelta import relativedelta
+from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, Depends, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -65,9 +64,9 @@ async def generate_license(req: LicenseCreate):
     # Calculate expiry
     now = datetime.now(timezone.utc)
     if product["type"] == "lifetime":
-        expires_at = (now + relativedelta(years=100)).isoformat()
+        expires_at = (now + timedelta(days=36500)).isoformat()
     else:
-        expires_at = (now + relativedelta(months=product.get("duration_months", 1))).isoformat()
+        expires_at = (now + timedelta(days=30 * product.get("duration_months", 1))).isoformat()
 
     doc = {
         "id": str(uuid.uuid4()),
