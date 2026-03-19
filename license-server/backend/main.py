@@ -41,7 +41,7 @@ async def dashboard_page(request: Request):
 # ── API ROUTES ────────────────────────────────────────────────────────────────
 
 @app.post("/api/v1/products")
-async def create_product(prod: ProductCreate):
+def create_product(prod: ProductCreate):
     doc = prod.model_dump()
     doc["id"] = str(uuid.uuid4())
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
@@ -49,11 +49,11 @@ async def create_product(prod: ProductCreate):
     return {"message": "Product created", "product": doc}
 
 @app.get("/api/v1/products")
-async def get_products():
+def get_products():
     return list(db.products.find({}, {"_id": 0}))
 
 @app.post("/api/v1/licenses")
-async def generate_license(req: LicenseCreate):
+def generate_license(req: LicenseCreate):
     product = db.products.find_one({"id": req.product_id})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
@@ -85,11 +85,11 @@ async def generate_license(req: LicenseCreate):
     return {"message": "License generated", "license": doc}
 
 @app.get("/api/v1/licenses")
-async def get_licenses():
+def get_licenses():
     return list(db.licenses.find({}, {"_id": 0}).sort("created_at", -1))
 
 @app.post("/api/v1/license/verify")
-async def verify_license(req: VerifyRequest):
+def verify_license(req: VerifyRequest):
     now_iso = datetime.now(timezone.utc).isoformat()
     def log_activity(status):
         db.monitoring_logs.insert_one({
@@ -138,7 +138,7 @@ async def verify_license(req: VerifyRequest):
     }
 
 @app.get("/api/v1/dashboard/stats")
-async def get_dashboard_stats():
+def get_dashboard_stats():
     now_iso = datetime.now(timezone.utc).isoformat()
     total = db.licenses.count_documents({})
     active = db.licenses.count_documents({"is_active": True, "expires_at": {"$gt": now_iso}})
@@ -155,7 +155,7 @@ async def get_dashboard_stats():
     }
 
 @app.get("/api/v1/monitoring_logs")
-async def get_logs(limit: int = 50):
+def get_logs(limit: int = 50):
     logs = list(db.monitoring_logs.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit))
     return logs
 

@@ -216,10 +216,16 @@
             if(body) opts.body = JSON.stringify(body);
             try {
                 const res = await fetch(path, opts);
+                if (!res.ok) {
+                    const text = await res.text();
+                    alert(`API Error ${res.status} on ${path}:\n${text}`);
+                    return null;
+                }
                 return await res.json();
             } catch(e) {
-                console.error(e);
-                alert("API Error");
+                console.error("Fetch API Crash:", e);
+                alert(`Network/Fetch Error on ${path}:\n` + e.message);
+                return null;
             }
         }
 
