@@ -10,7 +10,7 @@ router = APIRouter(prefix="/system/license", tags=["License"])
 class LicenseUpdateRequest(BaseModel):
     license_key: str
 
-@router.get("/")
+@router.get("")
 async def get_license_info(db=Depends(get_db)):
     """Get active license info and hardware ID."""
     doc = await db.system_settings.find_one({"_id": "license"})
@@ -26,7 +26,7 @@ async def get_license_info(db=Depends(get_db)):
         "message": status_doc.get("message")
     }
 
-@router.post("/")
+@router.post("")
 async def update_license(req: LicenseUpdateRequest, db=Depends(get_db)):
     """Save new license key and verify immediately."""
     await db.system_settings.update_one(
