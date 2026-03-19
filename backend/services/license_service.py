@@ -41,6 +41,7 @@ async def verify_license_now():
             
             if res.status_code == 200:
                 data = res.json()
+                now_str = datetime.now(timezone.utc).isoformat()
                 await db.system_settings.update_one(
                     {"_id": "license_status"},
                     {"$set": {
@@ -49,25 +50,73 @@ async def verify_license_now():
                         "customer": data.get("customer"),
                         "expires_at": data.get("expires_at"),
                         "hardware_id": hw_id,
-                        "updated_at": datetime.now(timezone.utc).isoformat()
+                        "last_online_check": now_str,
+                        "last_seen_time": now_str,
+                        "updated_at": now_str
                     }},
                     upsert=True
                 )
                 return True
             else:
                 err = res.json().get("detail", "Invalid License")
+                now_str = datetime.now(timezone.utc).isoformat()
                 await db.system_settings.update_one(
                     {"_id": "license_status"},
-                    {"$set": {"status": "invalid", "message": err, "updated_at": datetime.now(timezone.utc).isoformat()}},
+                    {
+                        "$set": {"status": "invalid", "message": err, "updated_at": now_str},
+                        # Don't update last_seen_time here fully, just minimum needed
+                    },
                     upsert=True
                 )
                 return False
     except Exception as e:
         logger.warning(f"Failed to connect to License Server: {e}. Running on grace period.")
-        # Grace period: if it was valid before, keep it valid until expires_at
+        # Grace period fallback with Anti-Tampering
         status_doc = await db.system_settings.find_one({"_id": "license_status"})
+        
         if status_doc and status_doc.get("status") == "valid":
+            now_str = datetime.now(timezone.utc).isoformat()
+            last_seen = status_doc.get("last_seen_time", "2000-01-01T00:00:00")
+            last_online = status_doc.get("last_online_check", "2000-01-01T00:00:00")
+            
+            # 1. Anti-Time Tampering (Clock rewind detection)
+            if now_str < last_seen:
+                logger.error("SYSTEM CLOCK TAMPERING DETECTED! Time went backwards. Locking license.")
+                await db.system_settings.update_one(
+                    {"_id": "license_status"},
+                    {"$set": {
+                        "status": "invalid", 
+                        "message": "Manipulation of OS Clock detected. Internet required to verify license.",
+                        "last_seen_time": now_str
+                    }}
+                )
+                return False
+                
+            # 2. Max Offline Tolerance (Max 3 Days allowed without internet)
+            try:
+                last_online_dt = datetime.fromisoformat(last_online.replace('Z', '+00:00'))
+                diff_days = (datetime.now(timezone.utc) - last_online_dt).days
+                if diff_days > 3:
+                    logger.error(f"Maximum offline grace period exceeded ({diff_days} days). Locking license.")
+                    await db.system_settings.update_one(
+                        {"_id": "license_status"},
+                        {"$set": {
+                            "status": "invalid", 
+                            "message": f"Offline grace period exceeded ({diff_days} / 3 days maximum). Please connect to the internet.",
+                            "last_seen_time": now_str
+                        }}
+                    )
+                    return False
+            except Exception as dt_err:
+                logger.warning(f"Date parsing error in grace period: {dt_err}")
+                
+            # Update last_seen_time to progress forward
+            await db.system_settings.update_one(
+                {"_id": "license_status"},
+                {"$set": {"last_seen_time": now_str}}
+            )
             return True
+            
         return False
 
 async def license_check_loop():
