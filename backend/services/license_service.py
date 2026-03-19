@@ -2,13 +2,14 @@ import asyncio
 import uuid
 import hashlib
 import httpx
+import os
 import logging
 from datetime import datetime, timezone
 from core.db import get_db
 
 logger = logging.getLogger(__name__)
 
-LICENSE_SERVER_URL = "http://103.217.217.36:1777"
+LICENSE_SERVER_URL = os.environ.get("LICENSE_SERVER_URL", "http://103.217.217.36:1777").rstrip('/')
 
 def get_hardware_id():
     """Generate a unique hardware fingerprint using MAC address / node."""
