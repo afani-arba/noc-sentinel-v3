@@ -11,7 +11,14 @@ from fastapi.templating import Jinja2Templates
 
 from models import ProductCreate, LicenseCreate, VerifyRequest
 
+from fastapi.responses import PlainTextResponse
+import traceback
+
 app = FastAPI(title="NOC Sentinel License Server", version="1.0.0")
+
+@app.exception_handler(Exception)
+async def debug_exception_handler(request: Request, exc: Exception):
+    return PlainTextResponse(f"Exception: {str(exc)}\n\n{traceback.format_exc()}", status_code=500)
 
 app.add_middleware(
     CORSMiddleware,
