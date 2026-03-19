@@ -28,11 +28,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from dotenv import load_dotenv
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
+# Load environment variables
+load_dotenv()
+noc_env_path = os.path.abspath(os.path.join(BASE_DIR, "../../backend/.env"))
+if os.path.exists(noc_env_path):
+    load_dotenv(noc_env_path)
+
 # DB Setup
-client = pymongo.MongoClient("mongodb://localhost:27017/")
+mongo_uri = os.environ.get("MONGO_URI") or os.environ.get("MONGO_URL") or "mongodb://localhost:27017/"
+client = pymongo.MongoClient(mongo_uri)
 db = client["noc_license_db"]
 
 # ── FRONTEND VIEWS ────────────────────────────────────────────────────────────
