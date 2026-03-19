@@ -589,17 +589,29 @@ function CustomersTab({ packages, onRefresh, deviceId }) {
   const [showForm, setShowForm] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [showImport, setShowImport] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [showBulkModal, setShowBulkModal] = useState(false);
   const { user } = useAuth();
   const isAdmin = user?.role === "administrator";
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { const r = await api.get("/customers", { params: { search, device_id: deviceId } }); setCustomers(r.data); }
+    try { const r = await api.get("/customers", { params: { search, device_id: deviceId } }); setCustomers(r.data); setSelectedIds([]); }
     catch { toast.error("Gagal memuat pelanggan"); }
     setLoading(false);
   }, [search, deviceId]);
 
   useEffect(() => { load(); }, [load]);
+
+  const toggleSelectAll = () => {
+    if (customers.length === 0) return;
+    if (selectedIds.length === customers.length) setSelectedIds([]);
+    else setSelectedIds(customers.map(c => c.id));
+  };
+
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
 
   const deleteCust = async (id) => {
     if (!window.confirm("Hapus pelanggan ini?")) return;
@@ -616,6 +628,11 @@ function CustomersTab({ packages, onRefresh, deviceId }) {
             className="pl-8 h-8 rounded-sm text-xs" />
         </div>
         <Button size="sm" variant="outline" className="rounded-sm h-8 gap-1 text-xs" onClick={load}><RefreshCw className="w-3.5 h-3.5" /></Button>
+        {isAdmin && selectedIds.length > 0 && (
+          <Button size="sm" variant="default" className="rounded-sm h-8 gap-1 text-xs bg-blue-600 hover:bg-blue-700 text-white" onClick={() => setShowBulkModal(true)}>
+            <Edit2 className="w-3.5 h-3.5" /> Set Paket Massal ({selectedIds.length})
+          </Button>
+        )}
         {isAdmin && <>
           <Button size="sm" variant="outline" className="rounded-sm h-8 gap-1 text-xs" onClick={() => setShowImport(true)}>
             <Upload className="w-3.5 h-3.5" /> Import MikroTik
@@ -633,6 +650,12 @@ function CustomersTab({ packages, onRefresh, deviceId }) {
           <table className="w-full text-left min-w-[700px]">
             <thead>
               <tr className="border-b border-border">
+                <th className="px-3 py-2 w-10">
+                  <input type="checkbox" className="rounded border-border bg-secondary/50 accent-blue-500 cursor-pointer"
+                    checked={customers.length > 0 && selectedIds.length === customers.length}
+                    onChange={toggleSelectAll}
+                  />
+                </th>
                 {["Nama", "Username", "Layanan", "Paket", "Jatuh Tempo", "Status", "Aksi"].map(h => (
                   <th key={h} className="px-3 py-2 text-[10px] text-muted-foreground uppercase tracking-wider font-medium">{h}</th>
                 ))}
@@ -641,8 +664,15 @@ function CustomersTab({ packages, onRefresh, deviceId }) {
             <tbody>
               {customers.map(c => {
                 const pkg = packages.find(p => p.id === c.package_id);
+                const isSelected = selectedIds.includes(c.id);
                 return (
-                  <tr key={c.id} className="border-b border-border/30 hover:bg-secondary/20">
+                  <tr key={c.id} className={`border-b border-border/30 hover:bg-secondary/20 ${isSelected ? "bg-secondary/10" : ""}`}>
+                    <td className="px-3 py-2.5">
+                      <input type="checkbox" className="rounded border-border bg-secondary/50 accent-blue-500 cursor-pointer"
+                        checked={isSelected}
+                        onChange={() => toggleSelect(c.id)}
+                      />
+                    </td>
                     <td className="px-3 py-2.5">
                       <p className="text-xs font-medium">{c.name}</p>
                       <p className="text-[10px] text-muted-foreground">{c.phone || "—"}</p>
@@ -684,6 +714,57 @@ function CustomersTab({ packages, onRefresh, deviceId }) {
       {showForm && <CustomerForm packages={packages} initial={editTarget}
         onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); load(); onRefresh?.(); }} />}
       {showImport && <ImportModal onClose={() => setShowImport(false)} onImported={() => { setShowImport(false); load(); }} />}
+      {showBulkModal && <BulkPackageModal packages={packages} selectedIds={selectedIds}
+        onClose={() => setShowBulkModal(false)} onSaved={() => { setShowBulkModal(false); load(); onRefresh?.(); setSelectedIds([]); }} />}
+    </div>
+  );
+}
+
+// ── Bulk Package Modal ────────────────────────────────────────────────────────
+
+function BulkPackageModal({ packages, selectedIds, onClose, onSaved }) {
+  const [targetPackageId, setTargetPackageId] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!targetPackageId) return toast.error("Pilih paket terlebih dahulu");
+    setSaving(true);
+    try {
+      await api.put("/customers/bulk-update", { customer_ids: selectedIds, package_id: targetPackageId });
+      toast.success("Berhasil mengubah paket secara massal");
+      onSaved();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Gagal mengubah paket");
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-card w-full max-w-sm rounded-lg shadow-xl border border-border p-5 relative">
+        <Button variant="ghost" size="icon" className="absolute right-3 top-3 h-6 w-6" onClick={onClose} disabled={saving}>
+          <X className="w-4 h-4" />
+        </Button>
+        <h3 className="font-semibold mb-4">Set Paket Massal ({selectedIds.length} Pelanggan)</h3>
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label className="text-xs">Pilih Paket Layanan</Label>
+            <select value={targetPackageId} onChange={e => setTargetPackageId(e.target.value)}
+              className="w-full text-xs rounded border border-border bg-secondary p-2 text-foreground" disabled={saving}>
+              <option value="">-- Pilih Paket --</option>
+              {packages.map(p => (
+                <option key={p.id} value={p.id}>{p.name} - Rp {p.price.toLocaleString("id-ID")}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex gap-2 justify-end pt-2">
+            <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>Batal</Button>
+            <Button size="sm" onClick={handleSave} disabled={saving}>
+              {saving ? "Menyimpan..." : "Simpan Perubahan"}
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

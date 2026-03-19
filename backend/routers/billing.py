@@ -652,22 +652,32 @@ async def mark_paid(invoice_id: str, data: PaymentUpdate, user=Depends(require_w
         }}
     )
 
-    # Auto-enable user MikroTik setelah lunas
+    # Auto-enable user MikroTik setelah lunas, KECUALI jika masih ada tunggakan lain
     mt_msg = ""
     try:
         from mikrotik_api import get_api_client
         customer = await db.customers.find_one({"id": inv["customer_id"]})
         if customer:
-            device = await db.devices.find_one({"id": customer.get("device_id", "")})
-            if device:
-                mt = get_api_client(device)
-                username = customer.get("username", "")
-                svc = customer.get("service_type", "pppoe")
-                if svc == "pppoe":
-                    await mt.enable_pppoe_user(username)
-                else:
-                    await mt.enable_hotspot_user(username)
-                mt_msg = f" | User '{username}' di-enable di MikroTik"
+            # Cek apakah pelanggan ini Punya invoice overdue lain
+            other_overdue = await db.invoices.find_one({
+                "customer_id": customer["id"],
+                "status": "overdue",
+                "id": {"$ne": invoice_id}
+            })
+            
+            if other_overdue:
+                mt_msg = " | User tetap diisolir karena masih memiliki tagihan tunggakan lain"
+            else:
+                device = await db.devices.find_one({"id": customer.get("device_id", "")})
+                if device:
+                    mt = get_api_client(device)
+                    username = customer.get("username", "")
+                    svc = customer.get("service_type", "pppoe")
+                    if svc == "pppoe":
+                        await mt.enable_pppoe_user(username)
+                    else:
+                        await mt.enable_hotspot_user(username)
+                    mt_msg = f" | User '{username}' di-enable di MikroTik"
     except Exception as e:
         mt_msg = f" | Gagal enable MikroTik: {e}"
 

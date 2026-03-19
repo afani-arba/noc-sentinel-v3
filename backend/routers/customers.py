@@ -40,6 +40,10 @@ class CustomerUpdate(BaseModel):
     due_day: Optional[int] = None
     active: Optional[bool] = None
 
+class CustomerBulkUpdate(BaseModel):
+    customer_ids: list[str]
+    package_id: str
+
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
@@ -121,6 +125,30 @@ async def update_customer(customer_id: str, data: CustomerUpdate, user=Depends(r
     if result.matched_count == 0:
         raise HTTPException(404, "Customer tidak ditemukan")
     return {"message": "Customer berhasil diupdate"}
+
+@router.put("/bulk-update")
+async def bulk_update_customers(data: CustomerBulkUpdate, user=Depends(require_write)):
+    db = get_db()
+    
+    if not data.customer_ids:
+        raise HTTPException(400, "Tidak ada pelanggan yang dipilih")
+        
+    # Validasi package_id
+    if data.package_id:
+        pkg = await db.billing_packages.find_one({"id": data.package_id})
+        if not pkg:
+            raise HTTPException(404, "Paket berlangganan tidak ditemukan")
+
+    # Update massal
+    result = await db.customers.update_many(
+        {"id": {"$in": data.customer_ids}},
+        {"$set": {"package_id": data.package_id}}
+    )
+    
+    return {
+        "message": f"Berhasil mengupdate paket untuk {result.modified_count} pelanggan",
+        "modified_count": result.modified_count
+    }
 
 
 @router.delete("/{customer_id}")
