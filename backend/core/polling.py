@@ -643,7 +643,7 @@ async def polling_loop():
                         logger.error(f"Error during periodic cleanup: {clean_err}")
                 
             except asyncio.CancelledError:
-            break
+                break
         except Exception as e:
             logger.error(f"Poll loop fatal error: {e}")
 
