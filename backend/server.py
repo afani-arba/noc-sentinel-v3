@@ -60,6 +60,7 @@ from routers.routing_alerts import router as routing_alerts_router
 from routers.wireguard import router as wireguard_router
 from routers.peering_eye import router as peering_eye_router
 from routers.license import router as license_router
+from routers.looking_glass import router as looking_glass_router
 
 # ── Background task references (FIX BUG #3: simpan reference agar tidak di-GC) ──
 _background_tasks: list = []
@@ -276,6 +277,7 @@ api.include_router(routing_alerts_router)
 api.include_router(wireguard_router)
 api.include_router(peering_eye_router)
 api.include_router(license_router)
+api.include_router(looking_glass_router)
 app.include_router(api)
 
 

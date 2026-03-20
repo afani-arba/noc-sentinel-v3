@@ -29,6 +29,7 @@ import TopologyPage from "@/pages/TopologyPage";
 import UpdatePage from "@/pages/UpdatePage";
 import SchedulerPage from "@/pages/SchedulerPage";
 import PeeringEyePage from "@/pages/PeeringEyePage";
+import LookingGlassPage from "@/pages/LookingGlassPage";
 import LicensePage from "@/pages/LicensePage";
 import Layout from "@/components/Layout";
 import { Toaster } from "@/components/ui/sonner";
@@ -144,6 +145,7 @@ function App() {
               <Route path="scheduler" element={<ProtectedRoute allowedRoles={["administrator"]}><SchedulerPage /></ProtectedRoute>} />
               {/* Peering-Eye */}
               <Route path="peering-eye" element={<PeeringEyePage />} />
+              <Route path="looking-glass" element={<LookingGlassPage />} />
               {/* License Management */}
               <Route path="admin/license" element={<ProtectedRoute allowedRoles={["administrator"]}><LicensePage /></ProtectedRoute>} />
             </Route>
