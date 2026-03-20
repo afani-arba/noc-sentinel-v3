@@ -6,14 +6,16 @@
 echo "Memulai proses update NOC License Server..."
 
 # Mencari direktori license server secara otomatis
-if [ -d "/opt/noc-sentinel-license-server" ]; then
+if [ -d "license-server" ]; then
+    cd license-server || exit 1
+elif [ -d "/opt/noc-sentinel-license-server" ]; then
     cd /opt/noc-sentinel-license-server || exit 1
 elif [ -d "/root/noc-sentinel-license-server" ]; then
     cd /root/noc-sentinel-license-server || exit 1
 elif [ -d "../noc-sentinel-license-server" ]; then
     cd ../noc-sentinel-license-server || exit 1
 else
-    echo "[ERROR] Direktori noc-sentinel-license-server tidak ditemukan di /opt, /root, maupun direktori sebelah!"
+    echo "[ERROR] Direktori noc-sentinel-license-server tidak ditemukan!"
     exit 1
 fi
 
