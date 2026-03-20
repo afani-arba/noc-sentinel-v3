@@ -458,19 +458,21 @@ async def dashboard_stats(device_id: str = "", interface: str = "", user=Depends
     )
 
     if not device_id:
-        # Ambil snapshot traffic terbaru per device secara paralel
         total_dl_bps = 0
         total_ul_bps = 0
-        for d in all_devs:
-            if d.get("status") != "online":
-                continue
-            last_bw_doc = await db.traffic_history.find_one(
-                {"device_id": d["id"]},
-                {"_id": 0, "bandwidth": 1, "isp_bandwidth": 1},
-                sort=[("timestamp", -1)]
-            )
+        
+        # FIX BUG: Hindari N+1 query yang membuat Dashboard loading sangat berat!
+        # Ambil last_traffic dari memory devices (Cukup 1 Query untuk seluruh perangkat)
+        online_devices = await db.devices.find(
+            {"status": "online"},
+            {"_id": 0, "last_traffic.bandwidth": 1, "last_traffic.isp_bandwidth": 1, "isp_interfaces": 1}
+        ).to_list(1000)
+
+        for d in online_devices:
+            last_bw_doc = d.get("last_traffic")
             if not last_bw_doc:
                 continue
+            
             bw      = last_bw_doc.get("bandwidth")      or {}
             isp_bw  = last_bw_doc.get("isp_bandwidth")  or {}
             isp_ifaces = d.get("isp_interfaces") or []

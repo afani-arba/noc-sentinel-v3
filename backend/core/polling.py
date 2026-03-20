@@ -616,6 +616,16 @@ async def polling_loop():
     last_cleanup = 0
     while True:
         start_time = asyncio.get_running_loop().time()
+        
+        # ON-DEMAND AUTO PAUSE: Jika tidak ada client Dashboard terkoneksi, hentikan pemrosesan polling
+        try:
+            from routers.events import _manager
+            if _manager.client_count == 0:
+                await asyncio.sleep(3.0)
+                continue
+        except Exception:
+            pass
+
         try:
             db = get_db()
             devices = await db.devices.find({}, {"_id": 0}).to_list(None)
