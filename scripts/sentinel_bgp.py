@@ -144,10 +144,12 @@ def generate_gobgp_config(peers: list[dict]) -> str:
         if not neighbor_ip or neighbor_ip in seen_ips:
             continue
         seen_ips.add(neighbor_ip)
-        peer_as_raw = peer.get("bgp_peer_as", LOCAL_AS)
+        peer_as_raw = peer.get("bgp_peer_as")
         try:
             peer_as = int(str(peer_as_raw).strip())
-        except ValueError:
+            if peer_as <= 0:
+                peer_as = int(LOCAL_AS)
+        except (ValueError, TypeError):
             peer_as = int(LOCAL_AS)
             
         neighbor_conf = {
@@ -376,12 +378,19 @@ def bgp_monitor_loop():
             status = get_bgp_neighbors_status()
 
             # 3. Enrich with device names from DB
-            devices = {
-                d.get("ip_address", "").split(":")[0]: d.get("name", "")
-                for d in db.devices.find({}, {"_id": 0, "ip_address": 1, "name": 1})
+            devices_info = {
+                d.get("ip_address", "").split(":")[0]: {
+                    "name": d.get("name", ""),
+                    "bgp_peer_as": d.get("bgp_peer_as", int(LOCAL_AS))
+                }
+                for d in db.devices.find({}, {"_id": 0, "ip_address": 1, "name": 1, "bgp_peer_as": 1})
             }
+            
             for s in status:
-                s["device_name"] = devices.get(s["neighbor_ip"], s["neighbor_ip"])
+                dev = devices_info.get(s["neighbor_ip"], {})
+                s["device_name"] = dev.get("name") or s["neighbor_ip"]
+                if not s.get("peer_as") or s["peer_as"] <= 0:
+                    s["peer_as"] = dev.get("bgp_peer_as") or int(LOCAL_AS)
 
             # 4. Persist to MongoDB
             persist_bgp_status(db, status)
