@@ -116,9 +116,9 @@ export default function LookingGlassPage() {
                   {flattenRoutes(results).map((route, idx) => (
                     <tr key={idx} className="hover:bg-secondary/20 transition-colors">
                       <td className="px-4 py-4 font-mono text-primary font-medium">{route.nlri?.prefix || "N/A"}</td>
-                      <td className="px-4 py-4 font-mono">{getNexthop(route.pattrs || route.paths?.[0]?.pattrs)}</td>
-                      <td className="px-4 py-4 font-mono text-muted-foreground">{getAsPath(route.pattrs || route.paths?.[0]?.pattrs)}</td>
-                      <td className="px-4 py-4 font-mono text-xs">{getCommunities(route.pattrs || route.paths?.[0]?.pattrs)}</td>
+                      <td className="px-4 py-4 font-mono">{getNexthop(route.attrs || route.pattrs || route.paths?.[0]?.pattrs)}</td>
+                      <td className="px-4 py-4 font-mono text-muted-foreground">{getAsPath(route.attrs || route.pattrs || route.paths?.[0]?.pattrs)}</td>
+                      <td className="px-4 py-4 font-mono text-xs">{getCommunities(route.attrs || route.pattrs || route.paths?.[0]?.pattrs)}</td>
                     </tr>
                   ))}
                 </tbody>
