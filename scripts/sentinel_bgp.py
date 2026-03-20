@@ -81,17 +81,21 @@ def get_db():
 
 
 def get_local_ip() -> str:
-    """Auto-detect primary IP of this machine."""
+    """Auto-detect primary IP of this machine with retries."""
     if LOCAL_ROUTER_ID:
         return LOCAL_ROUTER_ID
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return "127.0.0.1"
+    
+    for _ in range(10):  # Retry up to 10 times (Useful during system boot)
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            time.sleep(2)
+            
+    return "127.0.0.1"
 
 
 def run_cmd(cmd: list[str]) -> tuple[bool, str]:
