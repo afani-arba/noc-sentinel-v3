@@ -5,8 +5,17 @@
 
 echo "Memulai proses update NOC License Server..."
 
-# Pindah ke direktori license server (Sesuaikan path jika berbeda)
-cd /root/noc-sentinel-license-server || { echo "[ERROR] Direktori /root/noc-sentinel-license-server tidak ditemukan!"; exit 1; }
+# Mencari direktori license server secara otomatis
+if [ -d "/opt/noc-sentinel-license-server" ]; then
+    cd /opt/noc-sentinel-license-server || exit 1
+elif [ -d "/root/noc-sentinel-license-server" ]; then
+    cd /root/noc-sentinel-license-server || exit 1
+elif [ -d "../noc-sentinel-license-server" ]; then
+    cd ../noc-sentinel-license-server || exit 1
+else
+    echo "[ERROR] Direktori noc-sentinel-license-server tidak ditemukan di /opt, /root, maupun direktori sebelah!"
+    exit 1
+fi
 
 echo "1. Menarik update terbaru dari GitHub..."
 git pull origin main
