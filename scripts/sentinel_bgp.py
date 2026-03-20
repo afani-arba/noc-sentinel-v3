@@ -188,6 +188,9 @@ def generate_gobgp_config(peers: list[dict]) -> str:
     return json.dumps(config, indent=2)
 
 
+# BGP FSM States from GoBGP gRPC format
+BGP_FSM = {0: "UNKNOWN", 1: "IDLE", 2: "CONNECT", 3: "ACTIVE", 4: "OPENSENT", 5: "OPENCONFIRM", 6: "ESTABLISHED"}
+
 def get_bgp_neighbors_status() -> list[dict]:
     """Get current BGP neighbor status via gobgp CLI."""
     ok, output = run_cmd([GOBGP_BIN, "neighbor", "-j"])
@@ -200,20 +203,34 @@ def get_bgp_neighbors_status() -> list[dict]:
         result = []
         for n in neighbors:
             state = n.get("state", {})
-            conf = n.get("conf", {}).get("neighbor-address")
-            if not conf:
-                conf = state.get("neighbor-address", "unknown")
+            conf = n.get("conf", {})
             
-            session_state = str(state.get("session-state", "unknown")).upper()
-            peer_as = state.get("peer-as", 0)
-            pfx = n.get("afi-safis", [{}])[0].get("state", {})
-            received  = pfx.get("received", 0)
-            accepted  = pfx.get("accepted", 0)
-            advertised = pfx.get("advertised", 0)
-            uptime_s = state.get("uptime", 0)
+            # Robust key extraction for various GoBGP versions (dash, camel, snake)
+            ip = (conf.get("neighbor-address") or conf.get("neighborAddress") or conf.get("neighbor_address") or
+                  state.get("neighbor-address") or state.get("neighborAddress") or state.get("neighbor_address") or "unknown")
+            
+            peer_as = state.get("peer-as") or state.get("peerAs") or state.get("peer_as") or 0
+            
+            raw_state = state.get("session-state") or state.get("sessionState") or state.get("session_state")
+            if isinstance(raw_state, int):
+                session_state = BGP_FSM.get(raw_state, str(raw_state))
+            else:
+                session_state = str(raw_state).upper() if raw_state else "UNKNOWN"
+            
+            # AFI/SAFI parsing
+            pfx = {}
+            afi_safis = n.get("afi-safis") or n.get("afiSafis") or n.get("afi_safis") or []
+            if afi_safis and len(afi_safis) > 0:
+                pfx = afi_safis[0].get("state", {})
+                
+            received   = pfx.get("received") or pfx.get("received-prefixes") or 0
+            accepted   = pfx.get("accepted") or pfx.get("accepted-prefixes") or 0
+            advertised = pfx.get("advertised") or pfx.get("advertised-prefixes") or 0
+            
+            uptime_s = state.get("uptime") or state.get("upTime") or 0
 
             result.append({
-                "neighbor_ip":  conf,
+                "neighbor_ip":   ip,
                 "peer_as":       peer_as,
                 "state":         session_state,
                 "uptime_sec":    uptime_s,
