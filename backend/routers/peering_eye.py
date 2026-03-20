@@ -302,6 +302,16 @@ async def peering_eye_top_domains(
         ]
     }
 
+@router.get("/debug-clients")
+async def debug_clients(limit: int = 5):
+    db = get_db()
+    docs = await db.peering_eye_stats.find(
+        {"top_clients": {"$exists": True, "$ne": {}}},
+        {"_id": 0, "device_id": 1, "platform": 1, "timestamp": 1, "top_clients": 1}
+    ).to_list(limit)
+    return {"data": docs}
+
+
 
 # ─── Endpoint: Top Clients ────────────────────────────────────────────────────
 @router.get("/top-clients")
