@@ -76,6 +76,7 @@ async def lifespan(app: FastAPI):
         from core.db import get_db
         db = get_db()
         await db.traffic_history.create_index([("device_id", 1), ("timestamp", -1)], background=True)
+        await db.traffic_history.create_index([("timestamp", -1)], background=True)  # FIX BUG: Global dashboard speedup
         await db.traffic_snapshots.create_index([("device_id", 1)], background=True)
         await db.devices.create_index([("id", 1)], unique=True, background=True)
         logger.info("MongoDB DB Indexes verified/created successfully.")
