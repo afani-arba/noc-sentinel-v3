@@ -21,7 +21,8 @@ export default function DevicesPage() {
     name: "", ip_address: "", winbox_address: "",
     api_mode: "rest", api_username: "admin", api_password: "",
     api_port: "", use_https: false, api_ssl: true, api_plaintext_login: true,
-    description: "",
+    api_port: "", use_https: false, api_ssl: true, api_plaintext_login: true,
+    description: "", bgp_enabled: false, bgp_peer_as: "65001"
   });
 
   const fetchDevices = useCallback(async () => {
@@ -36,7 +37,7 @@ export default function DevicesPage() {
 
   const openAdd = () => {
     setEditing(null);
-    setForm({ name: "", ip_address: "", winbox_address: "", api_mode: "rest", api_username: "admin", api_password: "", api_port: "", use_https: false, api_ssl: true, api_plaintext_login: true, description: "" });
+    setForm({ name: "", ip_address: "", winbox_address: "", api_mode: "rest", api_username: "admin", api_password: "", api_port: "", use_https: false, api_ssl: true, api_plaintext_login: true, description: "", bgp_enabled: false, bgp_peer_as: "65001" });
     setDialogOpen(true);
   };
 
@@ -50,7 +51,10 @@ export default function DevicesPage() {
       use_https: d.use_https || false,
       api_ssl: d.api_ssl !== undefined ? d.api_ssl : true,
       api_plaintext_login: d.api_plaintext_login !== undefined ? d.api_plaintext_login : true,
+      api_plaintext_login: d.api_plaintext_login !== undefined ? d.api_plaintext_login : true,
       description: d.description || "",
+      bgp_enabled: d.bgp_enabled || false,
+      bgp_peer_as: d.bgp_peer_as || "65001",
     });
     setDialogOpen(true);
   };
@@ -58,7 +62,8 @@ export default function DevicesPage() {
   const handleSave = async () => {
     try {
       const apiPort = form.api_port ? parseInt(form.api_port) : null;
-      const data = { ...form, api_port: apiPort, use_https: form.use_https };
+      const peerAs = form.bgp_peer_as ? parseInt(form.bgp_peer_as) : 65001;
+      const data = { ...form, api_port: apiPort, use_https: form.use_https, bgp_peer_as: peerAs };
       // winbox_address: kirim null jika kosong (bukan string kosong)
       if (!data.winbox_address || !data.winbox_address.trim()) data.winbox_address = null;
       else data.winbox_address = data.winbox_address.trim();
@@ -293,6 +298,36 @@ export default function DevicesPage() {
             </div>
             <div className="space-y-1.5"><Label className="text-xs text-muted-foreground">Description</Label>
               <Input value={form.description} onChange={e => setForm({...form, description:e.target.value})} className="rounded-sm bg-background" data-testid="device-form-description" /></div>
+
+            {/* BGP Peering Section */}
+            <div className="border border-border/50 rounded-sm p-3 space-y-3 mt-4">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                <Radio className="w-3 h-3" /> Peering-Eye BGP
+              </p>
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-muted-foreground">Enable BGP Peering</Label>
+                <div 
+                  className={`w-10 h-5 flex items-center rounded-full p-1 cursor-pointer transition-colors ${form.bgp_enabled ? 'bg-primary' : 'bg-muted'}`}
+                  onClick={() => setForm({...form, bgp_enabled: !form.bgp_enabled})}
+                >
+                  <div className={`bg-white w-3.5 h-3.5 rounded-full shadow-md transform transition-transform ${form.bgp_enabled ? 'translate-x-4' : ''}`} />
+                </div>
+              </div>
+              
+              {form.bgp_enabled && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">BGP Peer AS Number</Label>
+                  <Input 
+                    type="number" 
+                    value={form.bgp_peer_as} 
+                    onChange={e => setForm({...form, bgp_peer_as: e.target.value})} 
+                    className="rounded-sm bg-background font-mono text-xs" 
+                    placeholder="65001"
+                  />
+                  <p className="text-[10px] text-muted-foreground/70">AS Number dari MikroTik ini (default: 65001).</p>
+                </div>
+              )}
+            </div>
 
 
           </div>

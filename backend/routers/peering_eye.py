@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, Body
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 from pydantic import BaseModel
+import subprocess
 import asyncio
 import uuid
 from core.db import get_db
@@ -553,6 +554,46 @@ async def peering_eye_block(
             raise HTTPException(status_code=400, detail="Invalid target_type. Use 'domain' or 'client'")
             
         return {"success": True, "message": val}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Endpoint: BGP Service Controls ──────────────────────────────────────────
+@router.get("/bgp/service/status")
+async def bgp_service_status(user=Depends(get_current_user)):
+    """Check if sentinel-bgp.service is active via systemctl."""
+    # This requires noc-sentinel backend to run as root or have sudo privileges.
+    try:
+        # returns 0 if active, non-zero if inactive/failed
+        result = subprocess.run(["systemctl", "is-active", "sentinel-bgp"], capture_output=True, text=True)
+        status = result.stdout.strip()
+        
+        # also get uptime
+        status_long = subprocess.run(["systemctl", "status", "sentinel-bgp"], capture_output=True, text=True)
+        
+        return {
+            "status": status,  # "active", "inactive", "failed", "activating"
+            "raw": status_long.stdout
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+class BGPServiceControl(BaseModel):
+    action: str  # "start", "stop", "restart"
+
+@router.post("/bgp/service/control")
+async def bgp_service_control(payload: BGPServiceControl, user=Depends(require_write)):
+    """Control the sentinel-bgp systemd service."""
+    action = payload.action.lower()
+    if action not in ["start", "stop", "restart"]:
+        raise HTTPException(status_code=400, detail="Invalid action")
+        
+    try:
+        result = subprocess.run(["systemctl", action, "sentinel-bgp"], capture_output=True, text=True)
+        if result.returncode == 0:
+            return {"success": True, "message": f"Service successfully {action}ed."}
+        else:
+            raise HTTPException(status_code=500, detail=result.stderr or result.stdout)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

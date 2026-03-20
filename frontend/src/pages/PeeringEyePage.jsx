@@ -7,7 +7,9 @@ import {
 import {
   Radar, RefreshCw, ChevronDown, Globe, Activity, Wifi,
   TrendingUp, HardDrive, Radio, Server, AlertCircle, Users,
+  Play, Square, RefreshCcw
 } from "lucide-react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import PeeringPlatformModal from "@/components/PeeringPlatformModal";
 import Highcharts from 'highcharts';
@@ -102,6 +104,8 @@ export default function PeeringEyePage() {
   const [loading, setLoading]       = useState(true);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [domainPlatform, setDomainPlatform] = useState("all");
+  const [bgpSvcStatus, setBgpSvcStatus] = useState("unknown");
+  const [bgpSvcLoading, setBgpSvcLoading] = useState(false);
 
   const [showDevDropdown, setShowDevDropdown] = useState(false);
   const [showRangeDropdown, setShowRangeDropdown] = useState(false);
@@ -115,13 +119,14 @@ export default function PeeringEyePage() {
     if (showLoader) setLoading(true);
     const devId = selectedDev?.device_id || "";
     try {
-      const [sumRes, statsRes, tlRes, domainsRes, clientsRes, bgpRes] = await Promise.allSettled([
+      const [sumRes, statsRes, tlRes, domainsRes, clientsRes, bgpRes, svcRes] = await Promise.allSettled([
         api.get(`/peering-eye/summary?device_id=${devId}&range=${range}`),
         api.get(`/peering-eye/stats?device_id=${devId}&range=${range}`),
         api.get(`/peering-eye/timeline?device_id=${devId}&range=${range}`),
         api.get(`/peering-eye/top-domains?device_id=${devId}&range=${range}&limit=20&platform=${domainPlatform}`),
         api.get(`/peering-eye/top-clients?device_id=${devId}&range=${range}&limit=20&platform=${domainPlatform}`),
         api.get("/peering-eye/bgp/status"),
+        api.get("/peering-eye/bgp/service/status")
       ]);
 
       if (sumRes.status    === "fulfilled") setSummary(sumRes.value.data);
@@ -130,6 +135,7 @@ export default function PeeringEyePage() {
       if (domainsRes.status === "fulfilled") setTopDomains(domainsRes.value.data.domains || []);
       if (clientsRes.status === "fulfilled") setTopClients(clientsRes.value.data.clients || []);
       if (bgpRes.status    === "fulfilled") setBgpStatus(bgpRes.value.data);
+      if (svcRes.status    === "fulfilled") setBgpSvcStatus(svcRes.value.data.status || "unknown");
       setLastUpdate(new Date());
     } catch (e) {
       // silent
@@ -158,6 +164,19 @@ export default function PeeringEyePage() {
       alert(res.data?.message || "Berhasil diblokir!");
     } catch (e) {
       alert("Gagal memblokir: " + (e.response?.data?.detail || e.message));
+    }
+  };
+
+  const handleSvcCtrl = async (action) => {
+    setBgpSvcLoading(true);
+    try {
+      await api.post("/peering-eye/bgp/service/control", { action });
+      toast.success(`Service BGP successfully ${action}ed`);
+      setTimeout(() => fetchAll(false), 2000);
+    } catch (e) {
+      toast.error(`Gagal ${action} service: ${e.response?.data?.detail || e.message}`);
+    } finally {
+      setBgpSvcLoading(false);
     }
   };
 
@@ -499,19 +518,30 @@ export default function PeeringEyePage() {
       {/* ── Bottom Row: BGP Status + Top Domains + Top Clients ─────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* BGP Status Panel */}
-        <div className="bg-card border border-border rounded-sm p-4">
-          <div className="flex items-center justify-between mb-3">
+        <div className="bg-card border border-border rounded-sm p-4 relative">
+          <div className="flex items-center justify-between mb-3 border-b border-border/50 pb-3">
             <div>
-              <p className="text-xs font-semibold flex items-center gap-1.5">
-                <Radio className="w-3.5 h-3.5 text-purple-400" />
-                BGP Peer Status
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-semibold flex items-center gap-1.5 align-middle">
+                  <Radio className="w-3.5 h-3.5 text-purple-400" />
+                  BGP Peer Status
+                </p>
+                <div className="flex gap-1.5 ml-2">
+                  <button onClick={() => handleSvcCtrl("start")} disabled={bgpSvcLoading} className="p-1 hover:bg-green-500/20 text-green-400 rounded transition-colors" title="Start Service"><Play className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => handleSvcCtrl("stop")} disabled={bgpSvcLoading} className="p-1 hover:bg-red-500/20 text-red-400 rounded transition-colors" title="Stop Service"><Square className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => handleSvcCtrl("restart")} disabled={bgpSvcLoading} className="p-1 hover:bg-yellow-500/20 text-yellow-400 rounded transition-colors" title="Restart Service"><RefreshCcw className="w-3.5 h-3.5" /></button>
+                </div>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                Service: <span className={`font-mono ${bgpSvcStatus === "active" ? "text-green-400" : "text-red-400"}`}>{bgpSvcStatus}</span>
+                {bgpSvcLoading && " (loading...)"}
               </p>
               <p className="text-[10px] text-muted-foreground mt-0.5">
                 {bgpStatus?.established || 0}/{bgpStatus?.total || 0} peers ESTABLISHED
               </p>
             </div>
             {bgpStatus?.updated_at && (
-              <span className="text-[9px] text-muted-foreground font-mono">
+              <span className="text-[9px] text-muted-foreground font-mono self-start flex gap-2 items-center">
                 {new Date(bgpStatus.updated_at).toLocaleTimeString("id-ID")}
               </span>
             )}

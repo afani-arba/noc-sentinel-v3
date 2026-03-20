@@ -32,6 +32,8 @@ class DeviceCreate(BaseModel):
     api_plaintext_login: bool = True
     description: str = ""
     winbox_address: Optional[str] = None  # Alamat Winbox remote — opsional
+    bgp_enabled: bool = False
+    bgp_peer_as: Optional[int] = 65001
 
 
 
@@ -48,6 +50,8 @@ class DeviceUpdate(BaseModel):
     api_plaintext_login: Optional[bool] = None
     description: Optional[str] = None
     winbox_address: Optional[str] = None  # Alamat Winbox remote - opsional
+    bgp_enabled: Optional[bool] = None
+    bgp_peer_as: Optional[int] = None
 
 def filter_devices_for_user(devices: list, user: dict) -> list:
     if user.get("role") == "administrator":
