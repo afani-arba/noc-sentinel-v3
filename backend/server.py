@@ -82,55 +82,74 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error creating MongoDB indexes: {e}")
 
+    def _svc_enabled(key: str) -> bool:
+        return os.environ.get(key, "true").lower() == "true"
+
     # Start device polling background task
-    from core.polling import polling_loop
-    poll_task = asyncio.create_task(polling_loop())
-    _background_tasks.append(poll_task)  # FIX BUG #3: simpan reference
-    logger.info("Polling loop started")
+    if _svc_enabled("ENABLE_POLLING"):
+        from core.polling import polling_loop
+        poll_task = asyncio.create_task(polling_loop())
+        _background_tasks.append(poll_task)  # FIX BUG #3: simpan reference
+        logger.info("Polling loop started")
+    else:
+        logger.info("Service DISABLED: Polling loop")
 
     # Start SSE device event poller
-    from routers.events import start_poller
-    sse_task = start_poller()
-    _background_tasks.append(sse_task)   # FIX BUG #3: simpan reference
-    logger.info("SSE event poller started")
+    if _svc_enabled("ENABLE_SSE"):
+        from routers.events import start_poller
+        sse_task = start_poller()
+        _background_tasks.append(sse_task)   # FIX BUG #3: simpan reference
+        logger.info("SSE event poller started")
 
     # Start UDP syslog server
     # FIX BUG #1: gunakan get_running_loop() bukan get_event_loop()
     loop = asyncio.get_running_loop()
-    from syslog_server import start_syslog_server
-    syslog_tasks = await start_syslog_server(loop)
-    if syslog_tasks:
-        _background_tasks.extend(syslog_tasks)  # FIX BUG #3: simpan reference
+    if _svc_enabled("ENABLE_SYSLOG"):
+        from syslog_server import start_syslog_server
+        syslog_tasks = await start_syslog_server(loop)
+        if syslog_tasks:
+            _background_tasks.extend(syslog_tasks)  # FIX BUG #3: simpan reference
+    else:
+        logger.info("Service DISABLED: UDP syslog server")
 
     # Start auto-backup scheduler
-    from services.backup_service import auto_backup_loop
-    backup_task = asyncio.create_task(auto_backup_loop())
-    _background_tasks.append(backup_task)
-    logger.info("Auto backup scheduler started")
+    if _svc_enabled("ENABLE_BACKUP"):
+        from services.backup_service import auto_backup_loop
+        backup_task = asyncio.create_task(auto_backup_loop())
+        _background_tasks.append(backup_task)
+        logger.info("Auto backup scheduler started")
+    else:
+        logger.info("Service DISABLED: Auto backup")
 
     # Start auto-isolir scheduler
-    from services.isolir_service import auto_isolir_loop
-    isolir_task = asyncio.create_task(auto_isolir_loop())
-    _background_tasks.append(isolir_task)
-    logger.info("Auto isolir scheduler started")
+    if _svc_enabled("ENABLE_ISOLIR"):
+        from services.isolir_service import auto_isolir_loop
+        isolir_task = asyncio.create_task(auto_isolir_loop())
+        _background_tasks.append(isolir_task)
+        logger.info("Auto isolir scheduler started")
 
     # Start BGP/OSPF alert monitor
-    from services.routing_alert_service import bgp_ospf_alert_loop
-    bgp_task = asyncio.create_task(bgp_ospf_alert_loop())
-    _background_tasks.append(bgp_task)
-    logger.info("BGP/OSPF alert monitor started")
+    if _svc_enabled("ENABLE_ROUTING_ALERTS"):
+        from services.routing_alert_service import bgp_ospf_alert_loop
+        bgp_task = asyncio.create_task(bgp_ospf_alert_loop())
+        _background_tasks.append(bgp_task)
+        logger.info("BGP/OSPF alert monitor started")
+    else:
+        logger.info("Service DISABLED: Routing Alerts")
 
     # Start speed test scheduler
-    from services.speedtest_service import speedtest_loop
-    speedtest_task = asyncio.create_task(speedtest_loop())
-    _background_tasks.append(speedtest_task)
-    logger.info("Speed test scheduler started")
+    if _svc_enabled("ENABLE_SPEEDTEST"):
+        from services.speedtest_service import speedtest_loop
+        speedtest_task = asyncio.create_task(speedtest_loop())
+        _background_tasks.append(speedtest_task)
+        logger.info("Speed test scheduler started")
 
     # Start PPPoE & Hotspot session cache updater
-    from services.session_cache_service import session_cache_loop
-    session_task = asyncio.create_task(session_cache_loop())
-    _background_tasks.append(session_task)
-    logger.info("Session cache service started (PPPoE & Hotspot count, interval=1h)")
+    if _svc_enabled("ENABLE_SESSION_CACHE"):
+        from services.session_cache_service import session_cache_loop
+        session_task = asyncio.create_task(session_cache_loop())
+        _background_tasks.append(session_task)
+        logger.info("Session cache service started (PPPoE & Hotspot count, interval=1h)")
 
     # Start WireGuard tunnel if enabled
     try:

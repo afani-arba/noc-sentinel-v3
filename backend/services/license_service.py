@@ -12,7 +12,16 @@ logger = logging.getLogger(__name__)
 LICENSE_SERVER_URL = os.environ.get("LICENSE_SERVER_URL", "http://103.217.217.36:1744").rstrip('/')
 
 def get_hardware_id():
-    """Generate a unique hardware fingerprint using MAC address / node."""
+    """Generate a unique hardware fingerprint avoiding dynamic MAC restarts."""
+    for path in ["/etc/machine-id", "/var/lib/dbus/machine-id"]:
+        try:
+            with open(path, "r") as f:
+                content = f.read().strip()
+                if content:
+                    return "HW-" + hashlib.sha256(content.encode()).hexdigest()[:12].upper()
+        except Exception:
+            pass
+    # Fallback to uuid (MAC) if not Linux/Container
     node = uuid.getnode()
     return "HW-" + hashlib.sha256(str(node).encode()).hexdigest()[:12].upper()
 
