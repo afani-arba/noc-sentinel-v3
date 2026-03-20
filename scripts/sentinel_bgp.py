@@ -28,6 +28,9 @@ import json
 import logging
 import socket
 import subprocess
+import argparse
+import signal
+import sys
 import threading
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
@@ -209,7 +212,8 @@ def get_bgp_neighbors_status() -> list[dict]:
             ip = (conf.get("neighbor-address") or conf.get("neighborAddress") or conf.get("neighbor_address") or
                   state.get("neighbor-address") or state.get("neighborAddress") or state.get("neighbor_address") or "unknown")
             
-            peer_as = state.get("peer-as") or state.get("peerAs") or state.get("peer_as") or 0
+            peer_as = (conf.get("peer-as") or conf.get("peerAs") or conf.get("peer_as") or
+                       state.get("peer-as") or state.get("peerAs") or state.get("peer_as") or 0)
             
             raw_state = state.get("session-state") or state.get("sessionState") or state.get("session_state")
             if isinstance(raw_state, int):
@@ -439,18 +443,27 @@ def ensure_gobgpd_running():
 
     try:
         log_f = open("/var/log/gobgpd.log", "a")
-        subprocess.Popen(
+        proc = subprocess.Popen(
             [GOBGPD_BIN, "-f", GOBGP_CONFIG_PATH, "--log-level", "info"],
             stdout=log_f,
             stderr=log_f,
             start_new_session=True
         )
         time.sleep(2)
-        logger.info("gobgpd start attempt finished")
+        logger.info(f"gobgpd started with PID {proc.pid}")
         return True
     except Exception as e:
         logger.error(f"Failed to start gobgpd: {e}")
         return False
+
+def shutdown_handler(signum, frame):
+    logger.info("Received termination signal. Shutting down Sentinel BGP Speaker...")
+    # Kill gobgpd
+    ok, pid = run_cmd(["pgrep", "-x", "gobgpd"])
+    if ok and pid:
+        logger.info(f"Killing gobgpd (PID {pid})...")
+        run_cmd(["kill", "-9", pid])
+    sys.exit(0)
 
 
 def main():
@@ -487,12 +500,16 @@ def main():
     t.start()
     logger.info("Sentinel BGP Speaker running. Press Ctrl+C to stop.")
 
+    # Register handlers for clean graceful shutdown
+    signal.signal(signal.SIGINT, shutdown_handler)
+    signal.signal(signal.SIGTERM, shutdown_handler)
+
     try:
         while True:
             time.sleep(30)
-    except KeyboardInterrupt:
-        logger.info("Shutting down Sentinel BGP Speaker...")
-
+    except Exception as e:
+        logger.error(f"Main loop error: {e}")
+        shutdown_handler(0, None)
 
 if __name__ == "__main__":
     main()
