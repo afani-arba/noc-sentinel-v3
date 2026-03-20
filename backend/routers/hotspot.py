@@ -17,10 +17,11 @@ class HotspotUserCreate(BaseModel):
     profile: str = "default"
     server: str = "all"
     comment: str = ""
+    price: Optional[str] = "0"
+    validity: Optional[str] = ""
 
 class HotspotUserBatchCreate(BaseModel):
     users: list[HotspotUserCreate]
-
 
 class HotspotUserUpdate(BaseModel):
     name: Optional[str] = None
@@ -58,34 +59,74 @@ async def list_hotspot_users(device_id: str = "", search: str = "", user=Depends
         result.append(u)
     return result
 
+@router.get("/hotspot-vouchers")
+async def list_hotspot_vouchers(device_id: str = "", search: str = "", user=Depends(get_current_user)):
+    db = get_db()
+    query = {}
+    if device_id:
+        query["device_id"] = device_id
+    if search:
+        query["username"] = {"$regex": search, "$options": "i"}
+        
+    vouchers = await db.hotspot_vouchers.find(query).to_list(1000)
+    for v in vouchers:
+        v["_id"] = str(v["_id"])
+    return vouchers
+
+@router.delete("/hotspot-vouchers/{vid}")
+async def delete_hotspot_voucher(vid: str, user=Depends(require_write)):
+    db = get_db()
+    res = await db.hotspot_vouchers.delete_one({"id": vid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Voucher not found")
+    return {"message": "Deleted"}
+
 
 @router.post("/hotspot-users", status_code=201)
 async def create_hotspot_user(device_id: str, data: HotspotUserCreate, user=Depends(require_write)):
     mt, _ = await _get_mt_api(device_id)
-    body = {k: v for k, v in data.model_dump().items() if v}
+    # Remove custom fields before sending to MT
+    body = {k: v for k, v in data.model_dump().items() if v and k not in ("price", "validity")}
     try:
         return await mt.create_hotspot_user(body)
     except Exception as e:
         raise HTTPException(502, f"MikroTik: {e}")
 
+from datetime import datetime
+import uuid
+
 @router.post("/hotspot-users/batch", status_code=201)
 async def create_hotspot_users_batch(device_id: str, data: HotspotUserBatchCreate, user=Depends(require_write)):
-    mt, _ = await _get_mt_api(device_id)
+    # Batch creation using Internal RADIUS
+    # Instead of sending to MikroTik, we just save them locally in MongoDB
+    db = get_db()
     created = 0
     errors = []
     
+    docs = []
     for u in data.users:
-        body = {k: v for k, v in u.model_dump().items() if v}
-        try:
-            await mt.create_hotspot_user(body)
-            created += 1
-        except Exception as e:
-            errors.append({"name": u.name, "error": str(e)})
-            
-    if errors and created == 0:
-        raise HTTPException(502, f"Failed to create any users. First error: {errors[0]['error']}")
+        doc = {
+            "id": str(uuid.uuid4()),
+            "username": u.name,
+            "password": u.password,
+            "profile": u.profile,
+            "server": u.server,
+            "price": u.price,
+            "validity": u.validity,
+            "status": "new",
+            "device_id": device_id,
+            "created_at": datetime.now().isoformat()
+        }
+        docs.append(doc)
         
-    return {"message": f"Successfully created {created} users", "errors": errors if errors else None}
+    if docs:
+        try:
+            await db.hotspot_vouchers.insert_many(docs)
+            created = len(docs)
+        except Exception as e:
+            raise HTTPException(500, f"Database error: {e}")
+            
+    return {"message": f"Successfully created {created} vouchers in Database", "errors": None}
 
 
 @router.put("/hotspot-users/{mt_id}")

@@ -143,6 +143,15 @@ async def lifespan(app: FastAPI):
     _background_tasks.append(license_task)
     logger.info("License Verification loop started")
 
+    # Start RADIUS Server
+    try:
+        from radius_server import start_radius_server
+        from core.db import get_db
+        db = get_db()
+        start_radius_server(loop, db)
+    except Exception as e:
+        logger.error(f"Failed to initialize RADIUS server: {e}")
+
     logger.info("NOC-Sentinel ready!")
     
     yield  # Server berjalan di sini

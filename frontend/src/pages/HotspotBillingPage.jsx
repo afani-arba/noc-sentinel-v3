@@ -77,6 +77,8 @@ export default function HotspotBillingPage() {
                 password: password,
                 profile: form.profile,
                 server: form.server,
+                price: form.price,
+                validity: form.validity,
                 comment: `Voucher Generated ${new Date().toISOString().split('T')[0]}`
             });
 

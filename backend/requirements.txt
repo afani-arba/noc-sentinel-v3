@@ -34,4 +34,6 @@ sse-starlette==2.1.3
 # Time-Series Database (InfluxDB 2.x — opsional)
 influxdb-client==1.50.0
 
+# RADIUS Server Integration
+pyrad==2.4
 

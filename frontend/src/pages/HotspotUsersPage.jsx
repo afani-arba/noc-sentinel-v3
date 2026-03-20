@@ -112,6 +112,8 @@ export default function HotspotUsersPage() {
   const [devices, setDevices] = useState([]);
   const [selectedDevice, setSelectedDevice] = useState("");
   const [users, setUsers] = useState([]);
+  const [vouchers, setVouchers] = useState([]);
+  const [tabMode, setTabMode] = useState("users"); // "users" or "vouchers"
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -152,12 +154,18 @@ export default function HotspotUsersPage() {
     try {
       const params = { device_id: selectedDevice };
       if (search) params.search = search;
-      const r = await api.get("/hotspot-users", { params });
-      setUsers(r.data);
+      
+      const [rUsers, rVouchers] = await Promise.all([
+         api.get("/hotspot-users", { params }),
+         api.get("/hotspot-vouchers", { params })
+      ]);
+      setUsers(rUsers.data);
+      setVouchers(rVouchers.data);
     } catch (e) {
-      const msg = e.response?.data?.detail || "Failed to connect to MikroTik";
+      const msg = e.response?.data?.detail || "Failed to connect to MikroTik or DB";
       setError(msg);
       setUsers([]);
+      setVouchers([]);
     }
     setLoading(false);
   }, [selectedDevice, search]);
@@ -209,23 +217,40 @@ export default function HotspotUsersPage() {
   };
 
   const currentDev = devices.find(d => d.id === selectedDevice);
+  const activeData = tabMode === "users" ? users : vouchers;
   const onlineCount = users.filter(u => u.is_online).length;
-  const totalPages = Math.ceil(users.length / PAGE_SIZE);
-  const pagedUsers = users.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const totalPages = Math.ceil(activeData.length / PAGE_SIZE);
+  const pagedData = activeData.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  const deleteVoucher = async (id, name) => {
+    if (!window.confirm(`Hapus voucher ${name}?`)) return;
+    try {
+      await api.delete(`/hotspot-vouchers/${id}?device_id=${selectedDevice}`);
+      toast.success("Voucher dihapus");
+      fetchUsers();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Delete failed");
+    }
+  };
 
   return (
     <div className="space-y-3 pb-16" data-testid="hotspot-users-page">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold font-['Rajdhani'] tracking-tight">Hotspot Users</h1>
-          <p className="text-xs sm:text-sm text-muted-foreground">Manage Hotspot users on MikroTik</p>
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold font-['Rajdhani'] tracking-tight">Hotspot Users & Vouchers</h1>
+          <p className="text-xs sm:text-sm text-muted-foreground">Manage Hotspot users (MikroTik) & Vouchers (NOC Sentinel RADIUS)</p>
         </div>
-        {!isViewer && selectedDevice && (
+        {!isViewer && selectedDevice && tabMode === "users" && (
           <Button onClick={openAdd} size="sm" className="rounded-sm gap-2 w-full sm:w-auto" data-testid="add-hotspot-user-btn">
             <Plus className="w-4 h-4" /> Add User
           </Button>
         )}
+      </div>
+
+      <div className="flex border-b border-border text-sm mb-4">
+        <button className={`px-4 py-2 font-semibold -mb-[1px] ${tabMode === "users" ? "border-b-2 border-primary text-primary" : "text-muted-foreground"}`} onClick={() => {setTabMode("users"); setPage(0);}}>Local Users (MikroTik)</button>
+        <button className={`px-4 py-2 font-semibold -mb-[1px] ${tabMode === "vouchers" ? "border-b-2 border-primary text-primary" : "text-muted-foreground"}`} onClick={() => {setTabMode("vouchers"); setPage(0);}}>Vouchers (RADIUS)</button>
       </div>
 
       {/* Controls */}
@@ -262,15 +287,14 @@ export default function HotspotUsersPage() {
         </div>
       </div>
 
-      {/* Stats bar — hanya administrator */}
-      {selectedDevice && !error && users.length > 0 && user?.role === "administrator" && (
+      {/* Stats bar */}
+      {selectedDevice && !error && activeData.length > 0 && user?.role === "administrator" && (
         <div className="flex items-center gap-3 text-xs text-muted-foreground px-1">
-          <span>Total: <span className="text-foreground font-mono">{users.length}</span></span>
-          <span className="text-green-500">Online: <span className="font-mono">{onlineCount}</span></span>
-          <span className="text-muted-foreground/60">Offline: <span className="font-mono">{users.length - onlineCount}</span></span>
+          <span>Total: <span className="text-foreground font-mono">{activeData.length}</span> {tabMode}</span>
+          {tabMode === "users" && <span className="text-green-500">Online: <span className="font-mono">{onlineCount}</span></span>}
           {totalPages > 1 && (
-            <span className="text-muted-foreground/60">
-              Tampil: <span className="font-mono">{page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, users.length)}</span>
+            <span className="text-muted-foreground/60 ml-2">
+              Tampil: <span className="font-mono">{page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, activeData.length)}</span>
             </span>
           )}
           {currentDev && <span className="ml-auto font-mono text-[10px]">{currentDev.name}</span>}
@@ -281,7 +305,7 @@ export default function HotspotUsersPage() {
       {!selectedDevice ? (
         <div className="bg-card border border-border rounded-sm p-8 sm:p-12 text-center">
           <Server className="w-10 h-10 sm:w-12 sm:h-12 mx-auto mb-3 text-muted-foreground/30" />
-          <p className="text-sm text-muted-foreground">Select a MikroTik device to view Hotspot users</p>
+          <p className="text-sm text-muted-foreground">Select a MikroTik device to view Hotspot users & vouchers</p>
         </div>
       ) : error ? (
         <div className="bg-card border border-red-500/30 rounded-sm p-6 sm:p-8 text-center">
@@ -291,16 +315,16 @@ export default function HotspotUsersPage() {
       ) : loading ? (
         <div className="bg-card border border-border rounded-sm p-8 text-center">
           <RefreshCw className="w-6 h-6 mx-auto mb-2 text-muted-foreground animate-spin" />
-          <p className="text-sm text-muted-foreground">Connecting to MikroTik...</p>
+          <p className="text-sm text-muted-foreground">Connecting to databases...</p>
         </div>
-      ) : users.length === 0 ? (
+      ) : activeData.length === 0 ? (
         <div className="bg-card border border-border rounded-sm p-8 text-center">
-          <p className="text-sm text-muted-foreground">No Hotspot users found</p>
+          <p className="text-sm text-muted-foreground">No data found</p>
         </div>
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
-            {pagedUsers.map(u => (
+            {tabMode === "users" && pagedData.map(u => (
               <HotspotUserCard
                 key={u[".id"]}
                 u={u}
@@ -309,6 +333,27 @@ export default function HotspotUsersPage() {
                 onEdit={openEdit}
                 onDelete={handleDelete}
               />
+            ))}
+            {tabMode === "vouchers" && pagedData.map(v => (
+               <div key={v.id} className="bg-card border border-border rounded-sm p-3 hover:border-primary/30 transition-all flex flex-col">
+                  <div className="flex justify-between items-center bg-muted/30 -m-3 mb-3 p-2 px-3 border-b border-border">
+                     <span className="font-mono font-bold">{v.username}</span>
+                     <Badge className={`rounded-sm text-[10px] ${v.status === 'active' ? 'bg-green-500/10 text-green-500' : 'bg-primary/10 text-primary'}`}>{v.status.toUpperCase()}</Badge>
+                  </div>
+                  <div className="flex-1 space-y-1 text-sm mt-1">
+                     <div className="flex justify-between text-xs"><span className="text-muted-foreground">Password:</span> <span className="font-mono">{v.password}</span></div>
+                     <div className="flex justify-between text-xs"><span className="text-muted-foreground">Profile:</span> <span>{v.profile || "default"}</span></div>
+                     <div className="flex justify-between text-xs"><span className="text-muted-foreground">Sales Value:</span> <span className="font-mono text-green-500">Rp {parseInt(v.price||0).toLocaleString('id-ID')}</span></div>
+                     <div className="flex justify-between text-xs"><span className="text-muted-foreground">Validity:</span> <span>{v.validity || "—"}</span></div>
+                  </div>
+                  {!isViewer && user?.role === "administrator" && (
+                    <div className="mt-3 pt-2 border-t border-border flex justify-end">
+                      <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px] gap-1 rounded-sm text-destructive" onClick={() => deleteVoucher(v.id, v.username)}>
+                        <Trash2 className="w-3 h-3" /> Hapus
+                      </Button>
+                    </div>
+                  )}
+               </div>
             ))}
           </div>
           <Pagination page={page} totalPages={totalPages} onPage={setPage} />
