@@ -17,7 +17,7 @@ from core.polling import poll_single_device
 router = APIRouter(tags=["devices"])
 logger = logging.getLogger(__name__)
 
-SAFE_DEVICE_FIELDS = {"_id": 0, "api_password": 0, "last_poll_data": 0}
+SAFE_DEVICE_FIELDS = {"_id": 0, "api_password": 0, "last_poll_data": 0, "last_traffic": 0}
 
 
 class DeviceCreate(BaseModel):
@@ -71,6 +71,7 @@ async def list_devices_full(user=Depends(require_admin)):
     devs = await db.devices.find({}, {"_id": 0}).to_list(1000)  # FIX BUG #12: was 100
     for d in devs:
         d.pop("last_poll_data", None)
+        d.pop("last_traffic", None)
     return devs
 
 
