@@ -20,7 +20,7 @@ npm run build
 cd ..
 
 echo -e "\n${GREEN}3. Restarting Backend Service...${NC}"
-systemctl restart noc-sentinel-backend || pm2 restart noc-sentinel-backend
+systemctl restart noc-sentinel-backend || systemctl restart nocsentinel || pm2 restart noc-sentinel-backend || pm2 restart all
 
 echo -e "\n${GREEN}======================================================${NC}"
 echo -e "${GREEN}UPDATE SELESAI!${NC}"
