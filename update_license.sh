@@ -36,8 +36,10 @@ elif [ -f "backend/requirements.txt" ]; then
 fi
 
 echo "3. Merestart Service NOC License Server..."
-# Sesuaikan nama service PM2 jika Anda menggunakan nama yang berbeda saat setup awal
-pm2 restart noc-license-server || pm2 restart license-server || systemctl restart noc-license
+if command -v pm2 &> /dev/null; then
+    pm2 restart noc-license-server || pm2 restart license-server
+fi
+systemctl restart NOCLicenseServer || systemctl restart noc-license
 
 echo "=============================================================="
 echo "UPDATE SELESAI! NOC License Server berhasil diperbarui."
