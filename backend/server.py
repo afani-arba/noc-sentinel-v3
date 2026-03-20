@@ -71,6 +71,17 @@ async def lifespan(app: FastAPI):
     """Lifecycle manager: startup → yield → shutdown"""
     logger.info("NOC-Sentinel v3.0 starting up...")
 
+    # Ensure Indexes for Wall Display / Database Performance
+    try:
+        from core.db import get_db
+        db = get_db()
+        await db.traffic_history.create_index([("device_id", 1), ("timestamp", -1)], background=True)
+        await db.traffic_snapshots.create_index([("device_id", 1)], background=True)
+        await db.devices.create_index([("id", 1)], unique=True, background=True)
+        logger.info("MongoDB DB Indexes verified/created successfully.")
+    except Exception as e:
+        logger.error(f"Error creating MongoDB indexes: {e}")
+
     # Start device polling background task
     from core.polling import polling_loop
     poll_task = asyncio.create_task(polling_loop())

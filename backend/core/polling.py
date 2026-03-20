@@ -580,6 +580,8 @@ async def poll_single_device(device: dict) -> dict:
     # Tulis history setiap kali polling untuk Realtime Chart
     try:
         await db.traffic_history.insert_one(history_record)
+        # Update devices with the latest traffic snapshot so wallboard doesn't need to query history
+        await db.devices.update_one({"id": did}, {"$set": {"last_traffic": history_record}})
     except Exception:
         pass
 
@@ -611,43 +613,36 @@ async def polling_loop():
             except Exception as e:
                 logger.error(f"Poll error untuk {dev.get('name', '?')}: {e}")
 
-    while True:
-        start_time = asyncio.get_running_loop().time()
-        try:
-            db = get_db()
-            devices = await db.devices.find({}, {"_id": 0}).to_list(None)
-            
-            if devices:
-                # Fix: kita tidak boleh skip device yang sedang dites jika statusnya tetap offline abadi
-                to_poll = devices
-                # for d in devices:
-                #    did = d.get("id")
-                #    if not did: continue
-                #    fails = _device_tick.get(f"{did}_fails", d.get("consecutive_poll_failures") or 0)
-                #    fails_int = int(fails or 0)
-                #    if fails_int >= 5:
-                #        # Lewati 4 siklus sebelum mencoba ulang
-                #        skip_mod = fails_int % 5
-                #        if skip_mod != 0:
-                #            _device_tick[f"{did}_fails"] = fails_int + 1
-                #            continue
-                #    to_poll.append(d)
+        last_cleanup = 0
+        while True:
+            start_time = asyncio.get_running_loop().time()
+            try:
+                db = get_db()
+                devices = await db.devices.find({}, {"_id": 0}).to_list(None)
+                
+                if devices:
+                    to_poll = devices
+                    tasks = [
+                        poll_with_semaphore_and_jitter(d, i)
+                        for i, d in enumerate(to_poll)
+                    ]
+                    await asyncio.gather(*tasks, return_exceptions=True)
 
-                tasks = [
-                    poll_with_semaphore_and_jitter(d, i)
-                    for i, d in enumerate(to_poll)
-                ]
-                await asyncio.gather(*tasks, return_exceptions=True)
-
-            # Cleanup data usang
-            cutoff_snap = (datetime.now(timezone.utc) - timedelta(hours=1)).timestamp()
-            await db.traffic_snapshots.delete_many({"ts": {"$lt": cutoff_snap}})
-            
-            # Membatasi storage limit untuk history berfrekuensi tinggi
-            cutoff_hist = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-            await db.traffic_history.delete_many({"timestamp": {"$lt": cutoff_hist}})
-            
-        except asyncio.CancelledError:
+                # Periodic Cleanup (Once per hour)
+                if start_time - last_cleanup > 3600:
+                    try:
+                        cutoff_snap = (datetime.now(timezone.utc) - timedelta(hours=1)).timestamp()
+                        await db.traffic_snapshots.delete_many({"ts": {"$lt": cutoff_snap}})
+                        
+                        cutoff_hist = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+                        await db.traffic_history.delete_many({"timestamp": {"$lt": cutoff_hist}})
+                        
+                        last_cleanup = start_time
+                        logger.info("Periodic database cleanup (snapshots and history) completed.")
+                    except Exception as clean_err:
+                        logger.error(f"Error during periodic cleanup: {clean_err}")
+                
+            except asyncio.CancelledError:
             break
         except Exception as e:
             logger.error(f"Poll loop fatal error: {e}")

@@ -36,16 +36,8 @@ async def wallboard_status(user=Depends(get_current_user)):
     enriched = []
 
     for d in devices:
-        # Get latest traffic snapshot for bandwidth
-        snap = await db.traffic_snapshots.find_one({"device_id": d["id"]})
-
-        # Get last bandwidth from traffic_history
-        # FIXBUG: tambahkan isp_bandwidth ke projection agar PRIORITAS 1 bisa terpakai
-        last_bw = await db.traffic_history.find_one(
-            {"device_id": d["id"]},
-            {"_id": 0, "bandwidth": 1, "isp_bandwidth": 1, "ping_ms": 1, "timestamp": 1},
-            sort=[("timestamp", -1)]
-        )
+        # Get last bandwidth from polling cache (last_traffic) instead of querying the DB 60 times
+        last_bw = d.get("last_traffic", {})
 
         download_bps = 0
         upload_bps = 0
