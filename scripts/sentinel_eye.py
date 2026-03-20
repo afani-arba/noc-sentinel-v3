@@ -332,17 +332,20 @@ def parse_netflow_v5(data: bytes, sender_ip: str) -> list[dict]:
             if octets > 500_000_000:     # Limit absolut: 500 MB per flow record (mencegah spike gila)
                 octets = 500_000_000
 
-            # Check if we know what platform this dst_ip or src_ip belongs to
+            # Determine client IP based on platform knowledge rather than strictly is_local_ip
+            # If dst_ip matches a platform, then src_ip is the client.
+            # If src_ip matches a platform, then dst_ip is the client.
             with cache_lock:
-                platform = ip_platform_cache.get(dst_ip)
-                if not platform:
+                if ip_platform_cache.get(dst_ip):
+                    platform = ip_platform_cache.get(dst_ip)
+                    client_ip = src_ip
+                elif ip_platform_cache.get(src_ip):
                     platform = ip_platform_cache.get(src_ip)
-
-            if not platform:
-                # Try reverse lookup (optional; skip to keep it fast)
-                platform = "Others"
-
-            client_ip = src_ip if is_local_ip(src_ip) else (dst_ip if is_local_ip(dst_ip) else None)
+                    client_ip = dst_ip
+                else:
+                    platform = "Others"
+                    # For Others, just guess based on local IP, otherwise None
+                    client_ip = src_ip if is_local_ip(src_ip) else (dst_ip if is_local_ip(dst_ip) else None)
 
             records.append({
                 "device_id": sender_ip,
