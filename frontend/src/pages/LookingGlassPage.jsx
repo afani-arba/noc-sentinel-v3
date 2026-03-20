@@ -55,6 +55,19 @@ export default function LookingGlassPage() {
     return commAttr.communities.join(", ");
   };
 
+  const flattenRoutes = (rawResults) => {
+    if (!rawResults || !Array.isArray(rawResults)) return [];
+    const flat = [];
+    rawResults.forEach(item => {
+      Object.values(item).forEach(pathArray => {
+        if (Array.isArray(pathArray)) {
+          flat.push(...pathArray);
+        }
+      });
+    });
+    return flat;
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div>
@@ -100,12 +113,12 @@ export default function LookingGlassPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/50">
-                  {results.map((route, idx) => (
+                  {flattenRoutes(results).map((route, idx) => (
                     <tr key={idx} className="hover:bg-secondary/20 transition-colors">
                       <td className="px-4 py-4 font-mono text-primary font-medium">{route.nlri?.prefix || "N/A"}</td>
-                      <td className="px-4 py-4 font-mono">{getNexthop(route.paths?.[0]?.pattrs)}</td>
-                      <td className="px-4 py-4 font-mono text-muted-foreground">{getAsPath(route.paths?.[0]?.pattrs)}</td>
-                      <td className="px-4 py-4 font-mono text-xs">{getCommunities(route.paths?.[0]?.pattrs)}</td>
+                      <td className="px-4 py-4 font-mono">{getNexthop(route.pattrs || route.paths?.[0]?.pattrs)}</td>
+                      <td className="px-4 py-4 font-mono text-muted-foreground">{getAsPath(route.pattrs || route.paths?.[0]?.pattrs)}</td>
+                      <td className="px-4 py-4 font-mono text-xs">{getCommunities(route.pattrs || route.paths?.[0]?.pattrs)}</td>
                     </tr>
                   ))}
                 </tbody>
