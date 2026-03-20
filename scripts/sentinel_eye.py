@@ -289,6 +289,18 @@ def dns_syslog_listener():
 # THREAD 2 — NETFLOW v5/v9 LISTENER (UDP:2055)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def is_local_ip(ip_str: str) -> bool:
+    """Check if an IP string is a private/local IPv4 address."""
+    if not ip_str:
+        return False
+    return (ip_str.startswith("10.") or 
+            ip_str.startswith("192.168.") or 
+            ip_str.startswith("172.16.") or ip_str.startswith("172.17.") or 
+            ip_str.startswith("172.18.") or ip_str.startswith("172.19.") or 
+            ip_str.startswith("172.2") or ip_str.startswith("172.30.") or 
+            ip_str.startswith("172.31.") or ip_str.startswith("100.64.") or
+            ip_str.startswith("127."))
+
 def parse_netflow_v5(data: bytes, sender_ip: str) -> list[dict]:
     """Parse NetFlow v5 packet. Returns list of flow records."""
     records = []
