@@ -613,37 +613,37 @@ async def polling_loop():
             except Exception as e:
                 logger.error(f"Poll error untuk {dev.get('name', '?')}: {e}")
 
-        last_cleanup = 0
-        while True:
-            start_time = asyncio.get_running_loop().time()
-            try:
-                db = get_db()
-                devices = await db.devices.find({}, {"_id": 0}).to_list(None)
-                
-                if devices:
-                    to_poll = devices
-                    tasks = [
-                        poll_with_semaphore_and_jitter(d, i)
-                        for i, d in enumerate(to_poll)
-                    ]
-                    await asyncio.gather(*tasks, return_exceptions=True)
+    last_cleanup = 0
+    while True:
+        start_time = asyncio.get_running_loop().time()
+        try:
+            db = get_db()
+            devices = await db.devices.find({}, {"_id": 0}).to_list(None)
+            
+            if devices:
+                to_poll = devices
+                tasks = [
+                    poll_with_semaphore_and_jitter(d, i)
+                    for i, d in enumerate(to_poll)
+                ]
+                await asyncio.gather(*tasks, return_exceptions=True)
 
-                # Periodic Cleanup (Once per hour)
-                if start_time - last_cleanup > 3600:
-                    try:
-                        cutoff_snap = (datetime.now(timezone.utc) - timedelta(hours=1)).timestamp()
-                        await db.traffic_snapshots.delete_many({"ts": {"$lt": cutoff_snap}})
-                        
-                        cutoff_hist = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-                        await db.traffic_history.delete_many({"timestamp": {"$lt": cutoff_hist}})
-                        
-                        last_cleanup = start_time
-                        logger.info("Periodic database cleanup (snapshots and history) completed.")
-                    except Exception as clean_err:
-                        logger.error(f"Error during periodic cleanup: {clean_err}")
-                
-            except asyncio.CancelledError:
-                break
+            # Periodic Cleanup (Once per hour)
+            if start_time - last_cleanup > 3600:
+                try:
+                    cutoff_snap = (datetime.now(timezone.utc) - timedelta(hours=1)).timestamp()
+                    await db.traffic_snapshots.delete_many({"ts": {"$lt": cutoff_snap}})
+                    
+                    cutoff_hist = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+                    await db.traffic_history.delete_many({"timestamp": {"$lt": cutoff_hist}})
+                    
+                    last_cleanup = start_time
+                    logger.info("Periodic database cleanup (snapshots and history) completed.")
+                except Exception as clean_err:
+                    logger.error(f"Error during periodic cleanup: {clean_err}")
+            
+        except asyncio.CancelledError:
+            break
         except Exception as e:
             logger.error(f"Poll loop fatal error: {e}")
 
